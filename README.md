@@ -13,6 +13,51 @@ AquaSense is a full-stack water quality monitoring system with:
 - `ESP32_Water_Quality_MQTT.ino`: ESP32 firmware sketch for sensor publishing
 - Setup guides in root markdown files
 
+## Quick Start (Clone and Run)
+
+### 1) Clone the Entire Project
+
+```bash
+git clone https://github.com/jiro0823/AquaSense.git
+cd AquaSense
+```
+
+### 2) Install Project Dependencies
+
+```bash
+cd Backend
+npm install
+
+cd ../Frontend
+npm install
+```
+
+### 3) Configure Database and Environment
+
+1. Make sure PostgreSQL is running.
+2. Create a database named `AquaSense`.
+3. Review and update:
+	- `Backend/.env`
+	- `Frontend/.env`
+
+### 4) Start Backend and Frontend
+
+Terminal 1:
+
+```bash
+cd Backend
+npm run dev
+```
+
+Terminal 2:
+
+```bash
+cd Frontend
+npm run dev
+```
+
+Open the app at `http://localhost:3000`.
+
 ## Prerequisites
 
 Install these before running the project:
@@ -113,14 +158,67 @@ docker run -d --name mosquitto -p 1883:1883 -p 9001:9001 eclipse-mosquitto
 Then configure ESP32 sketch Wi-Fi and broker IP in:
 - `ESP32_Water_Quality_MQTT.ino`
 
-## Git Workflow Used
+## How to Update README and Push to GitHub
 
-Standard push flow applied:
-1. Initialize repository
-2. Add remote origin
-3. Stage all files
-4. Commit with clear message
-5. Push to `main`
+Use this standard workflow whenever you change documentation:
+
+### 1) Confirm Current Branch and Remote
+
+```bash
+git branch --show-current
+git remote -v
+```
+
+### 2) Pull Latest Changes First
+
+```bash
+git pull origin main
+```
+
+### 3) Edit README
+
+Update `README.md` in your editor and save.
+
+### 4) Stage and Commit
+
+```bash
+git add README.md
+git commit -m "docs: refine README setup and git workflow"
+```
+
+If you changed more files and want to include all of them:
+
+```bash
+git add .
+git commit -m "docs: update project documentation"
+```
+
+### 5) Push to GitHub
+
+```bash
+git push origin main
+```
+
+### 6) Verify on GitHub
+
+Open your repository and refresh the page:
+
+`https://github.com/jiro0823/AquaSense`
+
+You should see the updated README.
+
+## First-Time Push (New Repository Only)
+
+If starting from a local project that is not yet a git repo:
+
+```bash
+git init
+git branch -M main
+git remote add origin https://github.com/jiro0823/AquaSense.git
+git add .
+git commit -m "chore: initial project import"
+git push -u origin main
+```
 
 ## Security Note
 

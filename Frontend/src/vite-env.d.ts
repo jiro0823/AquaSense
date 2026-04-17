@@ -1,0 +1,11 @@
+/// <reference types="vite/client" />
+/// <reference types="node" />
+
+interface ImportMetaEnv {
+  readonly VITE_API_URL: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+  readonly url: string;
+}

@@ -1,0 +1,259 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base Styles */
+* {
+  @apply transition-colors duration-200;
+}
+
+html {
+  @apply scroll-smooth;
+}
+
+body {
+  @apply bg-white text-gray-900;
+  font-feature-settings: "rlig" 1 "calt" 1;
+}
+
+/* Typography */
+h1 { @apply text-3xl font-bold text-gray-900; }
+h2 { @apply text-2xl font-bold text-gray-900; }
+h3 { @apply text-xl font-bold text-gray-900; }
+h4 { @apply text-lg font-semibold text-gray-900; }
+h5 { @apply text-base font-semibold text-gray-900; }
+h6 { @apply text-sm font-semibold text-gray-900; }
+
+p { @apply text-gray-700 leading-relaxed; }
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  @apply w-2 h-2;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full hover:bg-gray-400;
+}
+
+/* Navigation Links */
+.nav-link {
+  @apply relative font-medium text-gray-700 transition duration-200 hover:text-accent;
+}
+
+.nav-link.active {
+  @apply text-primary font-semibold;
+}
+
+.nav-link::after {
+  content: '';
+  @apply absolute bottom-0 left-0 h-0.5 bg-blue-900 rounded-full transition-all duration-300 w-0;
+}
+
+.nav-link.active::after,
+.nav-link:hover::after {
+  @apply w-full;
+}
+
+/* Button Utilities */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2.5 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-blue-800 active:scale-95 shadow-md hover:shadow-hover focus:ring-offset-0;
+  }
+
+  .btn-secondary {
+    @apply btn bg-surface text-primary border border-primary hover:bg-blue-50;
+  }
+
+  .btn-success {
+    @apply btn bg-success text-white hover:bg-green-700 active:scale-95 shadow-md hover:shadow-hover;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger text-white hover:bg-red-700 active:scale-95 shadow-md hover:shadow-hover;
+  }
+
+  .btn-warning {
+    @apply btn bg-warning text-gray-900 hover:bg-amber-600 active:scale-95 shadow-md hover:shadow-hover;
+  }
+
+  .btn-ghost {
+    @apply btn text-primary hover:bg-surface;
+  }
+
+  .btn-accent {
+    @apply btn bg-accent text-white hover:bg-cyan-600 active:scale-95 shadow-md hover:shadow-hover;
+  }
+
+  .btn-outline {
+    @apply btn border-2 border-primary text-primary hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-sm {
+    @apply text-sm px-3 py-1.5;
+  }
+
+  .btn-lg {
+    @apply text-lg px-6 py-3;
+  }
+
+  /* Input Fields */
+  .input-field {
+    @apply w-full px-4 py-2.5 border border-gray-300 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent focus:ring-opacity-20 placeholder-gray-400;
+  }
+
+  .input-field:disabled {
+    @apply bg-gray-100 cursor-not-allowed opacity-60;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white rounded-xl shadow-md p-6 border border-gray-200 transition-all duration-200 hover:shadow-lg;
+  }
+
+  .card-flat {
+    @apply bg-surface rounded-lg p-6 border border-gray-200;
+  }
+
+  .card-elevated {
+    @apply bg-white rounded-xl shadow-lg p-6;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-medium;
+  }
+
+  .badge-primary {
+    @apply badge bg-blue-100 text-primary;
+  }
+
+  .badge-success {
+    @apply badge bg-green-100 text-green-800;
+  }
+
+  .badge-warning {
+    @apply badge bg-yellow-100 text-amber-800;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-100 text-red-800;
+  }
+
+  .badge-accent {
+    @apply badge bg-cyan-100 text-cyan-800;
+  }
+
+  /* Status Indicator */
+  .status-indicator {
+    @apply w-3 h-3 rounded-full inline-block;
+  }
+
+  .status-online {
+    @apply bg-success animate-pulse;
+  }
+
+  .status-offline {
+    @apply bg-danger animate-pulse;
+  }
+
+  .status-warning {
+    @apply bg-warning animate-pulse;
+  }
+
+  /* Text Utilities */
+  .text-primary {
+    @apply text-gray-900;
+  }
+
+  .text-secondary {
+    @apply text-gray-600;
+  }
+
+  .text-light {
+    @apply text-gray-500;
+  }
+
+  /* Dividers */
+  .divider {
+    @apply border-t border-gray-200;
+  }
+
+  /* Section */
+  .section-title {
+    @apply text-lg font-bold text-gray-900 mb-4 flex items-center gap-2;
+  }
+
+  /* Status Panel */
+  .status-panel {
+    @apply bg-surface border border-gray-200 rounded-lg p-4 flex items-center justify-between;
+  }
+
+  .status-connected {
+    @apply bg-green-50 border-green-200;
+  }
+
+  .status-disconnected {
+    @apply bg-red-50 border-red-200;
+  }
+
+  /* Alert Box */
+  .alert {
+    @apply rounded-lg p-4 border-l-4 flex items-start gap-3;
+  }
+
+  .alert-success {
+    @apply bg-green-50 border-green-500 text-green-800;
+  }
+
+  .alert-warning {
+    @apply bg-yellow-50 border-yellow-500 text-amber-800;
+  }
+
+  .alert-danger {
+    @apply bg-red-50 border-red-500 text-red-800;
+  }
+
+  .alert-info {
+    @apply bg-blue-50 border-blue-500 text-blue-800;
+  }
+
+  /* Metric Display */
+  .metric {
+    @apply flex flex-col gap-1;
+  }
+
+  .metric-label {
+    @apply text-sm font-medium text-gray-600;
+  }
+
+  .metric-value {
+    @apply text-3xl font-bold text-gray-900;
+  }
+
+  .metric-unit {
+    @apply text-gray-500 text-lg;
+  }
+
+  /* Grid Layout */
+  .grid-auto-fit {
+    @apply grid gap-6 auto-fit-sm;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    @apply bg-primary text-white rounded-lg p-6;
+  }
+
+  /* Header */
+  .header {
+    @apply bg-white border-b border-gray-200 sticky top-0 z-40;
+  }
+}

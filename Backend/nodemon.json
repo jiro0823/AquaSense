@@ -1,0 +1,14 @@
+{
+  "watch": [
+    "src"
+  ],
+  "ext": "ts",
+  "ignore": [
+    "src/**/*.test.ts"
+  ],
+  "exec": "ts-node",
+  "events": {
+    "restart": "echo 'App restarted due to file change'"
+  },
+  "delay": 500
+}

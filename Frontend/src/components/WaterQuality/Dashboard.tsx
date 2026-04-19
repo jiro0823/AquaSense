@@ -24,7 +24,17 @@ interface ChartDataPoint {
 }
 
 export const WaterQualityDashboard: React.FC = () => {
-  const { isConnected, latestReading, statistics, alerts, error: wsError, requestStatistics } =
+  const {
+    isConnected,
+    latestReading,
+    historyReadings,
+    statistics,
+    alerts,
+    error: wsError,
+    requestStatistics,
+    requestLatestReading,
+    requestHistory,
+  } =
     useWaterQualityWebSocket();
   const navigate = useNavigate();
 
@@ -36,8 +46,29 @@ export const WaterQualityDashboard: React.FC = () => {
   useEffect(() => {
     if (isConnected) {
       requestStatistics(60);
+      requestLatestReading();
+      requestHistory(60);
     }
-  }, [isConnected, requestStatistics]);
+  }, [isConnected, requestStatistics, requestLatestReading, requestHistory]);
+
+  useEffect(() => {
+    if (!historyReadings.length) {
+      return;
+    }
+
+    const sorted = [...historyReadings]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .slice(-30)
+      .map((reading) => ({
+        time: new Date(reading.timestamp).toLocaleTimeString(),
+        temperature: reading.temperature,
+        ph: reading.ph,
+        do: reading.do,
+        turbidity: reading.turbidity,
+      }));
+
+    setChartData(sorted);
+  }, [historyReadings]);
 
   // Periodic health check for backend connectivity
   useEffect(() => {
@@ -65,16 +96,19 @@ export const WaterQualityDashboard: React.FC = () => {
   useEffect(() => {
     if (latestReading) {
       const time = new Date(latestReading.timestamp).toLocaleTimeString();
-      setChartData((prev) => [
-        ...prev.slice(-29),
-        {
-          time,
-          temperature: latestReading.temperature,
-          ph: latestReading.ph,
-          do: latestReading.do,
-          turbidity: latestReading.turbidity,
-        },
-      ]);
+      setChartData((prev) => {
+        const deduped = prev.filter((point) => point.time !== time);
+        return [
+          ...deduped.slice(-29),
+          {
+            time,
+            temperature: latestReading.temperature,
+            ph: latestReading.ph,
+            do: latestReading.do,
+            turbidity: latestReading.turbidity,
+          },
+        ];
+      });
     }
   }, [latestReading]);
 
@@ -107,9 +141,9 @@ export const WaterQualityDashboard: React.FC = () => {
   return (
     <div className="min-h-screen bg-white">
       {/* Header Navigation */}
-      <nav className="header sticky top-0 z-50 shadow-md">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex justify-between items-center">
+      <nav className="sticky top-0 z-50 shadow-md header">
+        <div className="px-6 py-4 mx-auto max-w-7xl">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="text-3xl">🌊</div>
               <div>
@@ -119,12 +153,12 @@ export const WaterQualityDashboard: React.FC = () => {
             </div>
             <div className="flex items-center gap-4">
               {isConnected ? (
-                <div className="flex items-center gap-2 badge bg-green-100 text-green-800">
+                <div className="flex items-center gap-2 text-green-800 bg-green-100 badge">
                   <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
                   <span className="text-sm font-medium">Connected</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 badge bg-red-100 text-red-800">
+                <div className="flex items-center gap-2 text-red-800 bg-red-100 badge">
                   <span className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></span>
                   <span className="text-sm font-medium">Offline</span>
                 </div>
@@ -142,7 +176,7 @@ export const WaterQualityDashboard: React.FC = () => {
 
       {/* Error Alerts */}
       {wsError && (
-        <div className="alert alert-danger max-w-7xl mx-auto mt-4">
+        <div className="mx-auto mt-4 alert alert-danger max-w-7xl">
           <span className="text-lg">⚠️</span>
           <div>
             <p className="font-semibold">Connection Error</p>
@@ -151,23 +185,23 @@ export const WaterQualityDashboard: React.FC = () => {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+      <div className="px-6 py-8 mx-auto space-y-8 max-w-7xl">
         
         {/* Top Status Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           {/* Health Score */}
           {statistics && (
-            <div className="card bg-gradient-to-br from-blue-50 to-cyan-50 border-b-4 border-accent">
-              <div className="flex justify-between items-start mb-2">
+            <div className="border-b-4 card bg-gradient-to-br from-blue-50 to-cyan-50 border-accent">
+              <div className="flex items-start justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-600">Health Score</h3>
                 <span className="text-2xl">🎯</span>
               </div>
               <div className="metric">
                 <div className="metric-value text-accent">{Math.round(statistics.healthScore)}</div>
-                <p className="text-xs text-gray-600 font-medium">Water Quality Rating</p>
-                <div className="mt-3 bg-gray-200 rounded-full h-2 overflow-hidden">
+                <p className="text-xs font-medium text-gray-600">Water Quality Rating</p>
+                <div className="h-2 mt-3 overflow-hidden bg-gray-200 rounded-full">
                   <div
-                    className="bg-gradient-to-r from-accent to-cyan-500 h-full rounded-full transition-all duration-1000"
+                    className="h-full transition-all duration-1000 rounded-full bg-gradient-to-r from-accent to-cyan-500"
                     style={{ width: `${statistics.healthScore}%` }}
                   />
                 </div>
@@ -176,17 +210,17 @@ export const WaterQualityDashboard: React.FC = () => {
           )}
 
           {/* Battery Level */}
-          <div className="card bg-gradient-to-br from-yellow-50 to-amber-50 border-b-4 border-warning">
-            <div className="flex justify-between items-start mb-2">
+          <div className="border-b-4 card bg-gradient-to-br from-yellow-50 to-amber-50 border-warning">
+            <div className="flex items-start justify-between mb-2">
               <h3 className="text-sm font-semibold text-gray-600">Battery Level</h3>
               <span className="text-2xl">🔋</span>
             </div>
             <div className="metric">
               <div className="metric-value text-warning">{batteryLevel.toFixed(0)}%</div>
-              <p className="text-xs text-gray-600 font-medium">Solar Panel</p>
-              <div className="mt-3 bg-gray-200 rounded-full h-2 overflow-hidden">
+              <p className="text-xs font-medium text-gray-600">Solar Panel</p>
+              <div className="h-2 mt-3 overflow-hidden bg-gray-200 rounded-full">
                 <div 
-                  className="bg-gradient-to-r from-warning to-orange-500 h-full rounded-full" 
+                  className="h-full rounded-full bg-gradient-to-r from-warning to-orange-500" 
                   style={{ width: `${batteryLevel}%` }} 
                 />
               </div>
@@ -194,17 +228,17 @@ export const WaterQualityDashboard: React.FC = () => {
           </div>
 
           {/* Tank Level */}
-          <div className="card bg-gradient-to-br from-cyan-50 to-blue-50 border-b-4 border-accent">
-            <div className="flex justify-between items-start mb-2">
+          <div className="border-b-4 card bg-gradient-to-br from-cyan-50 to-blue-50 border-accent">
+            <div className="flex items-start justify-between mb-2">
               <h3 className="text-sm font-semibold text-gray-600">Tank Level</h3>
               <span className="text-2xl">💧</span>
             </div>
             <div className="metric">
               <div className="metric-value text-primary">{tankWaterLevel.toFixed(0)}%</div>
-              <p className="text-xs text-gray-600 font-medium">Water Reserve</p>
-              <div className="mt-3 bg-gray-200 rounded-full h-2 overflow-hidden">
+              <p className="text-xs font-medium text-gray-600">Water Reserve</p>
+              <div className="h-2 mt-3 overflow-hidden bg-gray-200 rounded-full">
                 <div 
-                  className="bg-gradient-to-r from-primary to-blue-500 h-full rounded-full" 
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-blue-500" 
                   style={{ width: `${tankWaterLevel}%` }} 
                 />
               </div>
@@ -212,12 +246,12 @@ export const WaterQualityDashboard: React.FC = () => {
           </div>
 
           {/* Drain Control */}
-          <div className="card bg-gradient-to-br from-red-50 to-orange-50 border-b-4 border-danger flex flex-col justify-between">
-            <h3 className="text-sm font-semibold text-gray-600 mb-4">Tank Control</h3>
+          <div className="flex flex-col justify-between border-b-4 card bg-gradient-to-br from-red-50 to-orange-50 border-danger">
+            <h3 className="mb-4 text-sm font-semibold text-gray-600">Tank Control</h3>
             <button
               onClick={handleDrainWater}
               disabled={isDraining || tankWaterLevel === 0}
-              className="btn btn-danger w-full"
+              className="w-full btn btn-danger"
             >
               {isDraining ? '🔄 Draining...' : tankWaterLevel === 0 ? '✓ Empty' : '💦 Drain'}
             </button>
@@ -233,25 +267,25 @@ export const WaterQualityDashboard: React.FC = () => {
               Real-Time Parameters
             </h2>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               {/* Temperature Chart */}
               <div className="card">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-primary">🌡️ Temperature</h3>
                   <span className="text-3xl font-bold text-orange-500">{statistics.temperature.current.toFixed(1)}°C</span>
                 </div>
                 
-                <div className="grid grid-cols-3 gap-4 mb-4 pb-4 border-b border-gray-200">
+                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Average</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.temperature.average.toFixed(1)}°C</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Min</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.temperature.min.toFixed(1)}°C</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Max</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.temperature.max.toFixed(1)}°C</p>
                   </div>
                 </div>
@@ -266,29 +300,29 @@ export const WaterQualityDashboard: React.FC = () => {
                       formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(1)}°C` : 'N/A')}
                       labelStyle={{ color: '#1f2937' }}
                     />
-                    <Line type="monotone" dataKey="temperature" stroke="#f97316" dot={false} strokeWidth={3} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="temperature" stroke="#f97316" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
 
               {/* pH Chart */}
               <div className="card">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-primary">🧪 pH Level</h3>
                   <span className="text-3xl font-bold text-purple-600">{statistics.ph.current.toFixed(2)}</span>
                 </div>
                 
-                <div className="grid grid-cols-3 gap-4 mb-4 pb-4 border-b border-gray-200">
+                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Average</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.ph.average.toFixed(2)}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Min</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.ph.min.toFixed(2)}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Max</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.ph.max.toFixed(2)}</p>
                   </div>
                 </div>
@@ -297,35 +331,35 @@ export const WaterQualityDashboard: React.FC = () => {
                   <LineChart data={chartData.slice(-20)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                     <XAxis dataKey="time" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis domain={[6, 9]} stroke="#9ca3af" style={{ fontSize: '12px' }} />
+                    <YAxis domain={['auto', 'auto']} stroke="#9ca3af" style={{ fontSize: '12px' }} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} 
                       formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(2)} pH` : 'N/A')}
                       labelStyle={{ color: '#1f2937' }}
                     />
-                    <Line type="monotone" dataKey="ph" stroke="#a855f7" dot={false} strokeWidth={3} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="ph" stroke="#a855f7" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
 
               {/* Dissolved Oxygen Chart */}
               <div className="card">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-primary">💨 Dissolved Oxygen</h3>
                   <span className="text-3xl font-bold text-green-600">{statistics.do.current.toFixed(2)} mg/L</span>
                 </div>
                 
-                <div className="grid grid-cols-3 gap-4 mb-4 pb-4 border-b border-gray-200">
+                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Average</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.do.average.toFixed(2)} mg/L</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Min</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.do.min.toFixed(2)} mg/L</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Max</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.do.max.toFixed(2)} mg/L</p>
                   </div>
                 </div>
@@ -340,29 +374,29 @@ export const WaterQualityDashboard: React.FC = () => {
                       formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(2)} mg/L` : 'N/A')}
                       labelStyle={{ color: '#1f2937' }}
                     />
-                    <Line type="monotone" dataKey="do" stroke="#22c55e" dot={false} strokeWidth={3} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="do" stroke="#22c55e" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
 
               {/* Turbidity Chart */}
               <div className="card">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-primary">🌊 Turbidity</h3>
                   <span className="text-3xl font-bold text-yellow-600">{statistics.turbidity.current.toFixed(1)} NTU</span>
                 </div>
                 
-                <div className="grid grid-cols-3 gap-4 mb-4 pb-4 border-b border-gray-200">
+                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Average</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.turbidity.average.toFixed(1)} NTU</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Min</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.turbidity.min.toFixed(1)} NTU</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-gray-600 uppercase mb-1">Max</p>
+                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
                     <p className="text-lg font-semibold text-gray-900">{statistics.turbidity.max.toFixed(1)} NTU</p>
                   </div>
                 </div>
@@ -371,23 +405,23 @@ export const WaterQualityDashboard: React.FC = () => {
                   <LineChart data={chartData.slice(-20)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                     <XAxis dataKey="time" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis domain={[0, 150]} stroke="#9ca3af" style={{ fontSize: '12px' }} />
+                    <YAxis domain={['auto', 'auto']} stroke="#9ca3af" style={{ fontSize: '12px' }} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} 
                       formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(1)} NTU` : 'N/A')}
                       labelStyle={{ color: '#1f2937' }}
                     />
-                    <Line type="monotone" dataKey="turbidity" stroke="#eab308" dot={false} strokeWidth={3} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="turbidity" stroke="#eab308" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 bg-surface rounded-lg">
-            <div className="text-5xl animate-bounce mb-4">⏳</div>
+          <div className="flex flex-col items-center justify-center py-16 rounded-lg bg-surface">
+            <div className="mb-4 text-5xl animate-bounce">⏳</div>
             <p className="text-lg font-semibold text-gray-900">Loading sensor data...</p>
-            <p className="text-sm text-gray-600 mt-2">Please wait while we connect to your IoT device</p>
+            <p className="mt-2 text-sm text-gray-600">Please wait while we connect to your IoT device</p>
           </div>
         )}
 
@@ -399,13 +433,13 @@ export const WaterQualityDashboard: React.FC = () => {
           </h2>
 
           {alerts.length === 0 ? (
-            <div className="card bg-gradient-to-br from-green-50 to-emerald-50 border-l-4 border-success text-center py-12">
-              <p className="text-3xl mb-2">✓</p>
+            <div className="py-12 text-center border-l-4 card bg-gradient-to-br from-green-50 to-emerald-50 border-success">
+              <p className="mb-2 text-3xl">✓</p>
               <p className="text-lg font-bold text-gray-900">All Clear</p>
-              <p className="text-sm text-gray-600 mt-2">Water quality is stable and within normal ranges</p>
+              <p className="mt-2 text-sm text-gray-600">Water quality is stable and within normal ranges</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 max-h-96 overflow-y-auto">
+            <div className="grid grid-cols-1 gap-3 overflow-y-auto max-h-96">
               {alerts.map((alert) => (
                 <div
                   key={alert.id}
@@ -417,13 +451,13 @@ export const WaterQualityDashboard: React.FC = () => {
                         : 'alert-info'
                   }`}
                 >
-                  <span className="text-lg font-bold flex-shrink-0">
+                  <span className="flex-shrink-0 text-lg font-bold">
                     {alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '🟡' : 'ℹ️'}
                   </span>
                   <div className="flex-1">
                     <p className="font-bold capitalize">{alert.parameter} Alert</p>
-                    <p className="text-sm mt-1">{alert.message}</p>
-                    <p className="text-xs opacity-75 mt-1">{new Date(alert.timestamp).toLocaleTimeString()}</p>
+                    <p className="mt-1 text-sm">{alert.message}</p>
+                    <p className="mt-1 text-xs opacity-75">{new Date(alert.timestamp).toLocaleTimeString()}</p>
                   </div>
                 </div>
               ))}
@@ -434,7 +468,7 @@ export const WaterQualityDashboard: React.FC = () => {
       </div>
 
       {/* Footer */}
-      <footer className="mt-16 border-t border-gray-200 bg-surface py-8 text-center text-gray-600">
+      <footer className="py-8 mt-16 text-center text-gray-600 border-t border-gray-200 bg-surface">
         <p className="font-medium">🌊 AquaSense • Crayfish Farm Water Quality Management</p>
         <p className="mt-2 text-sm">Real-time monitoring • Automated control • Smart farming</p>
       </footer>

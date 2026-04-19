@@ -51,21 +51,13 @@ const LandingPage: React.FC = () => {
       <Navigation />
 
       {/* Hero Section */}
-      <section 
-        className="relative px-6 py-20 overflow-hidden bg-center bg-cover"
-        style={{
-          backgroundImage: `linear-gradient(135deg, rgba(15, 23, 42, 0.75) 0%, rgba(5, 5, 5, 0.75) 100%), url('/src/assets/images/Hero_image.jpg')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed'
-        }}
-      >
+      <section className="relative px-4 py-16 overflow-hidden bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 sm:px-6 sm:py-20">
         <div className="relative mx-auto text-center max-w-7xl">
-          <h1 className="mb-6 text-5xl font-bold leading-tight text-white md:text-6xl">
+          <h1 className="mb-6 text-4xl font-bold leading-tight text-cyan-500 sm:text-5xl md:text-6xl">
             Smart Water Quality Monitoring
-            <span className="block mt-2 text-white">for Crayfish Farming</span>
+            <span className="block mt-2 text-primary">for Crayfish Farming</span>
           </h1>
-          <p className="max-w-3xl mx-auto mb-10 text-xl leading-relaxed text-blue-100">
+          <p className="max-w-3xl mx-auto mb-10 text-base leading-relaxed text-slate-700 sm:text-lg md:text-xl">
             Real-time IoT dashboard with advanced sensors for temperature, pH, dissolved oxygen, and turbidity. Get instant alerts, automated controls, and comprehensive analytics to optimize your aquaculture operations.
           </p>
 
@@ -107,10 +99,10 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Problems Section - The Farmer's Pain Points */}
-      <section className="px-6 py-20 bg-gray-100">
+      <section className="px-4 py-16 bg-gray-100 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
-            <h2 className="mb-4 text-3xl font-bold text-primary md:text-4xl">Farming Shouldn't be a Guessing Game</h2>
+            <h2 className="mb-4 text-2xl font-bold text-blue-900 md:text-4xl">Farming Shouldn't be a Guessing Game</h2>
             <p className="text-lg text-gray-600">Most farmers face the same challenges. We solve them all.</p>
           </div>
 
@@ -149,7 +141,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Solution Section */}
-      <section className="px-6 py-20 bg-white">
+      <section className="px-4 py-16 bg-white sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="grid items-center grid-cols-1 gap-12 md:grid-cols-2">
             
@@ -197,7 +189,7 @@ const LandingPage: React.FC = () => {
 
             {/* Right Side - Text Content */}
             <div>
-              <h2 className="mb-4 text-3xl font-bold text-gray-900 md:text-4xl">A Smarter Way to Manage Your Pond</h2>
+              <h2 className="mb-5 text-3xl font-bold text-cyan-500 md:text-5xl">A Smarter Way to  <br /> Manage Your Pond</h2>
               <p className="mb-8 text-lg leading-relaxed text-gray-600">
                 AquaSense transforms how you care for your crayfish. Stop guessing. Start knowing. Our intelligent system handles everything automatically while you focus on growing your farm.
               </p>
@@ -256,10 +248,10 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Benefits Section - High Impact */}
-      <section className="px-6 py-20 bg-surface">
+      <section className="px-4 py-16 bg-surface sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
-            <h2 className="mb-4 text-3xl font-bold text-gray-900 md:text-4xl">Why Farmers Choose AquaSense</h2>
+            <h2 className="mb-4 text-3xl font-bold text-cyan-500 md:text-4xl">Why Farmers Choose <span className="text-blue-800">AquaSense</span></h2>
             <p className="text-lg text-gray-600">Real benefits that make a real difference</p>
           </div>
 
@@ -322,11 +314,11 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Dashboard Preview Section */}
-      <section className="px-6 py-20 bg-surface">
+      <section className="px-4 py-16 bg-surface sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
-            <h2 className="mb-4 text-3xl font-bold text-gray-900 md:text-4xl">Everything You Need in One Dashboard</h2>
-            <p className="text-lg text-gray-600">Monitor, control, and track your farm in real-time with a simple and intuitive interface.</p>
+            <h2 className="mb-4 text-3xl font-bold text-blue-800 md:text-5xl">Everything You Need in One Dashboard</h2>
+            <p className="text-gray-600 text-meduim">Monitor, control, and track your farm in real-time with a simple and intuitive interface.</p>
           </div>
 
           {/* Large Dashboard Mockup */}
@@ -455,10 +447,10 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* How It Works Section */}
-      <section className="px-6 py-20 bg-white">
+      <section className="px-4 py-16 bg-white sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
-            <h2 className="mb-4 text-3xl font-bold text-gray-900 md:text-4xl">How It Works</h2>
+            <h2 className="mb-4 text-3xl font-bold text-cyan-500 md:text-4xl">How It Works</h2>
             <p className="text-lg text-gray-600">Three simple steps to protect your farm</p>
           </div>
 
@@ -532,12 +524,12 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Trust & Reliability Section */}
-      <section className="px-6 py-20 bg-gradient-to-br from-blue-50 to-cyan-50">
+      <section className="px-4 py-16 bg-gradient-to-br from-blue-50 to-cyan-50 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="grid items-center grid-cols-1 gap-12 md:grid-cols-2">
             {/* Left Side - Text */}
             <div>
-              <h2 className="mb-6 text-3xl font-bold text-gray-900 md:text-4xl">Built for Real Farming</h2>
+              <h2 className="mb-6 text-3xl font-bold text-blue-900 md:text-4xl">Built for Real Farming</h2>
               <p className="mb-6 text-lg leading-relaxed text-gray-700">
                 Built for real farming environments with reliable hardware and consistent performance. Stay informed and in control at all times.
               </p>
@@ -605,16 +597,23 @@ const LandingPage: React.FC = () => {
       <FaqSection />
 
       {/* Contact CTA Section (Moved from Contact Page) */}
-      <section className="px-6 py-12 bg-white">
+      <section
+        className="px-4 py-12 bg-center bg-cover sm:px-6"
+        style={{
+          backgroundImage: `linear-gradient(135deg, rgba(15, 23, 42, 0.74) 0%, rgba(5, 5, 5, 0.72) 100%), url('/src/assets/images/Hero_image.jpg')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }}
+      >
         <div className="mx-auto max-w-7xl">
-          <div className="p-12 mt-24 text-center border bg-gradient-to-r from-blue-900 to-slate-900 rounded-2xl border-cyan-400 border-opacity-30">
-            <h2 className="mb-4 text-3xl font-bold text-white">Ready to Transform Your Aquaculture?</h2>
+          <div className="p-12 mt-24 text-center">
+            <h2 className="mb-4 text-3xl font-bold text-white">Ready to Transform Your <span className="text-cyan-400">Aquaculture?</span></h2>
             <p className="max-w-2xl mx-auto mb-8 text-blue-200">
               Join other aquaculture operators using AquaSense for better yields, lower costs, and sustainable operations.
             </p>
             <Link
               to="/signup"
-              className="inline-block px-8 py-4 text-lg font-bold text-white transition rounded-lg shadow-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700"
+              className="inline-block px-8 py-4 text-lg font-bold text-white transition rounded-lg shadow-lg bg-gradient-to-r from-cyan-500 to-blue-700 hover:from-cyan-600 hover:to-blue-700"
             >
               Get Started Today
             </Link>

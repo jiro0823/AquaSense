@@ -4,13 +4,90 @@
  */
 import { Request, Response } from 'express';
 import { waterQualityService } from '../services/waterQualityService';
+import type { WaterQualityStats } from '../types';
 import { sendSuccess, sendError } from '../../../utils/response';
+import { sensorReadingService } from '../../../services/sensorReadingService';
+
+const calculateHealthScore = (
+  temperature: number,
+  ph: number,
+  dissolvedOxygen: number,
+  turbidity: number
+): number => {
+  let score = 100;
+
+  if (temperature < 15 || temperature > 35) {
+    score -= 20;
+  } else if (temperature > 30) {
+    score -= 10;
+  }
+
+  if (ph < 6.5 || ph > 8.5) {
+    score -= 25;
+  } else if (ph < 7.0 || ph > 8.0) {
+    score -= 10;
+  }
+
+  if (dissolvedOxygen < 3) {
+    score -= 30;
+  } else if (dissolvedOxygen < 5) {
+    score -= 15;
+  } else if (dissolvedOxygen < 8) {
+    score -= 5;
+  }
+
+  if (turbidity > 100) {
+    score -= 20;
+  } else if (turbidity > 50) {
+    score -= 10;
+  }
+
+  return Math.max(0, score);
+};
+
+const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStats> => {
+  const dbStats = await sensorReadingService.getStatistics(minutes);
+
+  return {
+    timestamp: new Date(),
+    temperature: {
+      current: dbStats.temperature.current,
+      average: dbStats.temperature.average,
+      min: dbStats.temperature.min,
+      max: dbStats.temperature.max,
+    },
+    ph: {
+      current: dbStats.ph.current,
+      average: dbStats.ph.average,
+      min: dbStats.ph.min,
+      max: dbStats.ph.max,
+    },
+    do: {
+      current: dbStats.do.current,
+      average: dbStats.do.average,
+      min: dbStats.do.min,
+      max: dbStats.do.max,
+    },
+    turbidity: {
+      current: dbStats.turbidity.current,
+      average: dbStats.turbidity.average,
+      min: dbStats.turbidity.min,
+      max: dbStats.turbidity.max,
+    },
+    healthScore: calculateHealthScore(
+      dbStats.temperature.current,
+      dbStats.ph.current,
+      dbStats.do.current,
+      dbStats.turbidity.current
+    ),
+  };
+};
 
 /**
  * Add new water quality reading
  * POST /api/v1/water/readings
  */
-export const addReading = (_req: Request, res: Response): void => {
+export const addReading = async (_req: Request, res: Response): Promise<void> => {
   try {
     const { temperature, ph, do: dissolvedOxygen, turbidity, location } = _req.body;
 
@@ -29,6 +106,15 @@ export const addReading = (_req: Request, res: Response): void => {
       timestamp: new Date(),
     });
 
+    await sensorReadingService.addSensorReading(
+      reading.temperature,
+      reading.ph,
+      reading.do,
+      reading.turbidity,
+      reading.location,
+      new Date(reading.timestamp)
+    );
+
     sendSuccess(res, 201, 'Reading added successfully', reading);
   } catch (error) {
     sendError(res, 500, 'Failed to add reading', error instanceof Error ? error.message : 'Unknown error');
@@ -39,9 +125,9 @@ export const addReading = (_req: Request, res: Response): void => {
  * Get latest reading
  * GET /api/v1/water/readings/latest
  */
-export const getLatestReading = (_req: Request, res: Response): void => {
+export const getLatestReading = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const reading = waterQualityService.getLatestReading();
+    const reading = await sensorReadingService.getLatestReading();
 
     if (!reading) {
       sendError(res, 404, 'No readings available yet');
@@ -58,10 +144,10 @@ export const getLatestReading = (_req: Request, res: Response): void => {
  * Get readings within time range
  * GET /api/v1/water/readings?minutes=60
  */
-export const getReadingsByTimeRange = (req: Request, res: Response): void => {
+export const getReadingsByTimeRange = async (req: Request, res: Response): Promise<void> => {
   try {
     const minutes = parseInt(req.query.minutes as string) || 60;
-    const readings = waterQualityService.getReadingsByTimeRange(minutes);
+    const readings = await sensorReadingService.getReadingsByTimeRange(minutes);
 
     if (readings.length === 0) {
       sendError(res, 404, 'No readings found for the specified time range');
@@ -78,10 +164,10 @@ export const getReadingsByTimeRange = (req: Request, res: Response): void => {
  * Get statistics
  * GET /api/v1/water/statistics?minutes=60
  */
-export const getStatistics = (req: Request, res: Response): void => {
+export const getStatistics = async (req: Request, res: Response): Promise<void> => {
   try {
     const minutes = parseInt(req.query.minutes as string) || 60;
-    const stats = waterQualityService.getStatistics(minutes);
+    const stats = await mapDbStatsToWaterStats(minutes);
 
     sendSuccess(res, 200, 'Statistics calculated', stats);
   } catch (error) {
@@ -136,10 +222,10 @@ export const updateThresholds = (req: Request, res: Response): void => {
  * Get dashboard data (combined view)
  * GET /api/v1/water/dashboard
  */
-export const getDashboardData = (_req: Request, res: Response): void => {
+export const getDashboardData = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const latest = waterQualityService.getLatestReading();
-    const stats = waterQualityService.getStatistics(60);
+    const latest = await sensorReadingService.getLatestReading();
+    const stats = await mapDbStatsToWaterStats(60);
     const alerts = waterQualityService.getAlerts(10);
     const thresholds = waterQualityService.getThresholds();
 

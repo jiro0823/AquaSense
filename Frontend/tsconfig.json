@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
     "target": "ES2020",
     "useDefineForClassFields": true,
     "lib": [
@@ -31,28 +30,28 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "baseUrl": "./src",
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": [
-        "*"
+        "./src/*"
       ],
       "@components/*": [
-        "components/*"
+        "./src/components/*"
       ],
       "@pages/*": [
-        "pages/*"
+        "./src/pages/*"
       ],
       "@hooks/*": [
-        "hooks/*"
+        "./src/hooks/*"
       ],
       "@utils/*": [
-        "utils/*"
+        "./src/utils/*"
       ],
       "@types/*": [
-        "types/*"
+        "./src/types/*"
       ],
       "@services/*": [
-        "services/*"
+        "./src/services/*"
       ]
     }
   },

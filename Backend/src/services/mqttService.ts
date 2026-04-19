@@ -7,14 +7,18 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { logger } from '../utils/logger';
 import { waterQualityService } from '../iot/water/services/waterQualityService';
+import { sensorReadingService } from './sensorReadingService';
+import type { WaterQualityReading, WaterQualityStats } from '../iot/water/types';
 
 interface MQTTConfig {
   brokerUrl: string;
   username?: string;
   password?: string;
   clientId?: string;
+  defaultDo: number;
   topics: {
     readings: string;
+    sensorWildcard: string;
     commands: string;
     status: string;
   };
@@ -25,6 +29,19 @@ export class MQTTService {
   private config: MQTTConfig;
   private isConnected = false;
   private reconnectInterval: NodeJS.Timeout | null = null;
+  private latestSensorPayload: {
+    temperature?: number;
+    ph?: number;
+    turbidity?: number;
+    do?: number;
+  } = {};
+  private pendingBatchFlags = {
+    temperature: false,
+    ph: false,
+    turbidity: false,
+  };
+  private onReadingReceived?: (reading: WaterQualityReading) => void;
+  private onStatsUpdated?: (stats: WaterQualityStats) => void;
 
   constructor(config?: Partial<MQTTConfig>) {
     this.config = {
@@ -32,8 +49,10 @@ export class MQTTService {
       username: config?.username || process.env.MQTT_USERNAME,
       password: config?.password || process.env.MQTT_PASSWORD,
       clientId: config?.clientId || `aquasense-backend-${Date.now()}`,
+      defaultDo: Number(config?.defaultDo ?? process.env.MQTT_DEFAULT_DO ?? 0),
       topics: {
-        readings: config?.topics?.readings || 'water/esp32/readings',
+        readings: config?.topics?.readings || process.env.MQTT_TOPIC_READINGS || 'water/esp32/readings',
+        sensorWildcard: config?.topics?.sensorWildcard || process.env.MQTT_TOPIC_SENSOR_WILDCARD || 'aquasense/+',
         commands: config?.topics?.commands || 'water/commands/#',
         status: config?.topics?.status || 'water/esp32/status',
         ...config?.topics,
@@ -104,11 +123,13 @@ export class MQTTService {
     if (!this.client) return;
 
     try {
-      this.client.subscribe([this.config.topics.readings, this.config.topics.commands], (err) => {
+      this.client.subscribe([this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands], (err) => {
         if (err) {
           logger.error('MQTT subscription error:', err.message);
         } else {
-          logger.info(`✓ Subscribed to topics: ${this.config.topics.readings}, ${this.config.topics.commands}`);
+          logger.info(
+            `✓ Subscribed to topics: ${this.config.topics.readings}, ${this.config.topics.sensorWildcard}, ${this.config.topics.commands}`
+          );
         }
       });
     } catch (error) {
@@ -126,6 +147,8 @@ export class MQTTService {
 
       if (topic === this.config.topics.readings) {
         this.handleSensorReading(message);
+      } else if (this.isAquasenseSensorTopic(topic)) {
+        this.handleAquasenseTopicValue(topic, message);
       } else if (topic.startsWith('water/commands/')) {
         this.handleCommand(topic, message);
       }
@@ -142,31 +165,200 @@ export class MQTTService {
     try {
       const data = JSON.parse(payload);
 
+      // Accept both `do` and `dissolvedOxygen` key names.
+      const doValue = data.do ?? data.dissolvedOxygen ?? this.config.defaultDo;
+
       // Validate required fields
       if (
         data.temperature === undefined ||
         data.ph === undefined ||
-        data.do === undefined ||
         data.turbidity === undefined
       ) {
         logger.warn('Invalid sensor reading - missing required fields:', data);
         return;
       }
 
+      const temperature = parseFloat(data.temperature);
+      const ph = parseFloat(data.ph);
+      const dissolvedOxygen = parseFloat(doValue);
+      const turbidity = parseFloat(data.turbidity);
+
+      const sanitized = this.sanitizeSensorValues({
+        temperature,
+        ph,
+        dissolvedOxygen,
+        turbidity,
+      });
+
+      if (sanitized.turbidity === null) {
+        logger.warn('[MQTT] Dropping sensor reading: turbidity value is invalid', {
+          temperature,
+          ph,
+          do: dissolvedOxygen,
+          turbidity,
+        });
+        return;
+      }
+
+      if (sanitized.warnings.length) {
+        logger.warn(`[MQTT] Sanitized sensor reading: ${sanitized.warnings.join(', ')}`);
+      }
+
       // Add to water quality service
       const reading = waterQualityService.addReading({
-        temperature: parseFloat(data.temperature),
-        ph: parseFloat(data.ph),
-        do: parseFloat(data.do),
-        turbidity: parseFloat(data.turbidity),
+        temperature: sanitized.temperature,
+        ph: sanitized.ph,
+        do: sanitized.dissolvedOxygen,
+        turbidity: sanitized.turbidity,
         location: data.location || 'ESP32-Sensor',
         timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
       });
 
-      logger.info(`[ESP32] Sensor reading received: Temp=${reading.temperature}°C, pH=${reading.ph}, DO=${reading.do}, Turbidity=${reading.turbidity}`);
+      this.onReadingReceived?.(reading);
+      this.onStatsUpdated?.(waterQualityService.getStatistics(60));
+
+      this.latestSensorPayload = {
+        temperature: reading.temperature,
+        ph: reading.ph,
+        turbidity: reading.turbidity,
+        do: reading.do,
+      };
+
+      void sensorReadingService
+        .addSensorReading(reading.temperature, reading.ph, reading.do, reading.turbidity, reading.location, new Date(reading.timestamp))
+        .catch((error) => {
+          logger.error('Failed to persist MQTT sensor reading to database', error);
+        });
+
+      logger.info(
+        `[ESP32] Sensor reading received: Temp=${reading.temperature}°C, pH=${reading.ph}, DO=${reading.do}, Turbidity=${reading.turbidity}`
+      );
     } catch (error) {
       logger.error('Failed to process sensor reading:', error);
     }
+  }
+
+  setRealtimeHandlers(handlers: {
+    onReadingReceived?: (reading: WaterQualityReading) => void;
+    onStatsUpdated?: (stats: WaterQualityStats) => void;
+  }): void {
+    this.onReadingReceived = handlers.onReadingReceived;
+    this.onStatsUpdated = handlers.onStatsUpdated;
+  }
+
+  /**
+   * Handle topic-per-parameter payloads, e.g.:
+   * aquasense/temperature => 26.4
+   * aquasense/ph => 7.19
+   * aquasense/turbidity => 324
+   */
+  private handleAquasenseTopicValue(topic: string, payload: string): void {
+    const topicSuffix = topic.split('/').pop();
+    const parsed = Number(payload);
+
+    if (!Number.isFinite(parsed)) {
+      logger.warn(`[MQTT] Ignoring non-numeric payload on ${topic}: ${payload}`);
+      return;
+    }
+
+    switch (topicSuffix) {
+      case 'temperature':
+        this.latestSensorPayload.temperature = parsed;
+        this.pendingBatchFlags.temperature = true;
+        break;
+      case 'ph':
+        this.latestSensorPayload.ph = parsed;
+        this.pendingBatchFlags.ph = true;
+        break;
+      case 'turbidity':
+        this.latestSensorPayload.turbidity = parsed;
+        this.pendingBatchFlags.turbidity = true;
+        break;
+      case 'do':
+      case 'dissolved-oxygen':
+        this.latestSensorPayload.do = parsed;
+        break;
+      default:
+        logger.debug(`[MQTT] Unsupported aquasense topic suffix: ${topicSuffix}`);
+        return;
+    }
+
+    if (
+      this.pendingBatchFlags.temperature &&
+      this.pendingBatchFlags.ph &&
+      this.pendingBatchFlags.turbidity &&
+      this.latestSensorPayload.temperature !== undefined &&
+      this.latestSensorPayload.ph !== undefined &&
+      this.latestSensorPayload.turbidity !== undefined
+    ) {
+      const normalizedPayload = {
+        temperature: this.latestSensorPayload.temperature,
+        ph: this.latestSensorPayload.ph,
+        do: this.config.defaultDo,
+        turbidity: this.latestSensorPayload.turbidity,
+        location: 'ESP32-MQTT',
+        timestamp: new Date().toISOString(),
+      };
+
+      this.pendingBatchFlags = {
+        temperature: false,
+        ph: false,
+        turbidity: false,
+      };
+
+      this.handleSensorReading(JSON.stringify(normalizedPayload));
+    }
+  }
+
+  private isAquasenseSensorTopic(topic: string): boolean {
+    return topic.startsWith('aquasense/');
+  }
+
+  private sanitizeSensorValues(values: {
+    temperature: number;
+    ph: number;
+    dissolvedOxygen: number;
+    turbidity: number;
+  }): {
+    temperature: number;
+    ph: number;
+    dissolvedOxygen: number;
+    turbidity: number | null;
+    warnings: string[];
+  } {
+    const warnings: string[] = [];
+
+    let temperature = values.temperature;
+    if (!Number.isFinite(temperature)) {
+      temperature = 0;
+      warnings.push('temperature non-numeric -> set to 0');
+    }
+
+    let ph = values.ph;
+    if (!Number.isFinite(ph)) {
+      ph = 0;
+      warnings.push('pH non-numeric -> set to 0');
+    }
+
+    let dissolvedOxygen = values.dissolvedOxygen;
+    if (!Number.isFinite(dissolvedOxygen) || dissolvedOxygen < 0 || dissolvedOxygen > 20) {
+      dissolvedOxygen = 0;
+      warnings.push('dissolved oxygen unavailable -> set to 0');
+    }
+
+    let turbidity: number | null = values.turbidity;
+    if (!Number.isFinite(values.turbidity) || values.turbidity < 0 || values.turbidity > 5000) {
+      turbidity = null;
+      warnings.push('turbidity invalid -> dropped reading');
+    }
+
+    return {
+      temperature,
+      ph,
+      dissolvedOxygen,
+      turbidity,
+      warnings,
+    };
   }
 
   /**
@@ -248,7 +440,7 @@ export class MQTTService {
     return {
       connected: this.isConnected,
       brokerUrl: this.config.brokerUrl,
-      subscribedTopics: [this.config.topics.readings, this.config.topics.commands],
+      subscribedTopics: [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands],
     };
   }
 }

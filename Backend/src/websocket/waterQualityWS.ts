@@ -7,6 +7,8 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import { logger } from '../utils/logger';
 import { waterQualityService } from '../iot/water/services/waterQualityService';
+import { sensorReadingService } from '../services/sensorReadingService';
+import type { WaterQualityStats } from '../iot/water/types';
 
 class WaterQualityWebSocketServer {
   private io: SocketIOServer;
@@ -36,29 +38,17 @@ class WaterQualityWebSocketServer {
         totalClients: this.connectedClients.size,
       });
 
-      // Send latest reading on connection
-      const latest = waterQualityService.getLatestReading();
-      if (latest) {
-        socket.emit('water:latest', latest);
-      }
-
-      // Send current statistics
-      try {
-        const stats = waterQualityService.getStatistics(60);
-        socket.emit('water:stats', stats);
-      } catch {
-        logger.debug('No stats available yet');
-      }
+      void this.emitSnapshot(socket, 60);
 
       // Handle client events
-      socket.on('water:request-latest', () => {
-        const latest = waterQualityService.getLatestReading();
+      socket.on('water:request-latest', async () => {
+        const latest = await sensorReadingService.getLatestReading();
         socket.emit('water:latest', latest);
       });
 
-      socket.on('water:request-stats', (minutes: number) => {
+      socket.on('water:request-stats', async (minutes: number) => {
         try {
-          const stats = waterQualityService.getStatistics(minutes || 60);
+          const stats = await this.getDbBackedStats(minutes || 60);
           socket.emit('water:stats', stats);
         } catch (error) {
           socket.emit('error', { message: 'Failed to get statistics' });
@@ -70,6 +60,11 @@ class WaterQualityWebSocketServer {
         socket.emit('water:alerts', alerts);
       });
 
+      socket.on('water:request-history', async (minutes: number) => {
+        const history = await sensorReadingService.getReadingsByTimeRange(minutes || 60);
+        socket.emit('water:history', history);
+      });
+
       socket.on('disconnect', () => {
         this.connectedClients.delete(socket.id);
         logger.info(`Water quality client disconnected: ${socket.id}`, {
@@ -77,6 +72,95 @@ class WaterQualityWebSocketServer {
         });
       });
     });
+  }
+
+  private async emitSnapshot(socket: Socket, minutes: number): Promise<void> {
+    try {
+      const latest = await sensorReadingService.getLatestReading();
+      socket.emit('water:latest', latest);
+
+      const stats = await this.getDbBackedStats(minutes);
+      socket.emit('water:stats', stats);
+
+      const history = await sensorReadingService.getReadingsByTimeRange(minutes);
+      socket.emit('water:history', history);
+    } catch (error) {
+      logger.warn('Failed to emit websocket snapshot', error);
+    }
+  }
+
+  private async getDbBackedStats(minutes: number): Promise<WaterQualityStats> {
+    const dbStats = await sensorReadingService.getStatistics(minutes);
+    return {
+      timestamp: new Date(),
+      temperature: {
+        current: dbStats.temperature.current,
+        average: dbStats.temperature.average,
+        min: dbStats.temperature.min,
+        max: dbStats.temperature.max,
+      },
+      ph: {
+        current: dbStats.ph.current,
+        average: dbStats.ph.average,
+        min: dbStats.ph.min,
+        max: dbStats.ph.max,
+      },
+      do: {
+        current: dbStats.do.current,
+        average: dbStats.do.average,
+        min: dbStats.do.min,
+        max: dbStats.do.max,
+      },
+      turbidity: {
+        current: dbStats.turbidity.current,
+        average: dbStats.turbidity.average,
+        min: dbStats.turbidity.min,
+        max: dbStats.turbidity.max,
+      },
+      healthScore: this.calculateHealthScore(
+        dbStats.temperature.current,
+        dbStats.ph.current,
+        dbStats.do.current,
+        dbStats.turbidity.current
+      ),
+    };
+  }
+
+  private calculateHealthScore(
+    temperature: number,
+    ph: number,
+    dissolvedOxygen: number,
+    turbidity: number
+  ): number {
+    let score = 100;
+
+    if (temperature < 15 || temperature > 35) {
+      score -= 20;
+    } else if (temperature > 30) {
+      score -= 10;
+    }
+
+    if (ph < 6.5 || ph > 8.5) {
+      score -= 25;
+    } else if (ph < 7.0 || ph > 8.0) {
+      score -= 10;
+    }
+
+    if (dissolvedOxygen < 3) {
+      score -= 30;
+    } else if (dissolvedOxygen < 5) {
+      score -= 15;
+    } else if (dissolvedOxygen < 8) {
+      score -= 5;
+    }
+
+    if (turbidity > 100) {
+      score -= 20;
+    } else if (turbidity > 50) {
+      score -= 10;
+    }
+
+    return Math.max(0, score);
   }
 
   /**

@@ -34,8 +34,8 @@ const NewsBlogsSection: React.FC = () => {
       <div className="mx-auto max-w-7xl">
         <div className="flex flex-col gap-4 mb-14 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-medium text-primary">News & Blogs</p>
-            <h2 className="mt-2 text-4xl font-bold text-gray-900 md:text-5xl">Our Latest News & Blogs</h2>
+            <p className="text-sm font-medium text-primary">News & Blogs <span className="text-cyan-300">&rarr;</span></p>    
+            <h2 className="mt-2 text-4xl font-bold text-blue-900 md:text-5xl">Our Latest News & Blogs</h2>
           </div>
           <button
             type="button"

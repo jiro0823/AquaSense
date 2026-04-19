@@ -6,6 +6,7 @@ import SignupPage from './pages/SignupPage';
 import AboutPage from './pages/AboutPage';
 import FeaturesPage from './pages/FeaturesPage';
 import HowItWorksPage from './pages/HowItWorksPage';
+import ScrollManager from './components/ScrollManager';
 import { WaterQualityDashboard } from './components/WaterQuality/Dashboard';
 import './App.css';
 
@@ -53,6 +54,7 @@ function App(): JSX.Element {
 
   return (
     <BrowserRouter>
+      <ScrollManager />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/about" element={<AboutPage />} />

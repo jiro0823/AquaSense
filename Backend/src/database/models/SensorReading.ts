@@ -33,8 +33,8 @@ export const initializeSensorReadingModel = (): void => {
         type: DataTypes.FLOAT,
         allowNull: false,
         validate: {
-          min: -50,
-          max: 100,
+          min: -200,
+          max: 150,
         },
       },
       ph: {
@@ -42,7 +42,7 @@ export const initializeSensorReadingModel = (): void => {
         allowNull: false,
         validate: {
           min: 0,
-          max: 14,
+          max: 50,
         },
       },
       do: {
@@ -58,7 +58,7 @@ export const initializeSensorReadingModel = (): void => {
         allowNull: false,
         validate: {
           min: 0,
-          max: 1000,
+          max: 5000,
         },
       },
       location: {

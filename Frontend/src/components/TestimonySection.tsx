@@ -83,7 +83,6 @@ const TestimonySection: React.FC = () => {
   return (
     <section className="px-6 py-28 bg-primary">
       <div className="mx-auto max-w-7xl">
-        <p className="mb-2 text-xs text-center text-cyan-300">Testimonials <span className="text-cyan-300">→</span></p>
         <h2 className="text-4xl font-bold text-center text-cyan-300 md:text-5xl">
           Experience Shared by
           <span className="block text-white">Our Clients</span>

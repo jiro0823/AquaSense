@@ -13,15 +13,15 @@ const AboutPage: React.FC = () => {
       <Navigation />
 
       {/* Hero Section */}
-      <section className="px-6 py-20 bg-gradient-to-br from-blue-50 via-white to-cyan-50">
+      <section className="px-4 py-16 bg-gradient-to-br from-blue-50 via-white to-cyan-50 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="grid items-center grid-cols-1 gap-12 md:grid-cols-2">
             {/* Left Side - Text */}
             <div>
-              <h1 className="mb-6 text-5xl font-bold md:text-6xl text-primary">
+              <h1 className="mb-6 text-4xl font-bold sm:text-5xl md:text-6xl text-primary">
                 About <span className="text-accent">AquaSense</span>
               </h1>
-              <p className="text-lg text-gray-700">
+              <p className="text-base text-gray-700 sm:text-lg">
                 Revolutionizing Water Quality Monitoring with IoT, Solar Power, and Sustainable Aquaculture for crayfish farmers worldwide.
               </p>
             </div>
@@ -41,7 +41,7 @@ const AboutPage: React.FC = () => {
       </section>
 
       {/* Main Content */}
-      <div className="px-6 py-12 mx-auto max-w-7xl">
+      <div className="px-4 py-12 mx-auto max-w-7xl sm:px-6">
         {/* System Overview */}
         <section className="mb-20">
           <h2 className="mb-8 text-4xl font-bold text-primary">Our Integrated System</h2>
@@ -53,12 +53,12 @@ const AboutPage: React.FC = () => {
         {/* Three Pillars */}
         <section className="grid grid-cols-1 gap-8 mb-20 md:grid-cols-3">
           {/* IoT Component */}
-          <div className="card">
-            <div className="w-40 h-40 mb-4">
+          <div className="h-full card">
+            <div className="w-full mb-5 overflow-hidden rounded-xl aspect-[4/3]">
               <img 
                 src={aboutIotImage} 
                 alt="IoT Monitoring" 
-                className="object-cover w-full h-full rounded-lg"
+                className="object-cover w-full h-full"
               />
             </div>
             <h3 className="mb-4 text-2xl font-bold text-primary">IoT Monitoring</h3>
@@ -84,12 +84,12 @@ const AboutPage: React.FC = () => {
           </div>
 
           {/* Solar Power Component */}
-          <div className="card">
-            <div className="w-40 h-40 mb-4">
+          <div className="h-full card">
+            <div className="w-full mb-5 overflow-hidden rounded-xl aspect-[4/3]">
               <img 
                 src={aboutSolarImage} 
                 alt="Solar Powered" 
-                className="object-cover w-full h-full rounded-lg"
+                className="object-cover w-full h-full"
               />
             </div>
             <h3 className="mb-4 text-2xl font-bold text-primary">Solar Powered</h3>
@@ -115,12 +115,12 @@ const AboutPage: React.FC = () => {
           </div>
 
           {/* Crayfish Aquaculture Component */}
-          <div className="card">
-            <div className="w-40 h-40 mb-4">
+          <div className="h-full card">
+            <div className="w-full mb-5 overflow-hidden rounded-xl aspect-[4/3]">
               <img 
                 src={aboutCrayImage} 
                 alt="Crayfish Optimization" 
-                className="object-cover w-full h-full rounded-lg"
+                className="object-cover w-full h-full"
               />
             </div>
             <h3 className="mb-4 text-2xl font-bold text-primary">Crayfish Optimization</h3>

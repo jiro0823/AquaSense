@@ -161,6 +161,12 @@ const startServer = async (): Promise<void> => {
     // Initialize WebSocket server
     const wsServer = new WaterQualityWebSocketServer(httpServer);
 
+    // Bridge MQTT readings to connected WebSocket dashboard clients
+    mqttService.setRealtimeHandlers({
+      onReadingReceived: (reading) => wsServer.broadcastReading(reading),
+      onStatsUpdated: (stats) => wsServer.broadcastStats(stats),
+    });
+
     // Initialize MQTT Service (Optional - for ESP32 integration via MQTT)
     try {
       logger.info('Initializing MQTT Service...');

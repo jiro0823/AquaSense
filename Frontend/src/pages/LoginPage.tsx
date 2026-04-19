@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import loginBackgroundImage from '../assets/images/login/login_bg01.jpg';
 
 const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = () => {
   const [email, setEmail] = useState('');
@@ -50,11 +51,19 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen p-4 bg-white">
+    <div
+      className="flex items-center justify-center min-h-screen p-4 py-16 bg-center bg-cover sm:py-10"
+      style={{
+        backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), url(${loginBackgroundImage})`,
+        backgroundPosition: 'center',
+        backgroundSize: 'cover',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
       {/* Home Button */}
       <button
         onClick={() => navigate('/')}
-        className="absolute flex items-center gap-2 text-primary transition top-8 left-8 hover:text-accent hover:translate-x-1"
+        className="absolute flex items-center gap-2 text-white transition left-4 top-4 sm:top-6 sm:left-6 hover:text-accent hover:translate-x-1"
         aria-label="Go to home"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -63,25 +72,25 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
         <span className="text-sm font-medium">Home</span>
       </button>
 
-      <div className="flex w-full max-w-5xl overflow-hidden bg-white rounded-xl shadow-lg border border-gray-200">
+      <div className="flex w-full max-w-5xl overflow-hidden bg-white border border-gray-200 shadow-lg rounded-xl">
         
         {/* Left Side - Branding */}
-        <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary via-blue-700 to-blue-800 flex-col justify-between p-12 text-white overflow-hidden relative">
+        <div className="relative flex-col justify-between hidden p-8 overflow-hidden text-white lg:flex lg:w-5/12 xl:p-10 bg-gradient-to-br from-primary via-blue-700 to-blue-800">
           {/* Decorative elements */}
-          <div className="absolute top-0 right-0 w-40 h-40 bg-accent opacity-20 rounded-full -mr-20 -mt-20"></div>
-          <div className="absolute bottom-0 left-0 w-32 h-32 bg-accent opacity-10 rounded-full -ml-16 -mb-14"></div>
+          <div className="absolute top-0 right-0 w-40 h-40 -mt-20 -mr-20 rounded-full bg-accent opacity-20"></div>
+          <div className="absolute bottom-0 left-0 w-32 h-32 -ml-16 rounded-full bg-accent opacity-10 -mb-14"></div>
           
           <div className="relative z-10 space-y-6">
             <div>
-              <h2 className="mb-4 text-4xl font-bold leading-tight">
+              <h2 className="mb-4 text-4xl font-bold leading-tight xl:text-5xl text-cyan-300">
                 Monitor Your Crayfish Farm
               </h2>
-              <p className="text-lg text-blue-100 leading-relaxed">
+              <p className="text-lg leading-relaxed text-blue-100">
                 Real-time water quality monitoring with automated alerts and control systems. Optimize your aquaculture operations with intelligent insights.
               </p>
             </div>
 
-            <div className="space-y-4 pt-6 border-t border-white border-opacity-20">
+            <div className="pt-6 space-y-4 border-t border-white border-opacity-20">
               <div className="flex items-start gap-3">
                 <span className="text-2xl">📊</span>
                 <div>
@@ -106,11 +115,11 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
             </div>
           </div>
 
-          <p className="text-sm text-blue-100 relative z-10">🌊 AquaSense • Intelligent Farm Management</p>
+          <p className="relative z-10 text-sm text-blue-100">🌊 AquaSense • Intelligent Farm Management</p>
         </div>
 
         {/* Right Side - Form */}
-        <div className="flex flex-col justify-center w-full p-8 lg:w-1/2 lg:p-12">
+        <div className="flex flex-col justify-center w-full p-6 sm:p-8 lg:w-7/12 lg:p-10">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-3 mb-8">
             <div className="text-3xl">🌊</div>
@@ -126,7 +135,7 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
 
           {/* Error Alert */}
           {error && (
-            <div className="alert alert-danger mb-6">
+            <div className="mb-6 alert alert-danger">
               <span>⚠️</span>
               <div>
                 <p className="font-semibold">Login Error</p>
@@ -159,13 +168,13 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="input-field pr-10"
+                  className="pr-10 input-field"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute transition right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-primary"
+                  className="absolute text-gray-600 transition -translate-y-1/2 right-3 top-1/2 hover:text-primary"
                   aria-label="Toggle password visibility"
                 >
                   {showPassword ? (
@@ -183,7 +192,7 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
             </div>
 
             {/* Forgot Password */}
-            <Link to="#" className="text-sm font-medium text-accent hover:text-primary block mt-1">
+            <Link to="#" className="block mt-1 text-sm font-medium text-accent hover:text-primary">
               Forgot Password?
             </Link>
 
@@ -191,7 +200,7 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
             <button
               type="submit"
               disabled={loading}
-              className="btn btn-primary w-full mt-6"
+              className="w-full mt-6 btn btn-primary"
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
@@ -207,14 +216,14 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
           {/* Sign Up Link */}
           <Link
             to="/signup"
-            className="btn btn-secondary w-full"
+            className="w-full btn btn-secondary"
           >
             Create Account
           </Link>
 
           {/* Terms */}
-          <p className="text-xs text-gray-600 text-center mt-6">
-            By signing in, you agree to our <Link to="#" className="text-accent hover:text-primary font-medium">Terms of Service</Link> and <Link to="#" className="text-accent hover:text-primary font-medium">Privacy Policy</Link>
+          <p className="mt-6 text-xs text-center text-gray-600">
+            By signing in, you agree to our <Link to="#" className="font-medium text-accent hover:text-primary">Terms of Service</Link> and <Link to="#" className="font-medium text-accent hover:text-primary">Privacy Policy</Link>
           </p>
         </div>
 

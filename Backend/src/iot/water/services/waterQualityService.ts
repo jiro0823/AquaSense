@@ -106,7 +106,34 @@ export class WaterQualityService {
     const latest = this.getLatestReading();
 
     if (timeRangeReadings.length === 0) {
-      throw new Error('No readings available');
+      return {
+        timestamp: new Date(),
+        temperature: {
+          current: 0,
+          average: 0,
+          min: 0,
+          max: 0,
+        },
+        ph: {
+          current: 0,
+          average: 0,
+          min: 0,
+          max: 0,
+        },
+        do: {
+          current: 0,
+          average: 0,
+          min: 0,
+          max: 0,
+        },
+        turbidity: {
+          current: 0,
+          average: 0,
+          min: 0,
+          max: 0,
+        },
+        healthScore: 0,
+      };
     }
 
     const calculateStats = (param: keyof Omit<WaterQualityReading, 'id' | 'timestamp' | 'location' | 'status'>) => {

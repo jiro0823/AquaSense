@@ -67,18 +67,18 @@ const HowItWorksPage: React.FC = () => {
     <div className="min-h-screen bg-white">
       <Navigation />
 
-      <section className="px-6 py-20 bg-gradient-to-b from-slate-50 to-white">
+      <section className="px-4 py-16 bg-gradient-to-b from-slate-50 to-white sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
-          <h1 className="max-w-4xl mb-6 text-5xl font-bold text-slate-900 md:text-6xl">
+          <h1 className="max-w-4xl mb-6 text-4xl font-bold text-slate-900 sm:text-5xl md:text-6xl">
             Smart Monitoring Made Simple for Everyday Farm Use
           </h1>
-          <p className="max-w-3xl text-lg text-slate-600">
+          <p className="max-w-3xl text-base text-slate-600 sm:text-lg">
             AquaSense combines sensors, automation, and live dashboards into one clear workflow so you can protect water quality without guesswork.
           </p>
         </div>
       </section>
 
-      <div className="px-6 py-16 mx-auto max-w-7xl">
+      <div className="px-4 py-16 mx-auto max-w-7xl sm:px-6">
         <section className="mb-20">
           <div className="flex items-end justify-between mb-8">
             <h2 className="text-3xl font-bold text-slate-900">AquaSense in 4 Easy Steps</h2>

@@ -19,17 +19,17 @@ const Footer: React.FC = () => {
             <h4 className="mb-4 font-bold text-white">Product</h4>
             <ul className="space-y-2 text-sm">
               <li>
-                <Link to="/dashboard" className="transition hover:text-cyan-400">
+                <Link to="/dashboard" className="footer-link">
                   Dashboard
                 </Link>
               </li>
               <li>
-                <Link to="/features" className="transition hover:text-cyan-400">
+                <Link to="/features" className="footer-link">
                   Features
                 </Link>
               </li>
               <li>
-                <Link to="/how-it-works" className="transition hover:text-cyan-400">
+                <Link to="/how-it-works" className="footer-link">
                   How It Works
                 </Link>
               </li>
@@ -41,17 +41,17 @@ const Footer: React.FC = () => {
             <h4 className="mb-4 font-bold text-white">Company</h4>
             <ul className="space-y-2 text-sm">
               <li>
-                <Link to="/about" className="transition hover:text-cyan-400">
+                <Link to="/about" className="footer-link">
                   About
                 </Link>
               </li>
               <li>
-                <Link to="/contact" className="transition hover:text-cyan-400">
+                <Link to="/contact" className="footer-link">
                   Contact
                 </Link>
               </li>
               <li>
-                <Link to="/" className="transition hover:text-cyan-400">
+                <Link to="/" className="footer-link">
                   Blog
                 </Link>
               </li>
@@ -79,8 +79,8 @@ const Footer: React.FC = () => {
         </div>
 
         {/* Bottom Bar */}
-        <div className="pt-8 mt-12 text-sm text-center text-gray-600 border-t border-slate-800">
-          <p>
+        <div className="pt-8 mt-12 text-sm text-center border-t border-gray-500">
+          <p className="text-gray-500">
             © 2026 AquaSense. All rights reserved. • Built for sustainable aquaculture
           </p>
         </div>

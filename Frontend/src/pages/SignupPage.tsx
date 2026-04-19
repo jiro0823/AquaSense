@@ -104,11 +104,11 @@ const SignupPage: React.FC = () => {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen p-4 bg-white">
+    <div className="flex items-center justify-center min-h-screen p-4 py-16 bg-white sm:py-10">
       {/* Home Button */}
       <button
         onClick={() => navigate('/')}
-        className="absolute flex items-center gap-2 text-primary transition top-8 left-8 hover:text-accent hover:translate-x-1"
+        className="absolute flex items-center gap-2 transition text-primary left-4 top-4 sm:top-6 sm:left-6 hover:text-accent hover:translate-x-1"
         aria-label="Go to home"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -120,13 +120,13 @@ const SignupPage: React.FC = () => {
       <div className="flex w-full max-w-5xl overflow-hidden bg-white rounded-xl shadow-lg border border-gray-200">
 
         {/* Left Side - Branding */}
-        <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary via-blue-700 to-blue-800 flex-col justify-between p-12 text-white overflow-hidden relative">
+        <div className="relative flex-col justify-between hidden p-8 overflow-hidden text-white lg:flex lg:w-5/12 xl:p-10 bg-gradient-to-br from-primary via-blue-700 to-blue-800">
           <div className="absolute top-0 right-0 w-40 h-40 bg-accent opacity-20 rounded-full -mr-20 -mt-20"></div>
           <div className="absolute bottom-0 left-0 w-32 h-32 bg-accent opacity-10 rounded-full -ml-16 -mb-14"></div>
           
           <div className="relative z-10 space-y-6">
             <div>
-              <h2 className="mb-4 text-4xl font-bold leading-tight">Join AquaSense</h2>
+              <h2 className="mb-4 text-3xl font-bold leading-tight xl:text-4xl">Join AquaSense</h2>
               <p className="text-lg text-blue-100 leading-relaxed">
                 Start monitoring and controlling your aquaculture systems with real-time data, instant alerts, and automated solutions.
               </p>
@@ -156,7 +156,7 @@ const SignupPage: React.FC = () => {
         </div>
 
         {/* Right Side - Form */}
-        <div className="flex flex-col justify-center w-full p-8 lg:w-1/2 lg:p-12">
+        <div className="flex flex-col justify-center w-full p-6 sm:p-8 lg:w-7/12 lg:p-10">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-3 mb-8">
             <div className="text-3xl">🌊</div>

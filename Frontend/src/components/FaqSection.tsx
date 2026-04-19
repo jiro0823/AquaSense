@@ -38,9 +38,7 @@ const FaqSection: React.FC = () => {
   return (
     <section id="faq" className="py-28 bg-slate-50">
       <div className="px-6 mx-auto max-w-7xl">
-        <p className="mb-2 text-sm font-medium text-center text-primary">
-          FAQ <span className="text-cyan-300">&rarr;</span>
-        </p>
+         <p className="text-sm font-medium text-primary">FAQ <span className="text-cyan-300">&rarr;</span></p>  
         <h2 className="mb-12 text-3xl font-bold text-primary">Frequently Asked Questions</h2>
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2 lg:max-w-3xl">

@@ -17,19 +17,19 @@ const FeaturesPage: React.FC = () => {
       <Navigation />
 
       {/* Hero Section */}
-      <div className="px-6 py-24 bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 lg:py-32">
+      <div className="px-4 py-16 bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 sm:px-6 lg:py-28">
         <div className="grid items-center mx-auto gap-14 max-w-7xl lg:grid-cols-2">
           <div className="max-w-2xl text-left"> 
-            <h1 className="mb-6 text-5xl font-bold leading-tight md:text-6xl text-primary">
+            <h1 className="mb-6 text-4xl font-bold leading-tight sm:text-5xl md:text-6xl text-primary">
               Powerful
               <span className="text-accent"> Features</span>
             </h1>
-            <p className="pl-4 text-lg leading-relaxed text-gray-700 border-l-4 border-cyan-200">
+            <p className="pl-4 text-base leading-relaxed text-gray-700 border-l-4 sm:text-lg border-cyan-200">
               Comprehensive water quality monitoring and intelligent automation designed to optimize aquaculture performance. By leveraging real-time data insights, advanced sensor technology, and smart control systems, AquaSense ensures healthier aquatic environments, maximized yield, and more efficient, sustainable farming operations.
             </p>
           </div>
 
-          <div className="grid h-full grid-cols-2 gap-5 min-h-[500px] lg:min-h-[620px]">
+          <div className="grid h-full grid-cols-1 gap-5 sm:grid-cols-2 min-h-[420px] sm:min-h-[500px] lg:min-h-[620px]">
             <div className="row-span-2 overflow-hidden shadow-sm bg-white/70 rounded-2xl">
               <img
                 src={bigImage01}
@@ -56,23 +56,23 @@ const FeaturesPage: React.FC = () => {
       </div>
 
       {/* Core Monitoring Section */}
-      <div className="px-6 py-20 bg-stone-100 lg:py-24">
+      <div className="px-4 py-16 bg-stone-100 sm:px-6 lg:py-24">
         <div className="mx-auto max-w-[104rem]">
           <div className="mb-10 text-center">
             <h2 className="mb-3 text-4xl font-bold md:text-5xl text-primary">Core Monitoring</h2>
             <p className="max-w-2xl mx-auto text-lg text-gray-700">Real-time sensor data collection and analysis with visual sensor cards ready for your custom photos.</p>
           </div>
-          <div className="grid items-stretch grid-cols-1 gap-16 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          <div className="grid items-stretch grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {/* Temperature */}
-            <div className="flex flex-col h-full overflow-hidden bg-white border border-gray-200 shadow-sm rounded-2xl">
-              <div className="overflow-hidden h-72 bg-slate-100">
+            <div className="flex flex-col h-full card">
+              <div className="w-full mb-5 overflow-hidden h-44 bg-slate-100 rounded-xl">
                 <img
                   src={temperatureImage}
                   alt="Temperature monitoring"
                   className="object-cover w-full h-full"
                 />
               </div>
-              <div className="flex-1 p-6">
+              <div className="flex-1">
                 <h3 className="mb-4 text-2xl font-bold leading-tight text-slate-800">Temperature Monitoring</h3>
                 <ul className="space-y-2 text-sm text-slate-700">
                   <li className="flex items-start gap-2"><span className="font-bold text-orange-500">✓</span><span>Real-time readings</span></li>
@@ -84,15 +84,15 @@ const FeaturesPage: React.FC = () => {
             </div>
 
             {/* pH Level */}
-            <div className="flex flex-col h-full overflow-hidden bg-white border border-gray-200 shadow-sm rounded-2xl">
-              <div className="overflow-hidden h-72 bg-slate-100">
+            <div className="flex flex-col h-full card">
+              <div className="w-full mb-5 overflow-hidden h-44 bg-slate-100 rounded-xl">
                 <img
                   src={phImage}
                   alt="pH level detection"
                   className="object-cover w-full h-full"
                 />
               </div>
-              <div className="flex-1 p-6">
+              <div className="flex-1">
                 <h3 className="mb-4 text-2xl font-bold leading-tight text-slate-800">pH Level Detection</h3>
                 <ul className="space-y-2 text-sm text-slate-700">
                   <li className="flex items-start gap-2"><span className="font-bold text-purple-500">✓</span><span>Continuous monitoring</span></li>
@@ -104,15 +104,15 @@ const FeaturesPage: React.FC = () => {
             </div>
 
             {/* Dissolved Oxygen */}
-            <div className="flex flex-col h-full overflow-hidden bg-white border border-gray-200 shadow-sm rounded-2xl">
-              <div className="overflow-hidden h-72 bg-slate-100">
+            <div className="flex flex-col h-full card">
+              <div className="w-full mb-5 overflow-hidden h-44 bg-slate-100 rounded-xl">
                 <img
                   src={dissolvedOxygenImage}
                   alt="Dissolved oxygen monitoring"
                   className="object-cover w-full h-full"
                 />
               </div>
-              <div className="flex-1 p-6">
+              <div className="flex-1">
                 <h3 className="mb-4 text-2xl font-bold leading-tight text-slate-800">Dissolved Oxygen</h3>
                 <ul className="space-y-2 text-sm text-slate-700">
                   <li className="flex items-start gap-2"><span className="font-bold text-green-600">✓</span><span>Critical for aquatic life</span></li>
@@ -124,15 +124,15 @@ const FeaturesPage: React.FC = () => {
             </div>
 
             {/* Turbidity */}
-            <div className="flex flex-col h-full overflow-hidden bg-white border border-gray-200 shadow-sm rounded-2xl">
-              <div className="overflow-hidden h-72 bg-slate-100">
+            <div className="flex flex-col h-full card">
+              <div className="w-full mb-5 overflow-hidden h-44 bg-slate-100 rounded-xl">
                 <img
                   src={turbidityImage}
                   alt="Water clarity and turbidity"
                   className="object-cover w-full h-full"
                 />
               </div>
-              <div className="flex-1 p-6">
+              <div className="flex-1">
                 <h3 className="mb-4 text-2xl font-bold leading-tight text-slate-800">Water Clarity</h3>
                 <ul className="space-y-2 text-sm text-slate-700">
                   <li className="flex items-start gap-2"><span className="font-bold text-amber-500">✓</span><span>Turbidity measurement</span></li>
@@ -147,7 +147,7 @@ const FeaturesPage: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="px-6 py-16 bg-[#faf9f6] lg:py-20">
+      <div className="px-4 py-16 bg-[#faf9f6] sm:px-6 lg:py-20">
         <div className="mx-auto max-w-7xl">
           {/* Integrated Automation + Alerts Section */}
           <section className="mb-20">
@@ -161,7 +161,7 @@ const FeaturesPage: React.FC = () => {
               </div>
 
               <div className="pr-2">
-                <h3 className="mb-6 text-3xl font-bold text-slate-900">Smart Operations Panel</h3>
+                <h3 className="mb-6 text-4xl font-bold text-cyan-500">Smart Operations Panel</h3>
 
                 <div className="mb-7">
                   <h4 className="mb-2 text-lg font-semibold text-cyan-700">Automated Aerator Control</h4>
@@ -195,7 +195,7 @@ const FeaturesPage: React.FC = () => {
           <section>
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               <div className="p-6 border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white rounded-2xl">
-                <h4 className="mb-2 text-lg font-bold text-cyan-800">Real-Time Dashboard</h4>
+                <h4 className="mb-2 text-lg font-bold text-blue-800">Real-Time Dashboard</h4>
                 <p className="mb-2 text-sm text-slate-700">Live visualization of current sensor values, health status, and active automation states.</p>
                 <p className="text-xs text-slate-600">Monitor critical parameters, customize widgets, and review live trends.</p>
               </div>
@@ -205,7 +205,7 @@ const FeaturesPage: React.FC = () => {
                 <p className="text-xs text-slate-600">Includes retention, export options, and prediction-oriented insights.</p>
               </div>
               <div className="p-6 border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white rounded-2xl">
-                <h4 className="mb-2 text-lg font-bold text-indigo-800">Performance Reports</h4>
+                <h4 className="mb-2 text-lg font-bold text-blue-800">Performance Reports</h4>
                 <p className="mb-2 text-sm text-slate-700">Generate summary reports to evaluate quality, efficiency, and production impact.</p>
                 <p className="text-xs text-slate-600">Review KPIs, weekly or monthly trends, and yield-focused metrics.</p>
               </div>
@@ -215,7 +215,7 @@ const FeaturesPage: React.FC = () => {
       </div>
 
       {/* Data Security Section */}
-      <div className="px-6 py-12 bg-gradient-to-br from-blue-50 via-white to-cyan-50">
+      <div className="px-4 py-12 bg-gradient-to-br from-blue-50 via-white to-cyan-50 sm:px-6">
         <div className="mx-auto max-w-7xl">
           {/* Data Security */}
           <section>
@@ -258,19 +258,19 @@ const FeaturesPage: React.FC = () => {
               <div>
                 <h4 className="mb-2 font-bold text-green-300">Water Quality Metrics</h4>
                 <div className="space-y-2 text-white">
-                  <p><span className="font-bold">Temperature:</span> 20-30°C optimal range for crayfish</p>
-                  <p><span className="font-bold">pH Level:</span> 7.0-8.5 for healthy aquatic environment</p>
-                  <p><span className="font-bold">Dissolved Oxygen:</span> 5-8 mg/L for crayfish survival</p>
-                  <p><span className="font-bold">Turbidity:</span> &lt;25 NTU for water clarity</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Temperature:</span> 20-30°C optimal range for crayfish</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">pH Level:</span> 7.0-8.5 for healthy aquatic environment</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Dissolved Oxygen:</span> 5-8 mg/L for crayfish survival</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Turbidity:</span> &lt;25 NTU for water clarity</p>
                 </div>
               </div>
               <div>
                 <h4 className="mb-2 font-bold text-green-300">Automation Triggers</h4>
                 <div className="space-y-2 text-white">
-                  <p><span className="font-bold">Low Oxygen:</span> Aerator activates automatically</p>
-                  <p><span className="font-bold">Feeding Time:</span> Automatic dispenser releases food</p>
-                  <p><span className="font-bold">Critical Events:</span> Instant mobile notifications</p>
-                  <p><span className="font-bold">Health Trends:</span> Predictive alerts for interventions</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Low Oxygen:</span> Aerator activates automatically</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Feeding Time:</span> Automatic dispenser releases food</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Critical Events:</span> Instant mobile notifications</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Health Trends:</span> Predictive alerts for interventions</p>
                 </div>
               </div>
             </div>

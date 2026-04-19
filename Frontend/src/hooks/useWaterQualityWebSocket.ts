@@ -11,10 +11,14 @@ interface UseWaterQualityWebSocketOptions {
 }
 
 export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOptions = {}) => {
-  const { autoConnect = true, url = process.env.REACT_APP_WS_URL || 'http://localhost:5000' } = options;
+  const defaultWsUrl =
+    (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_WS_URL ||
+    'http://localhost:5000';
+  const { autoConnect = true, url = defaultWsUrl } = options;
 
   const [isConnected, setIsConnected] = useState(false);
   const [latestReading, setLatestReading] = useState<WaterQualityReading | null>(null);
+  const [historyReadings, setHistoryReadings] = useState<WaterQualityReading[]>([]);
   const [statistics, setStatistics] = useState<WaterQualityStats | null>(null);
   const [alerts, setAlerts] = useState<HealthAlert[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +94,10 @@ export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOption
         setLatestReading(data);
       });
 
+      socketRef.current.on('water:history', (data: WaterQualityReading[]) => {
+        setHistoryReadings(Array.isArray(data) ? data : []);
+      });
+
       socketRef.current.on('water:stats', (data: WaterQualityStats) => {
         setStatistics(data);
       });
@@ -138,14 +146,22 @@ export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOption
     }
   }, []);
 
+  const requestHistory = useCallback((minutes: number = 60) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('water:request-history', minutes);
+    }
+  }, []);
+
   return {
     isConnected,
     latestReading,
+    historyReadings,
     statistics,
     alerts,
     error,
     requestLatestReading,
     requestStatistics,
     requestAlerts,
+    requestHistory,
   };
 };

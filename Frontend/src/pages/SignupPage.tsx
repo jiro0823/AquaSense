@@ -115,24 +115,24 @@ const SignupPage: React.FC = () => {
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
         <span className="text-sm font-medium">Home</span>
-      </button>
+      </button> 
 
-      <div className="flex w-full max-w-5xl overflow-hidden bg-white rounded-xl shadow-lg border border-gray-200">
+      <div className="flex w-full max-w-5xl overflow-hidden bg-white border border-gray-200 shadow-lg rounded-xl">
 
         {/* Left Side - Branding */}
         <div className="relative flex-col justify-between hidden p-8 overflow-hidden text-white lg:flex lg:w-5/12 xl:p-10 bg-gradient-to-br from-primary via-blue-700 to-blue-800">
-          <div className="absolute top-0 right-0 w-40 h-40 bg-accent opacity-20 rounded-full -mr-20 -mt-20"></div>
-          <div className="absolute bottom-0 left-0 w-32 h-32 bg-accent opacity-10 rounded-full -ml-16 -mb-14"></div>
+          <div className="absolute top-0 right-0 w-40 h-40 -mt-20 -mr-20 rounded-full bg-accent opacity-20"></div>
+          <div className="absolute bottom-0 left-0 w-32 h-32 -ml-16 rounded-full bg-accent opacity-10 -mb-14"></div>
           
           <div className="relative z-10 space-y-6">
             <div>
-              <h2 className="mb-4 text-3xl font-bold leading-tight xl:text-4xl">Join AquaSense</h2>
-              <p className="text-lg text-blue-100 leading-relaxed">
+              <h2 className="mb-4 text-3xl font-bold leading-tight text-white xl:text-4xl">Join AquaSense</h2>
+              <p className="text-lg leading-relaxed text-blue-100">
                 Start monitoring and controlling your aquaculture systems with real-time data, instant alerts, and automated solutions.
               </p>
             </div>
 
-            <div className="space-y-4 pt-6 border-t border-white border-opacity-20">
+            <div className="pt-6 space-y-4 border-t border-white border-opacity-20">
               <div className="flex items-start gap-3">
                 <span className="text-2xl">✓</span>
                 <p className="text-blue-100">Real-time water quality monitoring</p>
@@ -152,7 +152,7 @@ const SignupPage: React.FC = () => {
             </div>
           </div>
 
-          <p className="text-sm text-blue-100 relative z-10">Join thousands of successful farmers</p>
+          <p className="relative z-10 text-sm text-blue-100">Join thousands of successful farmers</p>
         </div>
 
         {/* Right Side - Form */}
@@ -172,7 +172,7 @@ const SignupPage: React.FC = () => {
 
           {/* Error Alert */}
           {error && (
-            <div className="alert alert-danger mb-6">
+            <div className="mb-6 alert alert-danger">
               <span>⚠️</span>
               <div>
                 <p className="font-semibold">Signup Error</p>
@@ -218,13 +218,13 @@ const SignupPage: React.FC = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="input-field pr-10"
+                  className="pr-10 input-field"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute transition right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-primary"
+                  className="absolute text-gray-600 transition -translate-y-1/2 right-3 top-1/2 hover:text-primary"
                   aria-label="Toggle password visibility"
                 >
                   {showPassword ? (
@@ -242,10 +242,10 @@ const SignupPage: React.FC = () => {
 
               {/* Password Strength Meter */}
               {password && (
-                <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                <div className="p-3 mt-3 rounded-lg bg-gray-50">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="text-xs font-medium text-gray-600">Strength:</div>
-                    <div className="flex-1 h-2 overflow-hidden rounded-full bg-gray-200">
+                    <div className="flex-1 h-2 overflow-hidden bg-gray-200 rounded-full">
                       <div
                         className="h-full transition-all duration-300"
                         style={{
@@ -285,7 +285,7 @@ const SignupPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute transition right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-primary"
+                  className="absolute text-gray-600 transition -translate-y-1/2 right-3 top-1/2 hover:text-primary"
                   aria-label="Toggle password visibility"
                 >
                   {showConfirmPassword ? (
@@ -301,7 +301,7 @@ const SignupPage: React.FC = () => {
                 </button>
               </div>
               {confirmPassword && password !== confirmPassword && (
-                <p className="text-xs text-red-600 mt-1">Passwords do not match</p>
+                <p className="mt-1 text-xs text-red-600">Passwords do not match</p>
               )}
             </div>
 
@@ -311,10 +311,10 @@ const SignupPage: React.FC = () => {
                 type="checkbox"
                 id="terms"
                 required
-                className="mt-1 w-4 h-4 text-accent rounded focus:ring-accent"
+                className="w-4 h-4 mt-1 rounded text-accent focus:ring-accent"
               />
               <label htmlFor="terms" className="text-sm text-gray-700">
-                I agree to the <Link to="#" className="text-accent hover:text-primary font-medium">Terms of Service</Link> and <Link to="#" className="text-accent hover:text-primary font-medium">Privacy Policy</Link>
+                I agree to the <Link to="#" className="font-medium text-accent hover:text-primary">Terms of Service</Link> and <Link to="#" className="font-medium text-accent hover:text-primary">Privacy Policy</Link>
               </label>
             </div>
 
@@ -322,7 +322,7 @@ const SignupPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="btn btn-primary w-full mt-6"
+              className="w-full mt-6 btn btn-primary"
             >
               {loading ? 'Creating Account...' : 'Create Account'}
             </button>
@@ -338,7 +338,7 @@ const SignupPage: React.FC = () => {
           {/* Sign In Link */}
           <Link
             to="/login"
-            className="btn btn-secondary w-full"
+            className="w-full btn btn-secondary"
           >
             Sign In
           </Link>

@@ -13,7 +13,7 @@ const AboutPage: React.FC = () => {
       <Navigation />
 
       {/* Hero Section */}
-      <section className="px-4 py-16 bg-gradient-to-br from-blue-50 via-white to-cyan-50 sm:px-6 sm:py-20">
+       <section className="relative px-4 py-16 overflow-hidden bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="grid items-center grid-cols-1 gap-12 md:grid-cols-2">
             {/* Left Side - Text */}

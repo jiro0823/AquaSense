@@ -10,13 +10,16 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
+  const apiBase = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
+    ?.VITE_API_URL || 'http://localhost:5000/api/v1';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:5000/api/v1/auth/login', {
+      const response = await fetch(`${apiBase.replace(/\/+$/, '')}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -44,7 +47,7 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
         setError(data.message || 'Login failed');
       }
     } catch (err) {
-      setError('Failed to connect to backend. Make sure it is running on port 5000.');
+      setError(`Failed to connect to backend. Make sure it is running at ${apiBase}.`);
     } finally {
       setLoading(false);
     }

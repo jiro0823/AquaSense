@@ -72,9 +72,13 @@ export const WaterQualityDashboard: React.FC = () => {
 
   // Periodic health check for backend connectivity
   useEffect(() => {
+    const apiBase = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
+      ?.VITE_API_URL || 'http://localhost:5000/api/v1';
+    const healthUrl = `${apiBase.replace(/\/api\/v\d+\/?$/, '')}/health`;
+
     const checkBackendHealth = async () => {
       try {
-        const response = await fetch('http://localhost:5000/health', {
+        const response = await fetch(healthUrl, {
           signal: AbortSignal.timeout(3000),
         });
         // Health check is just for logging - WebSocket connection is what matters

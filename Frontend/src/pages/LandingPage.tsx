@@ -21,17 +21,35 @@ const LandingPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const apiBase = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
+      ?.VITE_API_URL || 'http://localhost:5000/api/v1';
+    const normalizedBase = apiBase.replace(/\/+$/, '');
+    const healthUrl = `${normalizedBase}/health`;
+
     const checkBackend = async () => {
       try {
-        const response = await fetch('http://localhost:5000/health', {
+        const response = await fetch(healthUrl, {
           signal: AbortSignal.timeout(3000),
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/json',
+          },
         });
-        if (response.ok) {
-          const data: HealthResponse = await response.json();
-          setIsConnected(data.success ?? true);
-        } else {
+
+        if (!response.ok) {
           setIsConnected(false);
+          return;
         }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          setIsConnected(false);
+          return;
+        }
+
+        const data: HealthResponse = await response.json();
+        const hasUptime = typeof data.data?.uptime === 'number';
+        setIsConnected(data.success === true && data.statusCode === 200 && hasUptime);
       } catch (_err) {
         setIsConnected(false);
       } finally {
@@ -248,7 +266,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Benefits Section - High Impact */}
-      <section className="px-4 py-16 bg-surface sm:px-6 sm:py-20">
+      <section className="px-4 py-16 bg-gray-100 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
             <h2 className="mb-4 text-3xl font-bold text-cyan-500 md:text-4xl">Why Farmers Choose <span className="text-blue-800">AquaSense</span></h2>
@@ -318,7 +336,7 @@ const LandingPage: React.FC = () => {
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
             <h2 className="mb-4 text-3xl font-bold text-blue-800 md:text-5xl">Everything You Need in One Dashboard</h2>
-            <p className="text-gray-600 text-meduim">Monitor, control, and track your farm in real-time with a simple and intuitive interface.</p>
+            <p className="text-gray-600 text-medium">Monitor, control, and track your farm in real-time with a simple and intuitive interface.</p>
           </div>
 
           {/* Large Dashboard Mockup */}
@@ -524,7 +542,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Trust & Reliability Section */}
-      <section className="px-4 py-16 bg-gradient-to-br from-blue-50 to-cyan-50 sm:px-6 sm:py-20">
+      <section className="relative px-4 py-16 overflow-hidden bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
           <div className="grid items-center grid-cols-1 gap-12 md:grid-cols-2">
             {/* Left Side - Text */}
@@ -610,13 +628,13 @@ const LandingPage: React.FC = () => {
             <h2 className="mb-4 text-3xl font-bold text-white">Ready to Transform Your <span className="text-cyan-400">Aquaculture?</span></h2>
             <p className="max-w-2xl mx-auto mb-8 text-blue-200">
               Join other aquaculture operators using AquaSense for better yields, lower costs, and sustainable operations.
-            </p>
-            <Link
-              to="/signup"
-              className="inline-block px-8 py-4 text-lg font-bold text-white transition rounded-lg shadow-lg bg-gradient-to-r from-cyan-500 to-blue-700 hover:from-cyan-600 hover:to-blue-700"
-            >
-              Get Started Today
-            </Link>
+             </p>
+           <Link
+         to="/signup"
+         className="inline-block px-8 py-4 text-lg font-bold transition border rounded-lg border-cyan-500 text-cyan-500 hover:bg-cyan-500 hover:text-white"
+         >
+       Get Started Today
+    </Link>
           </div>
         </div>
       </section>

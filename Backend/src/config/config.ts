@@ -1,38 +1,50 @@
 import dotenv from 'dotenv';
+import path from 'path';
 
-dotenv.config();
+const envPath = path.resolve(__dirname, '..', '..', '.env');
+const fileEnv = dotenv.config({ path: envPath, override: true }).parsed || {};
+
+const getEnv = (key: string, fallback?: string): string | undefined => {
+  if (fileEnv[key] !== undefined) {
+    return fileEnv[key];
+  }
+  if (process.env[key] !== undefined) {
+    return process.env[key];
+  }
+  return fallback;
+};
 
 /**
  * Application configuration
  */
 export const config = {
   server: {
-    nodeEnv: process.env.NODE_ENV || 'development',
-    port: parseInt(process.env.PORT || '5000', 10),
-    host: process.env.HOST || 'localhost',
+    nodeEnv: getEnv('NODE_ENV', 'development') || 'development',
+    port: parseInt(getEnv('PORT', '5000') || '5000', 10),
+    host: getEnv('HOST', 'localhost') || 'localhost',
   },
   api: {
-    version: process.env.API_VERSION || 'v1',
+    version: getEnv('API_VERSION', 'v1') || 'v1',
   },
   logging: {
-    level: process.env.LOG_LEVEL || 'info',
+    level: getEnv('LOG_LEVEL', 'info') || 'info',
   },
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'http://localhost:3001'],
+    origin: getEnv('CORS_ORIGIN')?.split(',') || ['http://localhost:3000', 'http://localhost:3001'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   },
   database: {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432', 10),
-    name: process.env.DB_NAME || 'AquaSense',
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
-    dialect: (process.env.DB_DIALECT as 'postgres') || 'postgres',
+    host: getEnv('DB_HOST', 'localhost') || 'localhost',
+    port: parseInt(getEnv('DB_PORT', '5432') || '5432', 10),
+    name: getEnv('DB_NAME', 'AquaSense') || 'AquaSense',
+    user: getEnv('DB_USER', 'postgres') || 'postgres',
+    password: getEnv('DB_PASSWORD', 'postgres') || 'postgres',
+    dialect: (getEnv('DB_DIALECT', 'postgres') as 'postgres') || 'postgres',
   },
   jwt: {
-    secret: process.env.JWT_SECRET || 'your_jwt_secret_key_change_in_production',
-    expiry: process.env.JWT_EXPIRY || '24h',
+    secret: getEnv('JWT_SECRET', 'your_jwt_secret_key_change_in_production') || 'your_jwt_secret_key_change_in_production',
+    expiry: getEnv('JWT_EXPIRY', '24h') || '24h',
   },
 };

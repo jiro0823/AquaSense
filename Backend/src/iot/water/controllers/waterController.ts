@@ -6,6 +6,8 @@ import { Request, Response } from 'express';
 import { waterQualityService } from '../services/waterQualityService';
 import type { WaterQualityStats } from '../types';
 import { sendSuccess, sendError } from '../../../utils/response';
+import { logger } from '../../../utils/logger';
+import { config } from '../../../config/config';
 import { sensorReadingService } from '../../../services/sensorReadingService';
 
 const calculateHealthScore = (
@@ -83,6 +85,18 @@ const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStat
   };
 };
 
+type IngestMeta = {
+  lastReceivedAt: string | null;
+  lastSourceIp: string | null;
+  lastLocation: string | null;
+};
+
+const ingestMeta: IngestMeta = {
+  lastReceivedAt: null,
+  lastSourceIp: null,
+  lastLocation: null,
+};
+
 /**
  * Add new water quality reading
  * POST /api/v1/water/readings
@@ -115,10 +129,37 @@ export const addReading = async (_req: Request, res: Response): Promise<void> =>
       new Date(reading.timestamp)
     );
 
+    ingestMeta.lastReceivedAt = new Date(reading.timestamp).toISOString();
+    ingestMeta.lastSourceIp = _req.ip || null;
+    ingestMeta.lastLocation = reading.location || null;
+
+    logger.info('[ESP32][HTTP] Reading received', {
+      sourceIp: ingestMeta.lastSourceIp,
+      temperature: reading.temperature,
+      ph: reading.ph,
+      do: reading.do,
+      turbidity: reading.turbidity,
+      location: ingestMeta.lastLocation,
+    });
+
     sendSuccess(res, 201, 'Reading added successfully', reading);
   } catch (error) {
     sendError(res, 500, 'Failed to add reading', error instanceof Error ? error.message : 'Unknown error');
   }
+};
+
+/**
+ * Ingest status and expected ESP32 URL
+ * GET /api/v1/water/ingest-status
+ */
+export const getIngestStatus = (_req: Request, res: Response): void => {
+  const baseUrl = `http://${config.server.host}:${config.server.port}`;
+  sendSuccess(res, 200, 'Ingest status', {
+    expectedPostUrl: `${baseUrl}/api/v1/water/readings`,
+    lastReceivedAt: ingestMeta.lastReceivedAt,
+    lastSourceIp: ingestMeta.lastSourceIp,
+    lastLocation: ingestMeta.lastLocation,
+  });
 };
 
 /**

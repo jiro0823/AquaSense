@@ -12,6 +12,7 @@ import {
   getThresholds,
   updateThresholds,
   getDashboardData,
+  getIngestStatus,
 } from './controllers/waterController';
 
 const router = Router();
@@ -25,6 +26,7 @@ const router = Router();
 router.post('/readings', addReading); // Add new reading
 router.get('/readings/latest', getLatestReading); // Get latest
 router.get('/readings', getReadingsByTimeRange); // Get by time range
+router.get('/ingest-status', getIngestStatus); // ESP32 ingest status
 
 // Statistics endpoint
 router.get('/statistics', getStatistics); // Get statistics

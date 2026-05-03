@@ -1,0 +1,1 @@
+{"version":3,"file":"exampleService.d.ts","sourceRoot":"","sources":["../../src/services/exampleService.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAIH;;GAEG;AACH,qBAAa,cAAc;IACzB;;OAEG;IACG,cAAc,IAAI,OAAO,CAAC;QAAE,OAAO,EAAE,MAAM,CAAC;QAAC,SAAS,EAAE,MAAM,CAAA;KAAE,CAAC;CAgBxE;AAED,eAAO,MAAM,cAAc,gBAAuB,CAAC"}

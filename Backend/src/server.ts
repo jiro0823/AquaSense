@@ -73,6 +73,7 @@ const createApp = (): Express => {
 
   // ESP32 Integration Guide
   app.get('/integration-guide', (_req: Request, res: Response) => {
+    const baseUrl = `http://${config.server.host}:${config.server.port}`;
     const guide: ApiResponse = {
       success: true,
       statusCode: 200,
@@ -80,7 +81,7 @@ const createApp = (): Express => {
       data: {
         description: 'Backend is in PREPARATION mode - ready to receive real sensor data from ESP32',
         howtostartPosting: {
-          endpoint: 'POST http://localhost:5000/api/v1/water/readings',
+          endpoint: `POST ${baseUrl}/api/v1/water/readings`,
           headers: {
             'Content-Type': 'application/json',
           },
@@ -92,7 +93,7 @@ const createApp = (): Express => {
             location: 'Sensor Location Name',
             timestamp: '2026-04-12T05:31:28.462Z',
           },
-          example_curl: 'curl -X POST http://localhost:5000/api/v1/water/readings -H "Content-Type: application/json" -d \'{"temperature":25.5,"ph":7.4,"do":7.8,"turbidity":25.3,"location":"Main Tank","timestamp":"2026-04-12T05:31:28.462Z"}\'',
+          example_curl: `curl -X POST ${baseUrl}/api/v1/water/readings -H "Content-Type: application/json" -d '{"temperature":25.5,"ph":7.4,"do":7.8,"turbidity":25.3,"location":"Main Tank","timestamp":"2026-04-12T05:31:28.462Z"}'`,
           esp32_pseudocode: `
             // Every 5 seconds (adjust as needed):
             POST /api/v1/water/readings with:
@@ -178,25 +179,50 @@ const startServer = async (): Promise<void> => {
       // Continue without MQTT - REST API is still available
     }
 
-    // Start server
-    server = httpServer.listen(PORT, HOST, () => {
-      logger.info(`✓ Server is running on http://${HOST}:${PORT}`);
-      logger.info(`✓ Environment: ${config.server.nodeEnv}`);
-      logger.info(`✓ API Version: ${config.api.version}`);
-      logger.info(`✓ Database: ${config.database.name}`);
-      logger.info(`✓ CORS Origins: ${config.cors.origin.join(', ')}`);
-      logger.info(`✓ WebSocket server enabled at ws://${HOST}:${PORT}`);
-      logger.info('');
-      logger.info('═══════════════════════════════════════════════════════════════');
-      logger.info('  PREPARATION MODE - Ready for ESP32 Integration');
-      logger.info('═══════════════════════════════════════════════════════════════');
-      logger.info('✓ Backend is connected to PostgreSQL database');
-      logger.info('✓ Waiting for sensor data from ESP32');
-      logger.info('✓ Visit http://localhost:5000/integration-guide for ESP32 setup');
-      logger.info('✓ Frontend: http://localhost:3000');
-      logger.info('═══════════════════════════════════════════════════════════════');
-      logger.info('');
+    let retryTimer: NodeJS.Timeout | null = null;
+    const startListening = (): void => {
+      if (retryTimer) {
+        retryTimer = null;
+      }
+      server = httpServer.listen(PORT, HOST, () => {
+        const baseUrl = `http://${HOST}:${PORT}`;
+        logger.info(`✓ Server is running on ${baseUrl}`);
+        logger.info(`✓ Environment: ${config.server.nodeEnv}`);
+        logger.info(`✓ API Version: ${config.api.version}`);
+        logger.info(`✓ Database: ${config.database.name}`);
+        logger.info(`✓ CORS Origins: ${config.cors.origin.join(', ')}`);
+        logger.info(`✓ WebSocket server enabled at ws://${HOST}:${PORT}`);
+        logger.info('');
+        logger.info('═══════════════════════════════════════════════════════════════');
+        logger.info('  PREPARATION MODE - Ready for ESP32 Integration');
+        logger.info('═══════════════════════════════════════════════════════════════');
+        logger.info('✓ Backend is connected to PostgreSQL database');
+        logger.info('✓ Waiting for sensor data from ESP32');
+        logger.info(`✓ Visit ${baseUrl}/integration-guide for ESP32 setup`);
+        logger.info('✓ Frontend: http://localhost:3000');
+        logger.info('═══════════════════════════════════════════════════════════════');
+        logger.info('');
+      });
+    };
+
+    httpServer.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EADDRINUSE') {
+        if (!retryTimer) {
+          logger.warn(`Port ${PORT} is in use. Retrying in 2 seconds...`);
+          retryTimer = setTimeout(startListening, 2000);
+        }
+        return;
+      }
+
+      logger.error('Failed to start HTTP server', {
+        message: error.message,
+        code: error.code,
+      });
+      process.exit(1);
     });
+
+    // Start server
+    startListening();
 
     // Add WebSocket server stats endpoint
     app.get('/stats', (_req: Request, res: Response) => {

@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import { waterQualityService } from '../iot/water/services/waterQualityService';
 import { sensorReadingService } from '../services/sensorReadingService';
 import type { WaterQualityStats } from '../iot/water/types';
+import { config } from '../config/config';
 
 class WaterQualityWebSocketServer {
   private io: SocketIOServer;
@@ -17,7 +18,7 @@ class WaterQualityWebSocketServer {
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: ['http://localhost:3000', 'http://localhost:5000'],
+        origin: config.cors.origin,
         methods: ['GET', 'POST'],
       },
       transports: ['websocket', 'polling'],
@@ -205,8 +206,9 @@ class WaterQualityWebSocketServer {
     // 2. MQTT broker (optional)
     // 3. Direct database polling
     
+    const baseUrl = `http://${config.server.host}:${config.server.port}`;
     logger.info('✓ Backend in preparation mode - ready to receive ESP32 sensor data via API');
-    logger.info('✓ ESP32 should POST to: http://localhost:5000/api/v1/water/readings');
+    logger.info(`✓ ESP32 should POST to: ${baseUrl}/api/v1/water/readings`);
     logger.info('✓ Request format: { temperature, ph, do, turbidity, location, timestamp }');
   }
 }

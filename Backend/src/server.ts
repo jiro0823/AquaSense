@@ -2,10 +2,13 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
 import { createServer as createHTTPServer } from 'http';
 import { config } from './config/config';
 import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { requireHttps } from './middleware/requireHttps';
+import { csrfProtection } from './middleware/csrfProtection';
 import apiRoutes from './api';
 import { ApiResponse } from './types';
 import { WaterQualityWebSocketServer } from './websocket/waterQualityWS';
@@ -24,11 +27,13 @@ const createApp = (): Express => {
 
   // Security middleware
   app.use(helmet()); // Set various HTTP headers for security
+  app.use(requireHttps);
   app.use(cors(config.cors)); // Enable CORS with configured origins
 
   // Body parsing middleware
   app.use(express.json({ limit: '10kb' })); // Limit payload size to prevent large requests
   app.use(express.urlencoded({ limit: '10kb', extended: true }));
+  app.use(csrfProtection);
 
   // Request logging
   app.use(
@@ -38,6 +43,14 @@ const createApp = (): Express => {
       },
     })
   );
+
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  app.use('/api', apiLimiter);
 
   // Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
@@ -148,7 +161,7 @@ const startServer = async (): Promise<void> => {
     logger.info('Initializing database connection...');
     await initializeDatabase();
     logger.info('Initializing database models...');
-    initializeAllModels();
+    await initializeAllModels();
     logger.info('Synchronizing database schema...');
     await syncDatabase();
 
@@ -179,11 +192,7 @@ const startServer = async (): Promise<void> => {
       // Continue without MQTT - REST API is still available
     }
 
-    let retryTimer: NodeJS.Timeout | null = null;
     const startListening = (): void => {
-      if (retryTimer) {
-        retryTimer = null;
-      }
       server = httpServer.listen(PORT, HOST, () => {
         const baseUrl = `http://${HOST}:${PORT}`;
         logger.info(`✓ Server is running on ${baseUrl}`);
@@ -207,11 +216,8 @@ const startServer = async (): Promise<void> => {
 
     httpServer.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
-        if (!retryTimer) {
-          logger.warn(`Port ${PORT} is in use. Retrying in 2 seconds...`);
-          retryTimer = setTimeout(startListening, 2000);
-        }
-        return;
+        logger.error(`Port ${PORT} is already in use. Stop the existing process or change PORT in Backend/.env.`);
+        process.exit(1);
       }
 
       logger.error('Failed to start HTTP server', {

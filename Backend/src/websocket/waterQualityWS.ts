@@ -6,8 +6,8 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import { logger } from '../utils/logger';
-import { waterQualityService } from '../iot/water/services/waterQualityService';
 import { sensorReadingService } from '../services/sensorReadingService';
+import { alertService } from '../services/alert.service';
 import type { WaterQualityStats } from '../iot/water/types';
 import { config } from '../config/config';
 
@@ -57,8 +57,7 @@ class WaterQualityWebSocketServer {
       });
 
       socket.on('water:request-alerts', (limit: number) => {
-        const alerts = waterQualityService.getAlerts(limit || 50);
-        socket.emit('water:alerts', alerts);
+        void alertService.getAlerts(limit || 50).then((alerts) => socket.emit('water:alerts', alerts));
       });
 
       socket.on('water:request-history', async (minutes: number) => {
@@ -117,6 +116,12 @@ class WaterQualityWebSocketServer {
         average: dbStats.turbidity.average,
         min: dbStats.turbidity.min,
         max: dbStats.turbidity.max,
+      },
+      ammonia: {
+        current: dbStats.ammonia.current,
+        average: dbStats.ammonia.average,
+        min: dbStats.ammonia.min,
+        max: dbStats.ammonia.max,
       },
       healthScore: this.calculateHealthScore(
         dbStats.temperature.current,

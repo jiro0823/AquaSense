@@ -109,6 +109,7 @@ export class WaterQualityWebSocketHandler {
         ph: 7.5 + (Math.random() - 0.5) * 0.5,
         do: 7.5 + (Math.random() - 0.5) * 2,
         turbidity: 30 + (Math.random() - 0.5) * 20,
+        ammonia: 0.2 + Math.random() * 0.15,
         location: 'Main Water Body',
         timestamp: new Date(),
       };

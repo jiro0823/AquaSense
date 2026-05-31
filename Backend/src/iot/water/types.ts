@@ -9,6 +9,7 @@ export interface WaterQualityReading {
   ph: number; // pH level (0-14)
   do: number; // Dissolved Oxygen (0-14 mg/L)
   turbidity: number; // Turbidity (0-1000 NTU)
+  ammonia: number; // Ammonia (0-10 ppm)
   location: string;
   status: 'normal' | 'warning' | 'critical';
 }
@@ -59,6 +60,12 @@ export interface WaterQualityStats {
     max: number;
   };
   turbidity: {
+    current: number;
+    average: number;
+    min: number;
+    max: number;
+  };
+  ammonia: {
     current: number;
     average: number;
     min: number;

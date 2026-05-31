@@ -71,7 +71,7 @@ const LandingPage: React.FC = () => {
       {/* Hero Section */}
       <section className="relative px-4 py-16 overflow-hidden bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 sm:px-6 sm:py-20">
         <div className="relative mx-auto text-center max-w-7xl">
-          <h1 className="mb-6 text-4xl font-bold leading-tight text-cyan-500 sm:text-5xl md:text-6xl">
+          <h1 className="mb-6 text-3xl font-bold leading-tight text-cyan-500 sm:text-5xl md:text-6xl">
             Smart Water Quality Monitoring
             <span className="block mt-2 text-primary">for Crayfish Farming</span>
           </h1>
@@ -624,14 +624,14 @@ const LandingPage: React.FC = () => {
         }}
       >
         <div className="mx-auto max-w-7xl">
-          <div className="p-12 mt-24 text-center">
+          <div className="p-6 mt-10 text-center sm:p-10 sm:mt-16 lg:p-12 lg:mt-24">
             <h2 className="mb-4 text-3xl font-bold text-white">Ready to Transform Your <span className="text-cyan-400">Aquaculture?</span></h2>
             <p className="max-w-2xl mx-auto mb-8 text-blue-200">
               Join other aquaculture operators using AquaSense for better yields, lower costs, and sustainable operations.
              </p>
            <Link
          to="/signup"
-         className="inline-block px-8 py-4 text-lg font-bold transition border rounded-lg border-cyan-500 text-cyan-500 hover:bg-cyan-500 hover:text-white"
+         className="inline-flex items-center justify-center w-full px-8 py-4 text-lg font-bold transition border rounded-lg border-cyan-500 text-cyan-500 hover:bg-cyan-500 hover:text-white sm:w-auto"
          >
        Get Started Today
     </Link>

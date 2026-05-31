@@ -12,19 +12,18 @@ class ApiClient {
     this.baseURL = (import.meta.env.VITE_API_URL as string) || 'http://localhost:5000/api/v1';
     this.client = axios.create({
       baseURL: this.baseURL,
+      withCredentials: true,
       headers: {
         'Content-Type': 'application/json',
       },
       timeout: 10000,
     });
 
-    // Request interceptor
     this.client.interceptors.request.use((config) => {
-      // Add auth token if needed
-      // const token = localStorage.getItem('token');
-      // if (token) {
-      //   config.headers.Authorization = `Bearer ${token}`;
-      // }
+      const csrfToken = this.getCookieValue('aquasense_csrf');
+      if (csrfToken && ['post', 'put', 'patch', 'delete'].includes((config.method || '').toLowerCase())) {
+        config.headers['X-CSRF-Token'] = csrfToken;
+      }
       return config;
     });
 
@@ -34,8 +33,7 @@ class ApiClient {
       (error: AxiosError) => {
         // Handle errors globally
         if (error.response?.status === 401) {
-          // Handle unauthorized - redirect to login
-          // window.location.href = '/login';
+          localStorage.removeItem('user');
         }
         return Promise.reject(error);
       }
@@ -60,6 +58,29 @@ class ApiClient {
   async delete<T = unknown>(url: string): Promise<SuccessResponse<T>> {
     const response = await this.client.delete<ApiResponse<T>>(url);
     return response.data as SuccessResponse<T>;
+  }
+
+  private getCookieValue(name: string): string | null {
+    const cookie = document.cookie
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${name}=`));
+
+    return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : null;
+  }
+
+  async verifyAuth(): Promise<boolean> {
+    try {
+      await this.get('/auth/verify');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async logout(): Promise<void> {
+    await this.post('/auth/logout');
+    localStorage.removeItem('user');
   }
 }
 

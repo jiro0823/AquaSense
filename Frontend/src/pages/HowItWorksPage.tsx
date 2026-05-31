@@ -69,7 +69,7 @@ const HowItWorksPage: React.FC = () => {
 
       <section className="relative px-4 py-16 overflow-hidden bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 sm:px-6 sm:py-20">
         <div className="mx-auto max-w-7xl">
-          <h1 className="max-w-4xl mb-6 text-4xl font-bold text-cyan-500 sm:text-5xl md:text-6xl">
+          <h1 className="max-w-4xl mb-6 text-3xl font-bold text-cyan-500 sm:text-5xl md:text-6xl">
             <span className="block mt-2 text-primary">Smart Monitoring</span> Made Simple for Everyday Farm Use
           </h1>
           <p className="max-w-3xl text-base text-slate-600 sm:text-lg">
@@ -80,9 +80,9 @@ const HowItWorksPage: React.FC = () => {
 
       <div className="px-4 py-20 mx-auto max-w-7xl sm:px-6">
         <section className="mb-20">
-          <div className="flex items-end justify-between mb-8">
-            <h2 className="text-4xl font-bold text-primary">Aqua Sense in 4 Easy Steps</h2>
-            <span className="hidden text-sm font-medium md:block text-primary">Simple workflow</span>
+          <div className="flex flex-col gap-2 mb-8 sm:flex-row sm:items-end sm:justify-between">
+            <h2 className="text-3xl font-bold text-primary sm:text-4xl">Aqua Sense in 4 Easy Steps</h2>
+            <span className="text-sm font-medium text-primary sm:block">Simple workflow</span>
           </div>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
             {coreSteps.map((step, index) => (
@@ -123,7 +123,7 @@ const HowItWorksPage: React.FC = () => {
         </section>
 
         <section className="mb-20">
-          <h2 className="mb-8 text-5xl font-bold text-center text-cyan-500">A Day With <span className="text-primary">AquaSense</span></h2>
+          <h2 className="mb-8 text-3xl font-bold text-center text-cyan-500 sm:text-4xl md:text-5xl">A Day With <span className="text-primary">AquaSense</span></h2>
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
             {dailyFlow.map((item) => (
               <article key={item.time} className="p-6 border rounded-2xl bg-slate-50 border-slate-200">
@@ -135,7 +135,7 @@ const HowItWorksPage: React.FC = () => {
         </section>
 
         <section>
-          <h2 className="mb-8 text-5xl font-bold text-primary">Why Farmers Prefer This Setup</h2>
+          <h2 className="mb-8 text-3xl font-bold text-primary sm:text-4xl md:text-5xl">Why Farmers Prefer This Setup</h2>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             {highlights.map((item) => (
               <article key={item.title} className="transition border bg-slate-50 p-7 rounded-2xl border-slate-200 hover:border-primary hover:shadow-md"
@@ -155,7 +155,7 @@ const HowItWorksPage: React.FC = () => {
           </p>
           <a
   href="/dashboard"
-  className="inline-block px-6 py-3 font-bold transition border rounded-lg border-primary text-primary hover:bg-primary hover:text-white"
+  className="inline-flex items-center justify-center w-full px-6 py-3 font-bold transition border rounded-lg border-primary text-primary hover:bg-primary hover:text-white sm:w-auto"
 >
   Open Dashboard
 </a>

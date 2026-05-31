@@ -30,16 +30,16 @@ const blogCards: BlogCard[] = [
 
 const NewsBlogsSection: React.FC = () => {
   return (
-    <section className="px-6 bg-white py-28">
+    <section className="px-6 bg-white py-16 sm:py-24">
       <div className="mx-auto max-w-7xl">
         <div className="flex flex-col gap-4 mb-14 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-medium text-primary">News & Blogs <span className="text-cyan-300">&rarr;</span></p>    
-            <h2 className="mt-2 text-4xl font-bold text-blue-900 md:text-5xl">Our Latest News & Blogs</h2>
+            <h2 className="mt-2 text-3xl font-bold text-blue-900 sm:text-4xl md:text-5xl">Our Latest News & Blogs</h2>
           </div>
           <button
             type="button"
-            className="px-5 py-2 text-sm font-semibold text-white transition rounded-full bg-primary hover:brightness-95"
+            className="w-full px-5 py-2 text-sm font-semibold text-white transition rounded-full bg-primary hover:brightness-95 sm:w-auto"
           >
             View All Blogs
           </button>

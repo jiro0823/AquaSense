@@ -18,7 +18,7 @@ const AboutPage: React.FC = () => {
           <div className="grid items-center grid-cols-1 gap-12 md:grid-cols-2">
             {/* Left Side - Text */}
             <div>
-              <h1 className="mb-6 text-4xl font-bold sm:text-5xl md:text-6xl text-primary">
+              <h1 className="mb-6 text-3xl font-bold text-primary sm:text-5xl md:text-6xl">
                 About <span className="text-accent">AquaSense</span>
               </h1>
               <p className="text-base text-gray-700 sm:text-lg">
@@ -44,7 +44,7 @@ const AboutPage: React.FC = () => {
       <div className="px-4 py-12 mx-auto max-w-7xl sm:px-6">
         {/* System Overview */}
         <section className="mb-20">
-          <h2 className="mb-8 text-4xl font-bold text-primary">Our Integrated System</h2>
+          <h2 className="mb-8 text-3xl font-bold text-primary sm:text-4xl">Our Integrated System</h2>
           <p className="mb-6 text-lg leading-relaxed text-gray-700">
            AquaSense is a comprehensive IoT-powered water quality monitoring solution designed to enhance sustainable aquaculture operations. Our system integrates advanced sensor technology, renewable energy, and intelligent automation to create a smart ecosystem that is both environmentally responsible and highly efficient. By enabling real-time monitoring and data-driven insights, AquaSense empowers users to optimize water conditions, improve productivity, and ensure healthier aquatic environments.
           </p>
@@ -164,7 +164,7 @@ const AboutPage: React.FC = () => {
 
         {/* Key Benefits */}
         <section>
-          <h2 className="mb-8 text-3xl font-bold text-primary">Why AquaSense?</h2>
+          <h2 className="mb-8 text-2xl font-bold text-primary sm:text-3xl">Why AquaSense?</h2>
           <div className="grid grid-cols-1 gap-10 mb-12 md:grid-cols-2">
             <div className="flex gap-4">
               <div className="flex-shrink-0 text-3xl">💰</div>

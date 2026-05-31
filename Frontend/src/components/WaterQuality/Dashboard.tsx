@@ -1,19 +1,9 @@
-/**
- * Water Quality Dashboard with Charts
- * Real-time monitoring with sensor graphs - Clean, Professional Design
- */
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useWaterQualityWebSocket } from '../../hooks/useWaterQualityWebSocket';
+import { apiClient } from '../../services/apiClient';
+import type { PredictiveAnalyticsResult, PredictionLog, SmsLogEntry } from '../../types/water';
 
 interface ChartDataPoint {
   time: string;
@@ -23,18 +13,16 @@ interface ChartDataPoint {
   turbidity?: number;
 }
 
+interface FeedingSchedule {
+  id: string;
+  date: string | null;
+  time: string;
+  enabled: boolean;
+  label: string | null;
+}
+
 export const WaterQualityDashboard: React.FC = () => {
-  const {
-    isConnected,
-    latestReading,
-    historyReadings,
-    statistics,
-    alerts,
-    error: wsError,
-    requestStatistics,
-    requestLatestReading,
-    requestHistory,
-  } =
+  const { isConnected, latestReading, historyReadings, statistics, alerts, error: wsError, requestStatistics, requestLatestReading, requestHistory } =
     useWaterQualityWebSocket();
   const navigate = useNavigate();
 
@@ -42,6 +30,27 @@ export const WaterQualityDashboard: React.FC = () => {
   const [tankWaterLevel, setTankWaterLevel] = useState(78);
   const [isDraining, setIsDraining] = useState(false);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [feedingSchedules, setFeedingSchedules] = useState<FeedingSchedule[]>([]);
+  const [feedingLoading, setFeedingLoading] = useState(false);
+  const [manualBusy, setManualBusy] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [scheduleLabel, setScheduleLabel] = useState('');
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
+  const [editLabel, setEditLabel] = useState('');
+  const [predictiveWarning, setPredictiveWarning] = useState<PredictiveAnalyticsResult | null>(null);
+  const [smsLogs, setSmsLogs] = useState<SmsLogEntry[]>([]);
+  const [activeSection, setActiveSection] = useState('overview');
+
+  const goToSection = (sectionId: string) => {
+    setActiveSection(sectionId);
+    const node = document.getElementById(sectionId);
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   useEffect(() => {
     if (isConnected) {
@@ -70,33 +79,6 @@ export const WaterQualityDashboard: React.FC = () => {
     setChartData(sorted);
   }, [historyReadings]);
 
-  // Periodic health check for backend connectivity
-  useEffect(() => {
-    const apiBase = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
-      ?.VITE_API_URL || 'http://localhost:5000/api/v1';
-    const healthUrl = `${apiBase.replace(/\/api\/v\d+\/?$/, '')}/health`;
-
-    const checkBackendHealth = async () => {
-      try {
-        const response = await fetch(healthUrl, {
-          signal: AbortSignal.timeout(3000),
-        });
-        // Health check is just for logging - WebSocket connection is what matters
-        if (!response.ok && isConnected) {
-          console.warn('Backend health check failed, but WebSocket still connected');
-        }
-      } catch (_err) {
-        if (isConnected) {
-          console.warn('Backend health check failed');
-        }
-      }
-    };
-
-    // Check every 10 seconds
-    const healthCheckInterval = setInterval(checkBackendHealth, 10000);
-    return () => clearInterval(healthCheckInterval);
-  }, [isConnected]);
-
   useEffect(() => {
     if (latestReading) {
       const time = new Date(latestReading.timestamp).toLocaleTimeString();
@@ -115,6 +97,46 @@ export const WaterQualityDashboard: React.FC = () => {
       });
     }
   }, [latestReading]);
+
+  const loadFeedingSchedules = async () => {
+    try {
+      setFeedingLoading(true);
+      const response = await apiClient.get<FeedingSchedule[]>('/feeding/schedules');
+      setFeedingSchedules(response.data || []);
+    } catch (error) {
+      console.error('Failed to load feeding schedules', error);
+    } finally {
+      setFeedingLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadFeedingSchedules();
+  }, []);
+
+  useEffect(() => {
+    const loadPredictiveBundle = async () => {
+      try {
+        const response = await apiClient.get<{
+          predictiveWarning: PredictiveAnalyticsResult;
+          predictionHistory: PredictionLog[];
+          smsLogs: SmsLogEntry[];
+        }>('/water/dashboard');
+
+        setPredictiveWarning(response.data.predictiveWarning);
+        setSmsLogs(response.data.smsLogs || []);
+      } catch (error) {
+        console.error('Failed to load predictive bundle', error);
+      }
+    };
+
+    void loadPredictiveBundle();
+    const interval = setInterval(() => {
+      void loadPredictiveBundle();
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const batteryInterval = setInterval(() => {
@@ -136,346 +158,337 @@ export const WaterQualityDashboard: React.FC = () => {
     }, 300);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('user');
+  const handleLogout = async () => {
+    try {
+      await apiClient.logout();
+    } finally {
+      localStorage.removeItem('user');
+    }
     navigate('/login');
   };
 
+  const triggerManual = async (action: 'ON' | 'OFF' | 'TRIGGER') => {
+    try {
+      setManualBusy(true);
+      await apiClient.post('/feeding/manual', { action });
+      await loadFeedingSchedules();
+    } catch (error) {
+      console.error('Failed to trigger manual command', error);
+    } finally {
+      setManualBusy(false);
+    }
+  };
+
+  const addSchedule = async () => {
+    if (!scheduleTime) return;
+    try {
+      setFeedingLoading(true);
+      await apiClient.post('/feeding/schedules', {
+        date: scheduleDate || null,
+        time: scheduleTime,
+        label: scheduleLabel || null,
+      });
+      setScheduleDate('');
+      setScheduleTime('');
+      setScheduleLabel('');
+      await loadFeedingSchedules();
+    } catch (error) {
+      console.error('Failed to add feeding schedule', error);
+      setFeedingLoading(false);
+    }
+  };
+
+  const toggleSchedule = async (item: FeedingSchedule) => {
+    try {
+      setFeedingLoading(true);
+      await apiClient.put(`/feeding/schedules/${item.id}`, {
+        enabled: !item.enabled,
+      });
+      await loadFeedingSchedules();
+    } catch (error) {
+      console.error('Failed to update schedule', error);
+      setFeedingLoading(false);
+    }
+  };
+
+  const removeSchedule = async (id: string) => {
+    try {
+      setFeedingLoading(true);
+      await apiClient.delete(`/feeding/schedules/${id}`);
+      await loadFeedingSchedules();
+    } catch (error) {
+      console.error('Failed to remove schedule', error);
+      setFeedingLoading(false);
+    }
+  };
+
+  const startEditSchedule = (item: FeedingSchedule) => {
+    setEditingScheduleId(item.id);
+    setEditDate(item.date || '');
+    setEditTime(item.time);
+    setEditLabel(item.label || '');
+  };
+
+  const cancelEditSchedule = () => {
+    setEditingScheduleId(null);
+    setEditDate('');
+    setEditTime('');
+    setEditLabel('');
+  };
+
+  const saveEditSchedule = async (id: string) => {
+    if (!editTime) return;
+    try {
+      setFeedingLoading(true);
+      await apiClient.put(`/feeding/schedules/${id}`, {
+        date: editDate || null,
+        time: editTime,
+        label: editLabel || null,
+      });
+      cancelEditSchedule();
+      await loadFeedingSchedules();
+    } catch (error) {
+      console.error('Failed to edit schedule', error);
+      setFeedingLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-white">
-      {/* Header Navigation */}
-      <nav className="sticky top-0 z-50 shadow-md header">
-        <div className="px-6 py-4 mx-auto max-w-7xl">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="text-3xl">🌊</div>
-              <div>
-                <h1 className="text-2xl font-bold text-primary">AquaSense Dashboard</h1>
-                <p className="text-xs text-gray-600">Real-time Water Quality Monitoring</p>
+    <div className="min-h-screen bg-[#0b0b10] text-gray-200">
+      <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
+        <aside className="border-b border-white/10 bg-[#101116] p-5 lg:min-h-screen lg:border-b-0 lg:border-r">
+          <div className="mb-6">
+            <p className="text-xs uppercase tracking-[0.2em] text-gray-500">AquaSense</p>
+            <h1 className="mt-2 text-xl font-bold text-white">Water Quality Console</h1>
+            <p className="mt-1 text-xs text-gray-400">Dark operations panel</p>
+          </div>
+
+          <div className="space-y-5">
+            <div>
+              <p className="mb-2 text-xs font-semibold tracking-wider text-gray-500 uppercase">Sections</p>
+              <div className="space-y-2 text-sm">
+                <button onClick={() => goToSection('overview')} className={`w-full rounded-lg px-3 py-2 text-left ${activeSection === 'overview' ? 'border border-white/10 bg-[#1a1b22] text-white' : 'text-gray-400 hover:bg-[#16171d]'}`}>Overview</button>
+                <button onClick={() => goToSection('parameters')} className={`w-full rounded-lg px-3 py-2 text-left ${activeSection === 'parameters' ? 'border border-white/10 bg-[#1a1b22] text-white' : 'text-gray-400 hover:bg-[#16171d]'}`}>Parameters</button>
+                <button onClick={() => goToSection('feeding')} className={`w-full rounded-lg px-3 py-2 text-left ${activeSection === 'feeding' ? 'border border-white/10 bg-[#1a1b22] text-white' : 'text-gray-400 hover:bg-[#16171d]'}`}>Feeding</button>
+                <button onClick={() => goToSection('alerts')} className={`w-full rounded-lg px-3 py-2 text-left ${activeSection === 'alerts' ? 'border border-white/10 bg-[#1a1b22] text-white' : 'text-gray-400 hover:bg-[#16171d]'}`}>Alerts & Logs</button>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              {isConnected ? (
-                <div className="flex items-center gap-2 text-green-800 bg-green-100 badge">
-                  <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
-                  <span className="text-sm font-medium">Connected</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-red-800 bg-red-100 badge">
-                  <span className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></span>
-                  <span className="text-sm font-medium">Offline</span>
-                </div>
-              )}
-              <button
-                onClick={handleLogout}
-                className="btn btn-danger btn-sm"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
 
-      {/* Error Alerts */}
-      {wsError && (
-        <div className="mx-auto mt-4 alert alert-danger max-w-7xl">
-          <span className="text-lg">⚠️</span>
-          <div>
-            <p className="font-semibold">Connection Error</p>
-            <p className="text-sm">{wsError}</p>
-          </div>
-        </div>
-      )}
-
-      <div className="px-6 py-8 mx-auto space-y-8 max-w-7xl">
-        
-        {/* Top Status Cards */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {/* Health Score */}
-          {statistics && (
-            <div className="border-b-4 card bg-gradient-to-br from-blue-50 to-cyan-50 border-accent">
-              <div className="flex items-start justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-600">Health Score</h3>
-                <span className="text-2xl">🎯</span>
-              </div>
-              <div className="metric">
-                <div className="metric-value text-accent">{Math.round(statistics.healthScore)}</div>
-                <p className="text-xs font-medium text-gray-600">Water Quality Rating</p>
-                <div className="h-2 mt-3 overflow-hidden bg-gray-200 rounded-full">
-                  <div
-                    className="h-full transition-all duration-1000 rounded-full bg-gradient-to-r from-accent to-cyan-500"
-                    style={{ width: `${statistics.healthScore}%` }}
-                  />
+            <div>
+              <p className="mb-2 text-xs font-semibold tracking-wider text-gray-500 uppercase">System</p>
+              <div className="space-y-2 rounded-xl border border-white/10 bg-[#15161c] p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">Connection</span>
+                  <span className={isConnected ? 'text-emerald-400' : 'text-rose-400'}>{isConnected ? 'Online' : 'Offline'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">Battery</span>
+                  <span className="text-white">{batteryLevel.toFixed(0)}%</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">Tank</span>
+                  <span className="text-white">{tankWaterLevel.toFixed(0)}%</span>
                 </div>
               </div>
             </div>
-          )}
 
-          {/* Battery Level */}
-          <div className="border-b-4 card bg-gradient-to-br from-yellow-50 to-amber-50 border-warning">
-            <div className="flex items-start justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-600">Battery Level</h3>
-              <span className="text-2xl">🔋</span>
-            </div>
-            <div className="metric">
-              <div className="metric-value text-warning">{batteryLevel.toFixed(0)}%</div>
-              <p className="text-xs font-medium text-gray-600">Solar Panel</p>
-              <div className="h-2 mt-3 overflow-hidden bg-gray-200 rounded-full">
-                <div 
-                  className="h-full rounded-full bg-gradient-to-r from-warning to-orange-500" 
-                  style={{ width: `${batteryLevel}%` }} 
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Tank Level */}
-          <div className="border-b-4 card bg-gradient-to-br from-cyan-50 to-blue-50 border-accent">
-            <div className="flex items-start justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-600">Tank Level</h3>
-              <span className="text-2xl">💧</span>
-            </div>
-            <div className="metric">
-              <div className="metric-value text-primary">{tankWaterLevel.toFixed(0)}%</div>
-              <p className="text-xs font-medium text-gray-600">Water Reserve</p>
-              <div className="h-2 mt-3 overflow-hidden bg-gray-200 rounded-full">
-                <div 
-                  className="h-full rounded-full bg-gradient-to-r from-primary to-blue-500" 
-                  style={{ width: `${tankWaterLevel}%` }} 
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Drain Control */}
-          <div className="flex flex-col justify-between border-b-4 card bg-gradient-to-br from-red-50 to-orange-50 border-danger">
-            <h3 className="mb-4 text-sm font-semibold text-gray-600">Tank Control</h3>
-            <button
-              onClick={handleDrainWater}
-              disabled={isDraining || tankWaterLevel === 0}
-              className="w-full btn btn-danger"
-            >
-              {isDraining ? '🔄 Draining...' : tankWaterLevel === 0 ? '✓ Empty' : '💦 Drain'}
+            <button onClick={handleLogout} className="w-full px-3 py-2 text-sm font-semibold text-white rounded-lg bg-rose-600 hover:bg-rose-500">
+              Logout
             </button>
           </div>
-        </div>
+        </aside>
 
-        {/* Main Parameters Section */}
-        {statistics ? (
-          <div className="space-y-6">
-            {/* Parameters Title */}
-            <h2 className="section-title">
-              <span className="text-2xl">📊</span>
-              Real-Time Parameters
-            </h2>
-
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              {/* Temperature Chart */}
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-primary">🌡️ Temperature</h3>
-                  <span className="text-3xl font-bold text-orange-500">{statistics.temperature.current.toFixed(1)}°C</span>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.temperature.average.toFixed(1)}°C</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.temperature.min.toFixed(1)}°C</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.temperature.max.toFixed(1)}°C</p>
-                  </div>
-                </div>
-
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={chartData.slice(-20)}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-                    <XAxis dataKey="time" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} 
-                      formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(1)}°C` : 'N/A')}
-                      labelStyle={{ color: '#1f2937' }}
-                    />
-                    <Line type="monotone" dataKey="temperature" stroke="#f97316" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
-                  </LineChart>
-                </ResponsiveContainer>
+        <main className="p-4 md:p-6 lg:p-8">
+          <header id="overview" className="mb-6 rounded-2xl border border-white/10 bg-gradient-to-r from-[#1a1b22] to-[#121317] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Live Monitoring Dashboard</h2>
+                <p className="text-sm text-gray-400">Black and gray command center layout</p>
               </div>
-
-              {/* pH Chart */}
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-primary">🧪 pH Level</h3>
-                  <span className="text-3xl font-bold text-purple-600">{statistics.ph.current.toFixed(2)}</span>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.ph.average.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.ph.min.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.ph.max.toFixed(2)}</p>
-                  </div>
-                </div>
-
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={chartData.slice(-20)}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-                    <XAxis dataKey="time" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis domain={['auto', 'auto']} stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} 
-                      formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(2)} pH` : 'N/A')}
-                      labelStyle={{ color: '#1f2937' }}
-                    />
-                    <Line type="monotone" dataKey="ph" stroke="#a855f7" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Dissolved Oxygen Chart */}
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-primary">💨 Dissolved Oxygen</h3>
-                  <span className="text-3xl font-bold text-green-600">{statistics.do.current.toFixed(2)} mg/L</span>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.do.average.toFixed(2)} mg/L</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.do.min.toFixed(2)} mg/L</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.do.max.toFixed(2)} mg/L</p>
-                  </div>
-                </div>
-
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={chartData.slice(-20)}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-                    <XAxis dataKey="time" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis domain={[0, 15]} stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} 
-                      formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(2)} mg/L` : 'N/A')}
-                      labelStyle={{ color: '#1f2937' }}
-                    />
-                    <Line type="monotone" dataKey="do" stroke="#22c55e" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Turbidity Chart */}
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-primary">🌊 Turbidity</h3>
-                  <span className="text-3xl font-bold text-yellow-600">{statistics.turbidity.current.toFixed(1)} NTU</span>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 pb-4 mb-4 border-b border-gray-200">
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Average</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.turbidity.average.toFixed(1)} NTU</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Min</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.turbidity.min.toFixed(1)} NTU</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-gray-600 uppercase">Max</p>
-                    <p className="text-lg font-semibold text-gray-900">{statistics.turbidity.max.toFixed(1)} NTU</p>
-                  </div>
-                </div>
-
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={chartData.slice(-20)}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-                    <XAxis dataKey="time" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis domain={['auto', 'auto']} stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} 
-                      formatter={(value: any) => (value !== undefined ? `${Number(value).toFixed(1)} NTU` : 'N/A')}
-                      labelStyle={{ color: '#1f2937' }}
-                    />
-                    <Line type="monotone" dataKey="turbidity" stroke="#eab308" dot={false} strokeWidth={3} isAnimationActive animationDuration={450} />
-                  </LineChart>
-                </ResponsiveContainer>
+              <div className={`rounded-full px-3 py-1 text-sm font-semibold ${isConnected ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>
+                {isConnected ? 'Connected' : 'Disconnected'}
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-16 rounded-lg bg-surface">
-            <div className="mb-4 text-5xl animate-bounce">⏳</div>
-            <p className="text-lg font-semibold text-gray-900">Loading sensor data...</p>
-            <p className="mt-2 text-sm text-gray-600">Please wait while we connect to your IoT device</p>
-          </div>
-        )}
+          </header>
 
-        {/* Alerts Section */}
-        <div>
-          <h2 className="section-title">
-            <span className="text-2xl">🚨</span>
-            Recent Alerts
-          </h2>
+          {wsError && <div className="p-4 mb-6 text-sm border rounded-xl border-rose-500/40 bg-rose-500/10 text-rose-200">Connection error: {wsError}</div>}
 
-          {alerts.length === 0 ? (
-            <div className="py-12 text-center border-l-4 card bg-gradient-to-br from-green-50 to-emerald-50 border-success">
-              <p className="mb-2 text-3xl">✓</p>
-              <p className="text-lg font-bold text-gray-900">All Clear</p>
-              <p className="mt-2 text-sm text-gray-600">Water quality is stable and within normal ranges</p>
+          <section className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <p className="text-xs tracking-wide text-gray-500 uppercase">Health Score</p>
+              <p className="mt-2 text-3xl font-bold text-white">{statistics ? Math.round(statistics.healthScore) : '--'}</p>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 overflow-y-auto max-h-96">
-              {alerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className={`alert ${
-                    alert.severity === 'critical'
-                      ? 'alert-danger'
-                      : alert.severity === 'warning'
-                        ? 'alert-warning'
-                        : 'alert-info'
-                  }`}
-                >
-                  <span className="flex-shrink-0 text-lg font-bold">
-                    {alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '🟡' : 'ℹ️'}
-                  </span>
-                  <div className="flex-1">
-                    <p className="font-bold capitalize">{alert.parameter} Alert</p>
-                    <p className="mt-1 text-sm">{alert.message}</p>
-                    <p className="mt-1 text-xs opacity-75">{new Date(alert.timestamp).toLocaleTimeString()}</p>
-                  </div>
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <p className="text-xs tracking-wide text-gray-500 uppercase">Battery</p>
+              <p className="mt-2 text-3xl font-bold text-amber-300">{batteryLevel.toFixed(0)}%</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <p className="text-xs tracking-wide text-gray-500 uppercase">Tank Reserve</p>
+              <p className="mt-2 text-3xl font-bold text-cyan-300">{tankWaterLevel.toFixed(0)}%</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <p className="text-xs tracking-wide text-gray-500 uppercase">Tank Control</p>
+              <button onClick={handleDrainWater} disabled={isDraining || tankWaterLevel === 0} className="w-full px-3 py-2 mt-2 text-sm font-semibold text-white rounded-lg bg-rose-600 disabled:opacity-40">
+                {isDraining ? 'Draining...' : tankWaterLevel === 0 ? 'Empty' : 'Drain Water'}
+              </button>
+            </div>
+          </section>
+
+          {predictiveWarning && (
+            <section className="mb-6 rounded-xl border border-amber-400/30 bg-[#18161a] p-5">
+              <h3 className="text-lg font-semibold text-white">Predictive Warning</h3>
+              <div className="grid grid-cols-1 gap-2 mt-3 text-sm md:grid-cols-2">
+                <p><span className="text-gray-400">Risk:</span> {predictiveWarning.warningCard.riskLevel}</p>
+                <p><span className="text-gray-400">Confidence:</span> {predictiveWarning.warningCard.confidence}%</p>
+                <p><span className="text-gray-400">Issue:</span> {predictiveWarning.warningCard.predictedIssue}</p>
+                <p><span className="text-gray-400">Action:</span> {predictiveWarning.warningCard.action}</p>
+              </div>
+            </section>
+          )}
+
+          {statistics ? (
+            <section id="parameters" className="grid grid-cols-1 gap-4 mb-6 xl:grid-cols-2">
+              {[
+                { key: 'temperature', label: 'Temperature (C)', color: '#fb923c', fill: '#7c2d12' },
+                { key: 'ph', label: 'pH Level', color: '#a78bfa', fill: '#4c1d95' },
+                { key: 'do', label: 'Dissolved Oxygen', color: '#34d399', fill: '#064e3b' },
+                { key: 'turbidity', label: 'Turbidity', color: '#facc15', fill: '#713f12' },
+              ].map((item) => (
+                <div key={item.key} className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+                  <h4 className="mb-4 text-sm font-semibold tracking-wide text-gray-400 uppercase">{item.label}</h4>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <AreaChart data={chartData.slice(-20)}>
+                      <defs>
+                        <linearGradient id={`legacy-${item.key}-gradient`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={item.color} stopOpacity={0.5} />
+                          <stop offset="55%" stopColor={item.fill} stopOpacity={0.22} />
+                          <stop offset="100%" stopColor={item.fill} stopOpacity={0.04} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#2a2c35" vertical={false} />
+                      <XAxis dataKey="time" stroke="#6b7280" style={{ fontSize: '11px' }} />
+                      <YAxis stroke="#6b7280" style={{ fontSize: '11px' }} />
+                      <Tooltip contentStyle={{ backgroundColor: '#101014', border: '1px solid #2a2c35', borderRadius: '10px', color: '#f3f4f6' }} />
+                      <Area
+                        type="monotone"
+                        dataKey={item.key}
+                        stroke={item.color}
+                        fill={`url(#legacy-${item.key}-gradient)`}
+                        dot={false}
+                        activeDot={{ r: 4, strokeWidth: 0, fill: item.color }}
+                        strokeWidth={2.5}
+                        isAnimationActive
+                        animationDuration={450}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               ))}
-            </div>
+            </section>
+          ) : (
+            <div className="mb-6 rounded-xl border border-white/10 bg-[#14151b] p-8 text-center text-gray-400">Loading sensor data...</div>
           )}
-        </div>
 
+          <section id="feeding" className="grid grid-cols-1 gap-4 mb-6 xl:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <h3 className="mb-3 text-lg font-semibold text-white">Feeding Control</h3>
+              <div className="grid grid-cols-3 gap-2">
+                <button disabled={manualBusy} onClick={() => triggerManual('ON')} className="px-3 py-2 text-sm font-semibold text-white rounded-lg bg-emerald-600">ON</button>
+                <button disabled={manualBusy} onClick={() => triggerManual('OFF')} className="px-3 py-2 text-sm font-semibold text-white rounded-lg bg-rose-600">OFF</button>
+                <button disabled={manualBusy} onClick={() => triggerManual('TRIGGER')} className="px-3 py-2 text-sm font-semibold text-white rounded-lg bg-slate-600">Feed</button>
+              </div>
+              <div className="grid grid-cols-1 gap-2 mt-3 md:grid-cols-3">
+                <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+                <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+                <input type="text" value={scheduleLabel} onChange={(e) => setScheduleLabel(e.target.value)} placeholder="Label" className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+              </div>
+              <button disabled={feedingLoading || !scheduleTime} onClick={addSchedule} className="px-4 py-2 mt-3 text-sm font-semibold text-white rounded-lg bg-cyan-600 disabled:opacity-40">Save Schedule</button>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <h3 className="mb-3 text-lg font-semibold text-white">Scheduled Feedings</h3>
+              {feedingLoading ? (
+                <p className="text-sm text-gray-400">Loading schedules...</p>
+              ) : feedingSchedules.length === 0 ? (
+                <p className="text-sm text-gray-400">No schedules yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {feedingSchedules.map((item) => (
+                    <div key={item.id} className="rounded-lg border border-white/10 bg-[#101117] p-3">
+                      {editingScheduleId === item.id ? (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                            <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+                            <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+                            <input type="text" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={() => saveEditSchedule(item.id)} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-cyan-600">Save</button>
+                            <button onClick={cancelEditSchedule} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-slate-600">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-white">{item.date ? `${item.date} ` : 'Daily '}@ {item.time}</p>
+                            {item.label && <p className="text-xs text-gray-400">{item.label}</p>}
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={() => startEditSchedule(item)} className="rounded-lg bg-slate-600 px-3 py-1.5 text-xs text-white">Edit</button>
+                            <button onClick={() => toggleSchedule(item)} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs text-white">{item.enabled ? 'Disable' : 'Enable'}</button>
+                            <button onClick={() => removeSchedule(item.id)} className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs text-white">Remove</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section id="alerts" className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <h3 className="mb-3 text-lg font-semibold text-white">Recent Alerts</h3>
+              {alerts.length === 0 ? (
+                <p className="text-sm text-emerald-300">All clear. No active alerts.</p>
+              ) : (
+                <div className="space-y-2 overflow-y-auto max-h-80">
+                  {alerts.map((alert) => (
+                    <div key={alert.id} className="rounded-lg border border-white/10 bg-[#101117] p-3">
+                      <p className="text-sm font-semibold text-white capitalize">{(alert.parameter || alert.category || 'Water quality').replace(/_/g, ' ')} alert</p>
+                      <p className="text-sm text-gray-300">{alert.message}</p>
+                      <p className="text-xs text-gray-500">{new Date(alert.timestamp || alert.createdAt || Date.now()).toLocaleTimeString()}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
+              <h3 className="mb-3 text-lg font-semibold text-white">SMS Logs</h3>
+              {smsLogs.length === 0 ? (
+                <p className="text-sm text-gray-400">No SMS logs yet.</p>
+              ) : (
+                <div className="space-y-2 overflow-y-auto max-h-80">
+                  {smsLogs.map((log) => (
+                    <div key={log.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-[#101117] p-3">
+                      <div>
+                        <p className="text-sm font-semibold text-white">{log.category} ({log.severity})</p>
+                        <p className="text-xs text-gray-500">{new Date(log.sentAt).toLocaleString()}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500">{log.recipient}</p>
+                        <p className={`text-sm font-semibold ${log.success ? 'text-emerald-400' : 'text-rose-400'}`}>{log.success ? 'Sent' : 'Failed'}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
       </div>
-
-      {/* Footer */}
-      <footer className="py-8 mt-16 text-center text-gray-600 border-t border-gray-200 bg-surface">
-        <p className="font-medium">🌊 AquaSense • Crayfish Farm Water Quality Management</p>
-        <p className="mt-2 text-sm">Real-time monitoring • Automated control • Smart farming</p>
-      </footer>
     </div>
   );
 };

@@ -20,7 +20,7 @@ const FeaturesPage: React.FC = () => {
       <div className="px-4 py-16 bg-gradient-to-br from-cyan-50 via-cyan-100 to-sky-100 sm:px-6 lg:py-28">
         <div className="grid items-center mx-auto gap-14 max-w-7xl lg:grid-cols-2">
           <div className="max-w-2xl text-left"> 
-            <h1 className="mb-6 text-4xl font-bold leading-tight sm:text-5xl md:text-6xl text-primary">
+            <h1 className="mb-6 text-3xl font-bold leading-tight text-primary sm:text-5xl md:text-6xl">
               Powerful
               <span className="text-accent"> Features</span>
             </h1>
@@ -29,7 +29,7 @@ const FeaturesPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="grid h-full grid-cols-1 gap-5 sm:grid-cols-2 min-h-[420px] sm:min-h-[500px] lg:min-h-[620px]">
+          <div className="grid h-full grid-cols-1 gap-5 min-h-[320px] sm:grid-cols-2 sm:min-h-[420px] lg:min-h-[620px]">
             <div className="row-span-2 overflow-hidden shadow-sm bg-white/70 rounded-2xl">
               <img
                 src={bigImage01}
@@ -59,7 +59,7 @@ const FeaturesPage: React.FC = () => {
       <div className="px-4 py-16 bg-stone-100 sm:px-6 lg:py-24">
         <div className="mx-auto max-w-[104rem]">
           <div className="mb-10 text-center">
-            <h2 className="mb-3 text-4xl font-bold md:text-5xl text-primary">Core Monitoring</h2>
+            <h2 className="mb-3 text-3xl font-bold text-primary sm:text-4xl md:text-5xl">Core Monitoring</h2>
             <p className="max-w-2xl mx-auto text-lg text-gray-700">Real-time sensor data collection and analysis with visual sensor cards ready for your custom photos.</p>
           </div>
           <div className="grid items-stretch grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
@@ -161,7 +161,7 @@ const FeaturesPage: React.FC = () => {
               </div>
 
               <div className="pr-2">
-                <h3 className="mb-6 text-4xl font-bold text-cyan-500">Smart Operations Panel</h3>
+                <h3 className="mb-6 text-3xl font-bold text-cyan-500 sm:text-4xl">Smart Operations Panel</h3>
 
                 <div className="mb-7">
                   <h4 className="mb-2 text-lg font-semibold text-cyan-700">Automated Aerator Control</h4>

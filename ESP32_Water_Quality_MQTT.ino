@@ -23,12 +23,12 @@ const char* WIFI_SSID = "YOUR_WIFI_SSID";          // Change this
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";  // Change this
 
 // ========== MQTT Configuration ==========
-const char* MQTT_BROKER = "YOUR_PC_IP";            // Change to your PC IP (e.g., 192.168.1.100)
+const char* MQTT_BROKER = "broker.hivemq.com";            // Change to your PC IP (e.g., 192.168.1.100)
 const int MQTT_PORT = 1883;
 const char* MQTT_USERNAME = "";                    // Leave empty if no auth
 const char* MQTT_PASSWORD = "";                    // Leave empty if no auth
-const char* MQTT_TOPIC_READINGS = "water/esp32/readings";
-const char* MQTT_TOPIC_STATUS = "water/esp32/status";
+const char* MQTT_TOPIC_READINGS = "capstone2026/water/esp32/readings";
+const char* MQTT_TOPIC_STATUS = "capstone2026/water/esp32/status";
 const char* MQTT_CLIENT_ID = "ESP32-WaterQuality-Sensor";
 
 // ========== Sensor Pin Configuration ==========
@@ -165,8 +165,8 @@ void setupMQTT() {
     Serial.println(MQTT_TOPIC_READINGS);
     
     // Subscribe to command topics
-    mqttClient.subscribe("water/commands/restart");
-    mqttClient.subscribe("water/commands/threshold-update");
+    mqttClient.subscribe("capstone2026/water/commands/restart");
+    mqttClient.subscribe("capstone2026/water/commands/threshold-update");
   } else {
     Serial.print("✗ MQTT Connection failed! State: ");
     Serial.println(mqttClient.state());
@@ -192,8 +192,8 @@ void reconnectMQTT() {
       Serial.println(" ✓ Connected");
       
       // Resubscribe to topics
-      mqttClient.subscribe("water/commands/restart");
-      mqttClient.subscribe("water/commands/threshold-update");
+      mqttClient.subscribe("capstone2026/water/commands/restart");
+      mqttClient.subscribe("capstone2026/water/commands/threshold-update");
       
       // Publish status
       PublishStatus("online");
@@ -325,8 +325,15 @@ float readTurbidity() {
   float voltage = (raw / (float)ADC_MAX) * VOLTAGE_REF;
   
   // Convert voltage to NTU (Nephelometric Turbidity Units)
-  // Typical: 2.5V = 0 NTU (clean), 0V = 100+ NTU (turbid)
-  float turbidity = 1000.0 / (voltage + 0.1);  // Prevent division by zero
+  // Simple linear approximation: Assume 2.5V is 0 NTU (clean) and 0V is 150 NTU (turbid).
+  // Note: if using a 5V sensor straight into 3.3V ESP32 ADC, the voltage will cap at 3.3V.
+  float turbidity = 0.0;
+  if (voltage > 2.5) {
+    turbidity = 0.0;
+  } else {
+    // Map 2.5V -> 0 NTU, 0V -> 150 NTU
+    turbidity = (2.5 - voltage) * (150.0 / 2.5);
+  }
   
   // Apply offset and scale
   turbidity = (turbidity * TURBIDITY_SCALE) + TURBIDITY_OFFSET;
@@ -353,7 +360,7 @@ void onMQTTMessage(char* topic, byte* payload, unsigned int length) {
   Serial.println(message);
   
   // Handle commands
-  if (strcmp(topic, "water/commands/restart") == 0) {
+  if (strcmp(topic, "capstone2026/water/commands/restart") == 0) {
     Serial.println("  ! Restart command received - restarting in 2 seconds...");
     delay(2000);
     ESP.restart();

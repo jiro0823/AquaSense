@@ -7,17 +7,45 @@ import AboutPage from './pages/AboutPage';
 import FeaturesPage from './pages/FeaturesPage';
 import HowItWorksPage from './pages/HowItWorksPage';
 import ScrollManager from './components/ScrollManager';
-import { WaterQualityDashboard } from './components/WaterQuality/Dashboard';
+import { DashboardLayout } from './components/WaterQuality/DashboardLayout';
+import DashboardOverviewPage from './pages/dashboard/DashboardOverviewPage';
+import DashboardParametersPage from './pages/dashboard/DashboardParametersPage';
+import DashboardFeedingPage from './pages/dashboard/DashboardFeedingPage';
+import DashboardAeratorPage from './pages/dashboard/DashboardAeratorPage';
+import DashboardAlertsPage from './pages/dashboard/DashboardAlertsPage';
+import DashboardSettingsPage from './pages/dashboard/DashboardSettingsPage';
+import { apiClient } from './services/apiClient';
 import './App.css';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const token = localStorage.getItem('authToken');
-  
-  if (!token) {
+  const [status, setStatus] = useState<'checking' | 'authenticated' | 'anonymous'>('checking');
+
+  useEffect(() => {
+    let mounted = true;
+    apiClient.verifyAuth().then((isAuthenticated) => {
+      if (mounted) {
+        setStatus(isAuthenticated ? 'authenticated' : 'anonymous');
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (status === 'checking') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <p className="text-gray-700 text-sm font-semibold">Checking session...</p>
+      </div>
+    );
+  }
+
+  if (status === 'anonymous') {
     return <Navigate to="/login" replace />;
   }
-  
+
   return <>{children}</>;
 };
 
@@ -30,7 +58,7 @@ function App(): JSX.Element {
 
     // Listen for storage changes (for when other tabs/windows auth changes)
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'authToken') {
+      if (e.key === 'user') {
         // Auth state will be checked by ProtectedRoute component
         console.log('[App] Storage change detected:', e.key);
       }
@@ -67,10 +95,18 @@ function App(): JSX.Element {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <WaterQualityDashboard />
+              <DashboardLayout />
             </ProtectedRoute>
           }
-        />
+        >
+          <Route index element={<Navigate to="/dashboard/overview" replace />} />
+          <Route path="overview" element={<DashboardOverviewPage />} />
+          <Route path="parameters" element={<DashboardParametersPage />} />
+          <Route path="feeding" element={<DashboardFeedingPage />} />
+          <Route path="aerator" element={<DashboardAeratorPage />} />
+          <Route path="alerts" element={<DashboardAlertsPage />} />
+          <Route path="settings" element={<DashboardSettingsPage />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   );

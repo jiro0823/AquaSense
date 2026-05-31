@@ -36,7 +36,7 @@ const FaqSection: React.FC = () => {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
   return (
-    <section id="faq" className="py-28 bg-slate-50">
+    <section id="faq" className="py-16 bg-slate-50 sm:py-24">
       <div className="px-6 mx-auto max-w-7xl">
          <p className="text-sm font-medium text-primary">FAQ <span className="text-cyan-300">&rarr;</span></p>  
         <h2 className="mb-12 text-3xl font-bold text-primary">Frequently Asked Questions</h2>

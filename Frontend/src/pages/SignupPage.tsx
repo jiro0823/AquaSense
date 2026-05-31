@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { apiClient } from '../services/apiClient';
 
 interface PasswordStrength {
   score: number;
@@ -17,10 +18,15 @@ const SignupPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const transition = (location.state as { transition?: string } | null)?.transition;
+  const isFromLogin = transition === 'to-signup';
+  const panelAnimation = isFromLogin ? 'auth-panel-in-from-left' : 'auth-panel-in-from-right';
+  const formAnimation = isFromLogin ? 'auth-form-in-from-right' : 'auth-form-in-from-left';
 
   // Calculate password strength
   const calculatePasswordStrength = (pwd: string): PasswordStrength => {
-    const minLength = pwd.length >= 8;
+    const minLength = pwd.length >= 12;
     const hasUpperCase = /[A-Z]/.test(pwd);
     const hasLowerCase = /[a-z]/.test(pwd);
     const hasNumbers = /\d/.test(pwd);
@@ -42,6 +48,11 @@ const SignupPage: React.FC = () => {
   };
 
   const passwordStrength = calculatePasswordStrength(password);
+  const passwordHint = password
+    ? passwordStrength.score >= 3
+      ? 'Looks good.'
+      : 'Use 12+ chars with upper, lower, number, symbol.'
+    : '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,8 +63,14 @@ const SignupPage: React.FC = () => {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters long');
+    if (
+      password.length < 12 ||
+      !/[A-Z]/.test(password) ||
+      !/[a-z]/.test(password) ||
+      !/\d/.test(password) ||
+      !/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)
+    ) {
+      setError('Password must be at least 12 characters and include uppercase, lowercase, number, and special character');
       return;
     }
 
@@ -65,46 +82,31 @@ const SignupPage: React.FC = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/v1/auth/signup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fullName,
-          email,
-          password,
-        }),
+      const response = await apiClient.post<{ user: unknown }>('/auth/signup', {
+        fullName,
+        email,
+        password,
       });
 
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        const token = data.data.token;
-        const user = data.data.user;
-        
-        localStorage.setItem('authToken', token);
+      if (response.success) {
+        const user = response.data.user;
         localStorage.setItem('user', JSON.stringify(user));
-        
-        console.log('[SignupPage] Token stored:', token.substring(0, 20) + '...');
-        console.log('[SignupPage] User stored:', user);
-        
+
         setTimeout(() => {
-          console.log('[SignupPage] Navigating to dashboard');
           navigate('/dashboard', { replace: true });
         }, 100);
       } else {
-        setError(data.message || 'Signup failed');
+        setError(response.message || 'Signup failed');
       }
     } catch (err) {
-      setError('Failed to connect to backend. Make sure it is running on port 5000.');
+      setError('Failed to create account. Check your details and backend connection.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen p-4 py-16 bg-white sm:py-10">
+    <div className="relative flex items-center justify-center min-h-screen px-4 py-12 bg-gradient-to-br from-slate-50 via-cyan-50 to-blue-100 sm:py-16">
       {/* Home Button */}
       <button
         onClick={() => navigate('/')}
@@ -117,48 +119,60 @@ const SignupPage: React.FC = () => {
         <span className="text-sm font-medium">Home</span>
       </button> 
 
-      <div className="flex w-full max-w-5xl overflow-hidden bg-white border border-gray-200 shadow-lg rounded-xl">
-
-        {/* Left Side - Branding */}
-        <div className="relative flex-col justify-between hidden p-8 overflow-hidden text-white lg:flex lg:w-5/12 xl:p-10 bg-gradient-to-br from-primary via-blue-700 to-blue-800">
-          <div className="absolute top-0 right-0 w-40 h-40 -mt-20 -mr-20 rounded-full bg-accent opacity-20"></div>
-          <div className="absolute bottom-0 left-0 w-32 h-32 -ml-16 rounded-full bg-accent opacity-10 -mb-14"></div>
-          
-          <div className="relative z-10 space-y-6">
-            <div>
-              <h2 className="mb-4 text-3xl font-bold leading-tight text-white xl:text-4xl">Join AquaSense</h2>
-              <p className="text-lg leading-relaxed text-blue-100">
-                Start monitoring and controlling your aquaculture systems with real-time data, instant alerts, and automated solutions.
-              </p>
+      <div className="relative w-full max-w-5xl overflow-hidden bg-white/95 border border-white/60 shadow-2xl rounded-[32px]">
+        <div className="relative flex flex-col lg:flex-row">
+          {/* Left Side - Branding */}
+          <div
+            className={`relative flex flex-col justify-between overflow-hidden text-white bg-gradient-to-br from-blue-900 via-blue-800 to-cyan-700 px-6 py-10 sm:px-8 lg:w-5/12 lg:order-2 ${panelAnimation}`}
+          >
+            <div className="absolute inset-0">
+              <div className="absolute top-0 right-0 w-40 h-40 -mt-20 -mr-20 rounded-full bg-cyan-300 opacity-20"></div>
+              <div className="absolute bottom-0 left-0 w-32 h-32 -ml-16 rounded-full bg-cyan-200 opacity-10 -mb-14"></div>
             </div>
 
-            <div className="pt-6 space-y-4 border-t border-white border-opacity-20">
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">✓</span>
-                <p className="text-blue-100">Real-time water quality monitoring</p>
+            <div className="relative z-10 space-y-6">
+              <div className="space-y-3">
+                <p className="text-sm font-semibold tracking-[0.3em] text-cyan-200 uppercase">Welcome</p>
+                <h2 className="text-2xl font-bold leading-tight text-white sm:text-3xl">Start Monitoring Today</h2>
+                <p className="text-sm text-blue-100">
+                  Build your dashboard in minutes and receive instant water quality alerts.
+                </p>
               </div>
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">✓</span>
-                <p className="text-blue-100">Instant alerts for critical changes</p>
+
+              <div className="pt-5 space-y-3 border-t border-white/20">
+                <div className="flex items-start gap-3">
+                  <span className="text-xl">✔</span>
+                  <p className="text-sm text-blue-100">Real-time data with smart analytics</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="text-xl">✔</span>
+                  <p className="text-sm text-blue-100">Automated control and alert rules</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="text-xl">✔</span>
+                  <p className="text-sm text-blue-100">Secure access from any device</p>
+                </div>
               </div>
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">✓</span>
-                <p className="text-blue-100">Automated control systems</p>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">✓</span>
-                <p className="text-blue-100">Advanced analytics & reporting</p>
-              </div>
+            </div>
+
+            <div className="relative z-10 pt-6">
+              <Link
+                to="/login"
+                state={{ transition: 'to-login' }}
+                className="inline-flex items-center justify-center w-full px-4 py-2 text-sm font-semibold text-white border rounded-full border-white/40 backdrop-blur hover:bg-white/10"
+              >
+                Sign In
+              </Link>
+              <p className="mt-3 text-xs text-blue-100">Already have an account? Hop back in.</p>
             </div>
           </div>
 
-          <p className="relative z-10 text-sm text-blue-100">Join thousands of successful farmers</p>
-        </div>
-
-        {/* Right Side - Form */}
-        <div className="flex flex-col justify-center w-full p-6 sm:p-8 lg:w-7/12 lg:p-10">
+          {/* Right Side - Form */}
+          <div
+            className={`flex flex-col justify-center w-full p-6 sm:p-8 lg:w-7/12 lg:order-1 ${formAnimation}`}
+          >
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-3 mb-8">
+          <Link to="/" className="flex items-center gap-3 mb-4">
             <div className="text-3xl">🌊</div>
             <div>
               <h1 className="text-2xl font-bold text-primary">AquaSense</h1>
@@ -167,8 +181,8 @@ const SignupPage: React.FC = () => {
           </Link>
 
           {/* Header */}
-          <h2 className="mb-2 text-3xl font-bold text-gray-900">Create Account</h2>
-          <p className="mb-6 text-gray-600">Join AquaSense to start monitoring your farm</p>
+          <h2 className="mb-1 text-2xl font-bold text-gray-900 sm:text-3xl">Create Account</h2>
+          <p className="mb-4 text-gray-600">Get started in minutes.</p>
 
           {/* Error Alert */}
           {error && (
@@ -185,7 +199,7 @@ const SignupPage: React.FC = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Full Name */}
             <div>
-              <label className="block mb-2 text-sm font-semibold text-gray-900">Full Name</label>
+              <label className="block mb-2 text-sm font-semibold text-gray-900">Full name</label>
               <input
                 type="text"
                 value={fullName}
@@ -198,7 +212,7 @@ const SignupPage: React.FC = () => {
 
             {/* Email */}
             <div>
-              <label className="block mb-2 text-sm font-semibold text-gray-900">Email Address</label>
+              <label className="block mb-2 text-sm font-semibold text-gray-900">Email</label>
               <input
                 type="email"
                 value={email}
@@ -258,19 +272,14 @@ const SignupPage: React.FC = () => {
                       {passwordStrength.label}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-600">
-                    {password.length < 8 && 'Password must be at least 8 characters'}
-                    {password.length >= 8 && !/[A-Z]/.test(password) && 'Add uppercase letter'}
-                    {password.length >= 8 && /[A-Z]/.test(password) && !/\d/.test(password) && 'Add a number'}
-                    {password.length >= 8 && /[A-Z]/.test(password) && /\d/.test(password) && 'Password is strong!'}
-                  </p>
+                  <p className="text-xs text-gray-600">{passwordHint}</p>
                 </div>
               )}
             </div>
 
             {/* Confirm Password */}
             <div>
-              <label className="block mb-2 text-sm font-semibold text-gray-900">Confirm Password</label>
+              <label className="block mb-2 text-sm font-semibold text-gray-900">Confirm password</label>
               <div className="relative">
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
@@ -314,7 +323,7 @@ const SignupPage: React.FC = () => {
                 className="w-4 h-4 mt-1 rounded text-accent focus:ring-accent"
               />
               <label htmlFor="terms" className="text-sm text-gray-700">
-                I agree to the <Link to="#" className="font-medium text-accent hover:text-primary">Terms of Service</Link> and <Link to="#" className="font-medium text-accent hover:text-primary">Privacy Policy</Link>
+                I agree to the <Link to="#" className="font-medium text-accent hover:text-primary">Terms</Link> and <Link to="#" className="font-medium text-accent hover:text-primary">Privacy Policy</Link>
               </label>
             </div>
 
@@ -328,22 +337,8 @@ const SignupPage: React.FC = () => {
             </button>
           </form>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 h-px bg-gray-200"></div>
-            <span className="text-sm text-gray-600">Already have an account?</span>
-            <div className="flex-1 h-px bg-gray-200"></div>
           </div>
-
-          {/* Sign In Link */}
-          <Link
-            to="/login"
-            className="w-full btn btn-secondary"
-          >
-            Sign In
-          </Link>
         </div>
-
       </div>
     </div>
   );

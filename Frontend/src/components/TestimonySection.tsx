@@ -81,9 +81,9 @@ const TestimonySection: React.FC = () => {
   }, []);
 
   return (
-    <section className="px-6 py-28 bg-primary">
+    <section className="px-6 py-16 bg-primary sm:py-24">
       <div className="mx-auto max-w-7xl">
-        <h2 className="text-4xl font-bold text-center text-cyan-300 md:text-5xl">
+        <h2 className="text-3xl font-bold text-center text-cyan-300 sm:text-4xl md:text-5xl">
           Experience Shared by
           <span className="block text-white">Our Clients</span>
         </h2>
@@ -94,7 +94,7 @@ const TestimonySection: React.FC = () => {
           {loopedTestimonies.map((item, idx) => (
             <article
               key={`${item.name}-${idx}`}
-              className="min-w-[340px] md:min-w-[440px] p-8 rounded-2xl border border-white/10 bg-[#143A67] snap-start"
+              className="min-w-[260px] sm:min-w-[320px] md:min-w-[440px] p-8 rounded-2xl border border-white/10 bg-[#143A67] snap-start"
             >
               <div className="flex items-center gap-2 mb-4">
                 <div className="flex gap-1 text-2xl text-yellow-400">

@@ -40,7 +40,7 @@ const ContactSection: React.FC = () => {
   };
 
   return (
-    <section id="contact" className="px-6 py-20 bg-gradient-to-b from-slate-50 via-sky-50 to-slate-100">
+    <section id="contact" className="px-6 py-16 bg-gradient-to-b from-slate-50 via-sky-50 to-slate-100 sm:py-20">
       <div className="mx-auto max-w-7xl">
        
         <h2 className="mb-10 text-3xl font-bold text-center text-blue-900 md:text-4xl">

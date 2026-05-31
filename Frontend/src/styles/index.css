@@ -19,6 +19,10 @@ body {
   font-feature-settings: "rlig" 1 "calt" 1;
 }
 
+img {
+  @apply max-w-full h-auto;
+}
+
 button,
 input,
 select,
@@ -47,6 +51,31 @@ p { @apply text-gray-700 leading-relaxed; }
 
 ::-webkit-scrollbar-thumb {
   @apply bg-gray-300 rounded-full hover:bg-gray-400;
+}
+
+/* Modern dark theme scrollbar for dashboard panels */
+.scrollbar-modern {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148,163,184,0.6) transparent;
+}
+
+.scrollbar-modern::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-modern::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-modern::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #374151, #0b0b10);
+  border-radius: 9999px;
+  border: 2px solid rgba(11,11,16,0.45);
+}
+
+.scrollbar-modern::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #6b7280, #111217);
 }
 
 /* Navigation Links */
@@ -214,6 +243,66 @@ p { @apply text-gray-700 leading-relaxed; }
     @apply text-lg font-bold text-gray-900 mb-4 flex items-center gap-2;
   }
 
+
+@keyframes auth-panel-in-from-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.9;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes auth-panel-in-from-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0.9;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes auth-form-in-from-left {
+  from {
+    transform: translateX(-40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes auth-form-in-from-right {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.auth-panel-in-from-left {
+  animation: auth-panel-in-from-left 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-panel-in-from-right {
+  animation: auth-panel-in-from-right 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-form-in-from-left {
+  animation: auth-form-in-from-left 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-form-in-from-right {
+  animation: auth-form-in-from-right 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
   /* Status Panel */
   .status-panel {
     @apply bg-surface border border-gray-200 rounded-lg p-4 flex items-center justify-between;

@@ -6,10 +6,12 @@ import { getDatabase } from '../connection';
  */
 export class SensorReading extends Model {
   declare id: string;
+  declare deviceId: string;
   declare temperature: number;
   declare ph: number;
   declare do: number; // Dissolved Oxygen
   declare turbidity: number;
+  declare ammonia: number;
   declare location: string;
   declare timestamp: Date;
   declare createdAt: Date;
@@ -28,6 +30,11 @@ export const initializeSensorReadingModel = (): void => {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true,
+      },
+      deviceId: {
+        type: DataTypes.STRING(120),
+        allowNull: false,
+        defaultValue: 'unknown-device',
       },
       temperature: {
         type: DataTypes.FLOAT,
@@ -61,6 +68,15 @@ export const initializeSensorReadingModel = (): void => {
           max: 5000,
         },
       },
+      ammonia: {
+        type: DataTypes.FLOAT,
+        allowNull: false,
+        defaultValue: 0,
+        validate: {
+          min: 0,
+          max: 10,
+        },
+      },
       location: {
         type: DataTypes.STRING(255),
         allowNull: false,
@@ -80,6 +96,9 @@ export const initializeSensorReadingModel = (): void => {
       indexes: [
         {
           fields: ['timestamp'],
+        },
+        {
+          fields: ['device_id'],
         },
         {
           fields: ['location'],

@@ -8,6 +8,7 @@ export class User extends Model {
   declare id: string;
   declare fullName: string;
   declare email: string;
+  declare role: 'admin' | 'farmer' | 'guest';
   declare passwordHash: string;
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -37,6 +38,11 @@ export const initializeUserModel = (): void => {
         validate: {
           isEmail: true,
         },
+      },
+      role: {
+        type: DataTypes.ENUM('admin', 'farmer', 'guest'),
+        allowNull: false,
+        defaultValue: 'farmer',
       },
       passwordHash: {
         type: DataTypes.STRING(255),

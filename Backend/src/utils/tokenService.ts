@@ -8,6 +8,7 @@ import { config } from '../config/config';
 export interface TokenPayload {
   userId: string;
   email: string;
+  role?: 'admin' | 'farmer' | 'guest';
 }
 
 class TokenService {

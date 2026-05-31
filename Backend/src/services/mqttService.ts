@@ -6,8 +6,8 @@
 
 import mqtt, { MqttClient } from 'mqtt';
 import { logger } from '../utils/logger';
-import { waterQualityService } from '../iot/water/services/waterQualityService';
 import { sensorReadingService } from './sensorReadingService';
+import { waterAlertNotificationService } from './waterAlertNotification.service';
 import type { WaterQualityReading, WaterQualityStats } from '../iot/water/types';
 
 interface MQTTConfig {
@@ -34,6 +34,7 @@ export class MQTTService {
     ph?: number;
     turbidity?: number;
     do?: number;
+    ammonia?: number;
   } = {};
   private pendingBatchFlags = {
     temperature: false,
@@ -42,6 +43,7 @@ export class MQTTService {
   };
   private onReadingReceived?: (reading: WaterQualityReading) => void;
   private onStatsUpdated?: (stats: WaterQualityStats) => void;
+  private lastConnectionWarningAt = 0;
 
   constructor(config?: Partial<MQTTConfig>) {
     this.config = {
@@ -101,9 +103,17 @@ export class MQTTService {
         logger.warn('MQTT disconnected, attempting to reconnect...');
       });
 
-      // Connection error
+      // MQTT is optional for local development; REST sensor ingestion remains online
+      // even when the public broker is unreachable.
       this.client.on('error', (error: Error) => {
-        logger.error('MQTT Connection error:', error.message);
+        const now = Date.now();
+        if (now - this.lastConnectionWarningAt > 30000) {
+          this.lastConnectionWarningAt = now;
+          logger.warn('MQTT broker unavailable; backend is still running without MQTT data', {
+            brokerUrl: this.config.brokerUrl,
+            message: error.message || 'Connection failed',
+          });
+        }
       });
 
       // Reconnection attempt
@@ -161,7 +171,7 @@ export class MQTTService {
    * Process sensor reading from ESP32
    * Expected format: {temperature, ph, do, turbidity, location?, timestamp?}
    */
-  private handleSensorReading(payload: string): void {
+  private async handleSensorReading(payload: string): Promise<void> {
     try {
       const data = JSON.parse(payload);
 
@@ -182,20 +192,28 @@ export class MQTTService {
       const ph = parseFloat(data.ph);
       const dissolvedOxygen = parseFloat(doValue);
       const turbidity = parseFloat(data.turbidity);
+      const ammonia = parseFloat(data.ammonia ?? 0);
 
       const sanitized = this.sanitizeSensorValues({
         temperature,
         ph,
         dissolvedOxygen,
         turbidity,
+        ammonia,
       });
 
-      if (sanitized.turbidity === null) {
-        logger.warn('[MQTT] Dropping sensor reading: turbidity value is invalid', {
+      if (
+        sanitized.temperature === null ||
+        sanitized.ph === null ||
+        sanitized.dissolvedOxygen === null ||
+        sanitized.turbidity === null
+      ) {
+        logger.warn('[MQTT] Dropping sensor reading: required sensor value is not numeric', {
           temperature,
           ph,
           do: dissolvedOxygen,
           turbidity,
+          ammonia,
         });
         return;
       }
@@ -204,31 +222,58 @@ export class MQTTService {
         logger.warn(`[MQTT] Sanitized sensor reading: ${sanitized.warnings.join(', ')}`);
       }
 
-      // Add to water quality service
-      const reading = waterQualityService.addReading({
+      const timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
+      const deviceId = typeof data.deviceId === 'string' && data.deviceId.trim() ? data.deviceId.trim() : 'mqtt-device';
+      const persisted = await sensorReadingService.addSensorReading(
+        deviceId,
+        sanitized.temperature,
+        sanitized.ph,
+        sanitized.dissolvedOxygen,
+        sanitized.turbidity,
+        sanitized.ammonia,
+        data.location || 'ESP32-Sensor',
+        timestamp
+      );
+      const reading = {
+        id: persisted?.id || `mqtt-${Date.now()}`,
         temperature: sanitized.temperature,
         ph: sanitized.ph,
         do: sanitized.dissolvedOxygen,
         turbidity: sanitized.turbidity,
+        ammonia: sanitized.ammonia,
         location: data.location || 'ESP32-Sensor',
-        timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+        timestamp,
+        status: 'normal' as const,
+      };
+
+      await waterAlertNotificationService.processReading({
+        deviceId,
+        temperature: reading.temperature,
+        ph: reading.ph,
+        dissolvedOxygen: reading.do,
+        turbidity: reading.turbidity,
+        ammonia: reading.ammonia,
       });
 
       this.onReadingReceived?.(reading);
-      this.onStatsUpdated?.(waterQualityService.getStatistics(60));
+      const dbStats = await sensorReadingService.getStatistics(60);
+      this.onStatsUpdated?.({
+        timestamp: new Date(),
+        temperature: dbStats.temperature,
+        ph: dbStats.ph,
+        do: dbStats.do,
+        turbidity: dbStats.turbidity,
+        ammonia: dbStats.ammonia,
+        healthScore: 0,
+      });
 
       this.latestSensorPayload = {
         temperature: reading.temperature,
         ph: reading.ph,
         turbidity: reading.turbidity,
         do: reading.do,
+        ammonia: reading.ammonia,
       };
-
-      void sensorReadingService
-        .addSensorReading(reading.temperature, reading.ph, reading.do, reading.turbidity, reading.location, new Date(reading.timestamp))
-        .catch((error) => {
-          logger.error('Failed to persist MQTT sensor reading to database', error);
-        });
 
       logger.info(
         `[ESP32] Sensor reading received: Temp=${reading.temperature}°C, pH=${reading.ph}, DO=${reading.do}, Turbidity=${reading.turbidity}`
@@ -278,6 +323,10 @@ export class MQTTService {
       case 'dissolved-oxygen':
         this.latestSensorPayload.do = parsed;
         break;
+      case 'ammonia':
+      case 'nh3':
+        this.latestSensorPayload.ammonia = parsed;
+        break;
       default:
         logger.debug(`[MQTT] Unsupported aquasense topic suffix: ${topicSuffix}`);
         return;
@@ -296,6 +345,7 @@ export class MQTTService {
         ph: this.latestSensorPayload.ph,
         do: this.config.defaultDo,
         turbidity: this.latestSensorPayload.turbidity,
+        ammonia: this.latestSensorPayload.ammonia ?? 0,
         location: 'ESP32-MQTT',
         timestamp: new Date().toISOString(),
       };
@@ -319,37 +369,45 @@ export class MQTTService {
     ph: number;
     dissolvedOxygen: number;
     turbidity: number;
+    ammonia: number;
   }): {
-    temperature: number;
-    ph: number;
-    dissolvedOxygen: number;
+    temperature: number | null;
+    ph: number | null;
+    dissolvedOxygen: number | null;
     turbidity: number | null;
+    ammonia: number;
     warnings: string[];
   } {
     const warnings: string[] = [];
 
-    let temperature = values.temperature;
+    let temperature: number | null = values.temperature;
     if (!Number.isFinite(temperature)) {
-      temperature = 0;
-      warnings.push('temperature non-numeric -> set to 0');
+      temperature = null;
+      warnings.push('temperature invalid -> dropped reading');
     }
 
-    let ph = values.ph;
+    let ph: number | null = values.ph;
     if (!Number.isFinite(ph)) {
-      ph = 0;
-      warnings.push('pH non-numeric -> set to 0');
+      ph = null;
+      warnings.push('pH invalid -> dropped reading');
     }
 
-    let dissolvedOxygen = values.dissolvedOxygen;
-    if (!Number.isFinite(dissolvedOxygen) || dissolvedOxygen < 0 || dissolvedOxygen > 20) {
-      dissolvedOxygen = 0;
-      warnings.push('dissolved oxygen unavailable -> set to 0');
+    let dissolvedOxygen: number | null = values.dissolvedOxygen;
+    if (!Number.isFinite(dissolvedOxygen)) {
+      dissolvedOxygen = null;
+      warnings.push('dissolved oxygen invalid -> dropped reading');
     }
 
     let turbidity: number | null = values.turbidity;
-    if (!Number.isFinite(values.turbidity) || values.turbidity < 0 || values.turbidity > 5000) {
+    if (!Number.isFinite(values.turbidity)) {
       turbidity = null;
       warnings.push('turbidity invalid -> dropped reading');
+    }
+
+    let ammonia = values.ammonia;
+    if (!Number.isFinite(ammonia)) {
+      ammonia = 0;
+      warnings.push('ammonia unavailable -> set to 0');
     }
 
     return {
@@ -357,6 +415,7 @@ export class MQTTService {
       ph,
       dissolvedOxygen,
       turbidity,
+      ammonia,
       warnings,
     };
   }
@@ -373,8 +432,7 @@ export class MQTTService {
 
       switch (command) {
         case 'threshold-update':
-          waterQualityService.setThresholds(data);
-          logger.info('Water quality thresholds updated via MQTT');
+          logger.info('Threshold update command received (handled by API configuration layer)');
           break;
 
         case 'restart':

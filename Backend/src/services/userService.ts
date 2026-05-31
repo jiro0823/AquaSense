@@ -10,6 +10,7 @@ export interface User {
   id: string;
   fullName: string;
   email: string;
+  role: 'admin' | 'farmer' | 'guest';
   passwordHash?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -27,9 +28,15 @@ class UserService {
         throw new Error('Invalid email format');
       }
 
-      // Validate password length
-      if (password.length < 8) {
-        throw new Error('Password must be at least 8 characters long');
+      // Validate password strength
+      if (
+        password.length < 12 ||
+        !/[A-Z]/.test(password) ||
+        !/[a-z]/.test(password) ||
+        !/\d/.test(password) ||
+        !/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)
+      ) {
+        throw new Error('Password must be at least 12 characters and include uppercase, lowercase, number, and special character');
       }
 
       // Check if user already exists
@@ -135,6 +142,7 @@ class UserService {
       id: user.id,
       fullName: user.fullName,
       email: user.email,
+      role: user.role,
       passwordHash: user.passwordHash,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,

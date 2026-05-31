@@ -132,6 +132,12 @@ export class WaterQualityService {
           min: 0,
           max: 0,
         },
+        ammonia: {
+          current: 0,
+          average: 0,
+          min: 0,
+          max: 0,
+        },
         healthScore: 0,
       };
     }
@@ -152,6 +158,7 @@ export class WaterQualityService {
       ph: calculateStats('ph'),
       do: calculateStats('do'),
       turbidity: calculateStats('turbidity'),
+      ammonia: calculateStats('ammonia'),
       healthScore: this.calculateHealthScore(latest || timeRangeReadings[0]),
     };
 

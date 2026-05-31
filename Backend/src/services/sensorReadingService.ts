@@ -8,10 +8,12 @@ import { Op } from 'sequelize';
 
 export interface SensorReading {
   id: string;
+  deviceId: string;
   temperature: number;
   ph: number;
   do: number;
   turbidity: number;
+  ammonia: number;
   location: string;
   timestamp: Date;
   createdAt: Date;
@@ -31,19 +33,23 @@ class SensorReadingService {
    * Add a new sensor reading
    */
   async addSensorReading(
+    deviceId: string,
     temperature: number,
     ph: number,
     do_value: number,
     turbidity: number,
+    ammonia: number = 0,
     location: string = 'Default Location',
     timestamp: Date = new Date()
   ): Promise<SensorReading | null> {
     try {
       const reading = await SensorReadingModel.create({
+        deviceId,
         temperature,
         ph,
         do: do_value,
         turbidity,
+        ammonia,
         location,
         timestamp,
       });
@@ -87,7 +93,16 @@ class SensorReadingService {
         order: [['timestamp', 'DESC']],
       });
 
-      return readings.map((r) => this.mapSensorModel(r));
+      if (readings.length > 0) {
+        return readings.map((r) => this.mapSensorModel(r));
+      }
+
+      const recentReadings = await SensorReadingModel.findAll({
+        order: [['timestamp', 'DESC']],
+        limit: 30,
+      });
+
+      return recentReadings.map((r) => this.mapSensorModel(r));
     } catch (error) {
       logger.error('Error fetching readings by time range', error);
       return [];
@@ -102,6 +117,7 @@ class SensorReadingService {
     ph: SensorStatistics;
     do: SensorStatistics;
     turbidity: SensorStatistics;
+    ammonia: SensorStatistics;
   }> {
     try {
       const readings = await this.getReadingsByTimeRange(minutes);
@@ -112,6 +128,7 @@ class SensorReadingService {
           ph: { parameter: 'pH', current: 0, average: 0, min: 0, max: 0 },
           do: { parameter: 'Dissolved Oxygen', current: 0, average: 0, min: 0, max: 0 },
           turbidity: { parameter: 'Turbidity', current: 0, average: 0, min: 0, max: 0 },
+          ammonia: { parameter: 'Ammonia', current: 0, average: 0, min: 0, max: 0 },
         };
       }
 
@@ -128,6 +145,7 @@ class SensorReadingService {
       const phs = readings.map((r) => r.ph);
       const dos = readings.map((r) => r.do);
       const turbidities = readings.map((r) => r.turbidity);
+      const ammonias = readings.map((r) => r.ammonia);
 
       return {
         temperature: {
@@ -150,6 +168,11 @@ class SensorReadingService {
           current: latestReading.turbidity,
           ...calculateStats(turbidities),
         },
+        ammonia: {
+          parameter: 'Ammonia',
+          current: latestReading.ammonia,
+          ...calculateStats(ammonias),
+        },
       };
     } catch (error) {
       logger.error('Error calculating statistics', error);
@@ -158,6 +181,7 @@ class SensorReadingService {
         ph: { parameter: 'pH', current: 0, average: 0, min: 0, max: 0 },
         do: { parameter: 'Dissolved Oxygen', current: 0, average: 0, min: 0, max: 0 },
         turbidity: { parameter: 'Turbidity', current: 0, average: 0, min: 0, max: 0 },
+        ammonia: { parameter: 'Ammonia', current: 0, average: 0, min: 0, max: 0 },
       };
     }
   }
@@ -211,10 +235,12 @@ class SensorReadingService {
   private mapSensorModel(reading: SensorReadingModel): SensorReading {
     return {
       id: reading.id,
+      deviceId: reading.deviceId,
       temperature: reading.temperature,
       ph: reading.ph,
       do: reading.do,
       turbidity: reading.turbidity,
+      ammonia: reading.ammonia,
       location: reading.location,
       timestamp: reading.timestamp,
       createdAt: reading.createdAt,

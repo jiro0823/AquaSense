@@ -89,8 +89,7 @@ const SignupPage: React.FC = () => {
       });
 
       if (response.success) {
-        const user = response.data.user;
-        localStorage.setItem('user', JSON.stringify(user));
+        localStorage.setItem('user', JSON.stringify(response.data.user));
 
         setTimeout(() => {
           navigate('/dashboard', { replace: true });
@@ -106,56 +105,56 @@ const SignupPage: React.FC = () => {
   };
 
   return (
-    <div className="relative flex items-center justify-center min-h-screen px-4 py-12 bg-gradient-to-br from-slate-50 via-cyan-50 to-blue-100 sm:py-16">
+    <div className="relative flex items-center justify-center min-h-screen px-4 py-8 bg-gradient-to-br from-slate-50 via-cyan-50 to-blue-100 sm:py-10">
       {/* Home Button */}
       <button
         onClick={() => navigate('/')}
-        className="absolute flex items-center gap-2 transition text-primary left-4 top-4 sm:top-6 sm:left-6 hover:text-accent hover:translate-x-1"
+        className="absolute flex items-center gap-2 transition text-primary left-4 top-4 sm:top-5 sm:left-6 hover:text-accent hover:translate-x-1"
         aria-label="Go to home"
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
         <span className="text-sm font-medium">Home</span>
-      </button> 
+      </button>
 
-      <div className="relative w-full max-w-5xl overflow-hidden bg-white/95 border border-white/60 shadow-2xl rounded-[32px]">
+      <div className="relative w-full max-w-4xl overflow-hidden bg-white/95 border border-white/60 shadow-2xl rounded-[28px]">
         <div className="relative flex flex-col lg:flex-row">
           {/* Left Side - Branding */}
           <div
-            className={`relative flex flex-col justify-between overflow-hidden text-white bg-gradient-to-br from-blue-900 via-blue-800 to-cyan-700 px-6 py-10 sm:px-8 lg:w-5/12 lg:order-2 ${panelAnimation}`}
+            className={`relative flex flex-col justify-between overflow-hidden text-white bg-gradient-to-br from-blue-900 via-blue-800 to-cyan-700 px-6 py-6 sm:px-7 sm:py-7 lg:w-5/12 lg:order-2 ${panelAnimation}`}
           >
             <div className="absolute inset-0">
-              <div className="absolute top-0 right-0 w-40 h-40 -mt-20 -mr-20 rounded-full bg-cyan-300 opacity-20"></div>
-              <div className="absolute bottom-0 left-0 w-32 h-32 -ml-16 rounded-full bg-cyan-200 opacity-10 -mb-14"></div>
+              <div className="absolute top-0 right-0 w-36 h-36 -mt-16 -mr-16 rounded-full bg-cyan-300 opacity-20"></div>
+              <div className="absolute bottom-0 left-0 w-28 h-28 -ml-12 rounded-full bg-cyan-200 opacity-10 -mb-10"></div>
             </div>
 
-            <div className="relative z-10 space-y-6">
-              <div className="space-y-3">
-                <p className="text-sm font-semibold tracking-[0.3em] text-cyan-200 uppercase">Welcome</p>
-                <h2 className="text-2xl font-bold leading-tight text-white sm:text-3xl">Start Monitoring Today</h2>
+            <div className="relative z-10 space-y-4">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold tracking-[0.3em] text-cyan-200 uppercase">Welcome</p>
+                <h2 className="text-xl font-bold leading-tight text-white sm:text-2xl">Start Monitoring Today</h2>
                 <p className="text-sm text-blue-100">
                   Build your dashboard in minutes and receive instant water quality alerts.
                 </p>
               </div>
 
-              <div className="pt-5 space-y-3 border-t border-white/20">
-                <div className="flex items-start gap-3">
-                  <span className="text-xl">✔</span>
+              <div className="pt-4 space-y-2 border-t border-white/20">
+                <div className="flex items-start gap-2.5">
+                  <span className="text-base">✔</span>
                   <p className="text-sm text-blue-100">Real-time data with smart analytics</p>
                 </div>
-                <div className="flex items-start gap-3">
-                  <span className="text-xl">✔</span>
+                <div className="flex items-start gap-2.5">
+                  <span className="text-base">✔</span>
                   <p className="text-sm text-blue-100">Automated control and alert rules</p>
                 </div>
-                <div className="flex items-start gap-3">
-                  <span className="text-xl">✔</span>
+                <div className="flex items-start gap-2.5">
+                  <span className="text-base">✔</span>
                   <p className="text-sm text-blue-100">Secure access from any device</p>
                 </div>
               </div>
             </div>
 
-            <div className="relative z-10 pt-6">
+            <div className="relative z-10 pt-4">
               <Link
                 to="/login"
                 state={{ transition: 'to-login' }}
@@ -163,7 +162,7 @@ const SignupPage: React.FC = () => {
               >
                 Sign In
               </Link>
-              <p className="mt-3 text-xs text-blue-100">Already have an account? Hop back in.</p>
+              <p className="mt-2.5 text-xs text-blue-100">Already have an account? Hop back in.</p>
             </div>
           </div>
 
@@ -172,81 +171,81 @@ const SignupPage: React.FC = () => {
             className={`flex flex-col justify-center w-full p-6 sm:p-8 lg:w-7/12 lg:order-1 ${formAnimation}`}
           >
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-3 mb-4">
-            <div className="text-3xl">🌊</div>
+          <Link to="/" className="flex items-center gap-2.5 mb-3">
+            <div className="text-2xl">🌊</div>
             <div>
-              <h1 className="text-2xl font-bold text-primary">AquaSense</h1>
-              <p className="text-xs text-gray-600">Water Quality System</p>
+              <h1 className="text-xl font-bold leading-tight text-primary">AquaSense</h1>
+              <p className="text-xs leading-tight text-gray-600">Water Quality System</p>
             </div>
           </Link>
 
           {/* Header */}
-          <h2 className="mb-1 text-2xl font-bold text-gray-900 sm:text-3xl">Create Account</h2>
-          <p className="mb-4 text-gray-600">Get started in minutes.</p>
+          <h2 className="mb-1 text-xl font-bold text-gray-900 sm:text-2xl">Create Account</h2>
+          <p className="mb-3 text-sm text-gray-600">Get started in minutes.</p>
 
           {/* Error Alert */}
           {error && (
-            <div className="mb-6 alert alert-danger">
-              <span>⚠️</span>
+            <div className="mb-3 alert alert-danger !p-3">
+              <span className="text-sm">⚠️</span>
               <div>
-                <p className="font-semibold">Signup Error</p>
-                <p className="text-sm">{error}</p>
+                <p className="text-sm font-semibold">Signup Error</p>
+                <p className="text-xs">{error}</p>
               </div>
             </div>
           )}
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
             {/* Full Name */}
             <div>
-              <label className="block mb-2 text-sm font-semibold text-gray-900">Full name</label>
+              <label className="block mb-1.5 text-sm font-semibold text-gray-900">Full name</label>
               <input
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 required
-                className="input-field"
+                className="input-field py-2 text-sm"
                 placeholder="John Farmer"
               />
             </div>
 
             {/* Email */}
             <div>
-              <label className="block mb-2 text-sm font-semibold text-gray-900">Email</label>
+              <label className="block mb-1.5 text-sm font-semibold text-gray-900">Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="input-field"
+                className="input-field py-2 text-sm"
                 placeholder="your@email.com"
               />
             </div>
 
             {/* Password */}
             <div>
-              <label className="block mb-2 text-sm font-semibold text-gray-900">Password</label>
+              <label className="block mb-1.5 text-sm font-semibold text-gray-900">Password</label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="pr-10 input-field"
+                  className="input-field py-2 pr-9 text-sm"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute text-gray-600 transition -translate-y-1/2 right-3 top-1/2 hover:text-primary"
+                  className="absolute text-gray-600 transition -translate-y-1/2 right-2.5 top-1/2 hover:text-primary"
                   aria-label="Toggle password visibility"
                 >
                   {showPassword ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-4.803m5.596-3.856a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                   ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
@@ -256,8 +255,8 @@ const SignupPage: React.FC = () => {
 
               {/* Password Strength Meter */}
               {password && (
-                <div className="p-3 mt-3 rounded-lg bg-gray-50">
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="p-2.5 mt-2 rounded-lg bg-gray-50">
+                  <div className="flex items-center gap-2 mb-1">
                     <div className="text-xs font-medium text-gray-600">Strength:</div>
                     <div className="flex-1 h-2 overflow-hidden bg-gray-200 rounded-full">
                       <div
@@ -279,14 +278,14 @@ const SignupPage: React.FC = () => {
 
             {/* Confirm Password */}
             <div>
-              <label className="block mb-2 text-sm font-semibold text-gray-900">Confirm password</label>
+              <label className="block mb-1.5 text-sm font-semibold text-gray-900">Confirm password</label>
               <div className="relative">
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
-                  className={`input-field pr-10 ${
+                  className={`input-field py-2 pr-9 text-sm ${
                     confirmPassword && password !== confirmPassword ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''
                   }`}
                   placeholder="••••••••"
@@ -294,15 +293,15 @@ const SignupPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute text-gray-600 transition -translate-y-1/2 right-3 top-1/2 hover:text-primary"
+                  className="absolute text-gray-600 transition -translate-y-1/2 right-2.5 top-1/2 hover:text-primary"
                   aria-label="Toggle password visibility"
                 >
                   {showConfirmPassword ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-4.803m5.596-3.856a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                   ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
@@ -315,12 +314,12 @@ const SignupPage: React.FC = () => {
             </div>
 
             {/* Terms Checkbox */}
-            <div className="flex items-start gap-2 pt-2">
+            <div className="flex items-start gap-2 pt-1">
               <input
                 type="checkbox"
                 id="terms"
                 required
-                className="w-4 h-4 mt-1 rounded text-accent focus:ring-accent"
+                className="w-4 h-4 mt-0.5 rounded text-accent focus:ring-accent"
               />
               <label htmlFor="terms" className="text-sm text-gray-700">
                 I agree to the <Link to="#" className="font-medium text-accent hover:text-primary">Terms</Link> and <Link to="#" className="font-medium text-accent hover:text-primary">Privacy Policy</Link>
@@ -331,7 +330,7 @@ const SignupPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-6 btn btn-primary"
+              className="w-full mt-4 btn-primary py-2.5"
             >
               {loading ? 'Creating Account...' : 'Create Account'}
             </button>

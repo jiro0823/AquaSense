@@ -22,8 +22,8 @@ export const DashboardLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0b10] text-gray-200">
-      <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
+    <div className="min-h-screen bg-[#0b0b10] text-gray-200 lg:h-screen lg:overflow-hidden">
+      <div className="min-h-screen lg:grid lg:h-screen lg:grid-cols-[260px_1fr] lg:overflow-hidden">
         <div className="sticky top-0 z-30 flex items-center justify-between border-b border-white/10 bg-[#101116] p-4 lg:hidden">
           <div>
             <p className="text-[10px] uppercase tracking-[0.25em] text-gray-500">AquaSense</p>
@@ -51,7 +51,7 @@ export const DashboardLayout: React.FC = () => {
         )}
 
         <aside
-          className={`fixed inset-y-0 left-0 z-40 w-72 border-b border-white/10 bg-[#101116] p-5 transition-transform duration-200 lg:static lg:z-auto lg:min-h-screen lg:w-auto lg:border-b-0 lg:border-r lg:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-40 w-72 overflow-y-auto border-b border-white/10 bg-[#101116] p-5 transition-transform duration-200 lg:static lg:z-auto lg:h-screen lg:w-auto lg:border-b-0 lg:border-r lg:translate-x-0 ${
             isMenuOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
@@ -114,6 +114,22 @@ export const DashboardLayout: React.FC = () => {
               </span>
             </NavLink>
             <NavLink
+              to="/dashboard/water-change"
+              onClick={closeMenu}
+              className={({ isActive }) => `${linkBase} ${isActive ? 'border border-teal-500/30 bg-[#1a1b22] text-white shadow-[0_0_0_1px_rgba(20,184,166,0.2)]' : 'text-gray-400 hover:bg-[#16171d]'}`}
+            >
+              <span className="flex items-center gap-3">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-teal-500/15 text-teal-300">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth="2">
+                    <path d="M5 4c0-1 14-1 14 0v9c0 4-14 4-14 0z" />
+                    <path d="M12 9v6" />
+                    <path d="M9 12l3 3 3-3" />
+                  </svg>
+                </span>
+                <span>Water Change</span>
+              </span>
+            </NavLink>
+            <NavLink
               to="/dashboard/aerator"
               onClick={closeMenu}
               className={({ isActive }) => `${linkBase} ${isActive ? 'border border-sky-500/30 bg-[#1a1b22] text-white shadow-[0_0_0_1px_rgba(14,165,233,0.2)]' : 'text-gray-400 hover:bg-[#16171d]'}`}
@@ -165,7 +181,7 @@ export const DashboardLayout: React.FC = () => {
           </button>
         </aside>
 
-        <main className="p-4 md:p-6 lg:p-8">
+        <main className="p-4 md:p-6 lg:h-screen lg:overflow-y-auto lg:p-6">
           <Outlet />
         </main>
       </div>

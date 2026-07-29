@@ -1,4 +1,6 @@
 {
+  "typescript.tsdk": "Backend/node_modules/typescript/lib",
+  "typescript.enableTsdkImportSpecifierUpgrades": false,
   "cSpell.words": [
     "aquasense",
     "hivemq",

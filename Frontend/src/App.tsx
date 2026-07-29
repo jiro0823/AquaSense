@@ -11,6 +11,7 @@ import { DashboardLayout } from './components/WaterQuality/DashboardLayout';
 import DashboardOverviewPage from './pages/dashboard/DashboardOverviewPage';
 import DashboardParametersPage from './pages/dashboard/DashboardParametersPage';
 import DashboardFeedingPage from './pages/dashboard/DashboardFeedingPage';
+import DashboardWaterChangePage from './pages/dashboard/DashboardWaterChangePage';
 import DashboardAeratorPage from './pages/dashboard/DashboardAeratorPage';
 import DashboardAlertsPage from './pages/dashboard/DashboardAlertsPage';
 import DashboardSettingsPage from './pages/dashboard/DashboardSettingsPage';
@@ -103,6 +104,7 @@ function App(): JSX.Element {
           <Route path="overview" element={<DashboardOverviewPage />} />
           <Route path="parameters" element={<DashboardParametersPage />} />
           <Route path="feeding" element={<DashboardFeedingPage />} />
+          <Route path="water-change" element={<DashboardWaterChangePage />} />
           <Route path="aerator" element={<DashboardAeratorPage />} />
           <Route path="alerts" element={<DashboardAlertsPage />} />
           <Route path="settings" element={<DashboardSettingsPage />} />

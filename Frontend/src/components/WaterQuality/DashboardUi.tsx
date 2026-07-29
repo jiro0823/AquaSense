@@ -86,7 +86,7 @@ export const StatusBadge = ({ label, tone }: { label: string; tone: Tone }) => (
   </span>
 );
 
-export const DashboardIcon = ({ name }: { name: 'home' | 'chart' | 'feed' | 'alert' | 'battery' | 'tank' | 'pulse' | 'sms' | 'clock' | 'bell' | 'settings' | 'user' | 'aerator' }) => {
+export const DashboardIcon = ({ name }: { name: 'home' | 'chart' | 'feed' | 'alert' | 'battery' | 'tank' | 'pulse' | 'sms' | 'clock' | 'bell' | 'settings' | 'user' | 'aerator' | 'drain' | 'fill' }) => {
   const common = 'h-4 w-4 fill-none stroke-current';
   switch (name) {
     case 'home':
@@ -115,5 +115,9 @@ export const DashboardIcon = ({ name }: { name: 'home' | 'chart' | 'feed' | 'ale
       return <svg viewBox="0 0 24 24" className={common} strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>;
     case 'aerator':
       return <svg viewBox="0 0 24 24" className={common} strokeWidth="2"><circle cx="12" cy="12" r="2" /><path d="M12 4c2 3 2 5 0 8" /><path d="M20 12c-3 2-5 2-8 0" /><path d="M12 20c-2-3-2-5 0-8" /><path d="M4 12c3-2 5-2 8 0" /></svg>;
+    case 'drain':
+      return <svg viewBox="0 0 24 24" className={common} strokeWidth="2"><path d="M5 4c0-1 14-1 14 0v9c0 4-14 4-14 0z" /><path d="M12 9v6" /><path d="M9 12l3 3 3-3" /></svg>;
+    case 'fill':
+      return <svg viewBox="0 0 24 24" className={common} strokeWidth="2"><path d="M5 11c0-1 14-1 14 0v9c0 1-14 1-14 0z" /><path d="M12 3v8" /><path d="M9 6l3-3 3 3" /></svg>;
   }
 };

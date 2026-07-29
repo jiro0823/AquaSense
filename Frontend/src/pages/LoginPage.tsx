@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { apiClient } from '../services/apiClient';
+import { apiClient, getApiErrorMessage } from '../services/apiClient';
 
 const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = () => {
   const [email, setEmail] = useState('');
@@ -33,7 +33,7 @@ const LoginPage: React.FC<{ setIsAuthenticated?: (value: boolean) => void }> = (
         setError(response.message || 'Login failed');
       }
     } catch (err) {
-      setError('Failed to sign in. Check your credentials and backend connection.');
+      setError(getApiErrorMessage(err, 'Failed to sign in. Please try again.'));
     } finally {
       setLoading(false);
     }

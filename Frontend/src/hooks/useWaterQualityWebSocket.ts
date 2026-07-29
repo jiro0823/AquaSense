@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Socket, io } from 'socket.io-client';
 import type { WaterQualityReading, WaterQualityStats, HealthAlert } from '../types/water';
+import { WEBSOCKET_URL } from '../config/runtime';
 
 interface UseWaterQualityWebSocketOptions {
   autoConnect?: boolean;
@@ -11,10 +12,7 @@ interface UseWaterQualityWebSocketOptions {
 }
 
 export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOptions = {}) => {
-  const defaultWsUrl =
-    (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_WS_URL ||
-    'http://localhost:5000';
-  const { autoConnect = true, url = defaultWsUrl } = options;
+  const { autoConnect = true, url = WEBSOCKET_URL } = options;
 
   const [isConnected, setIsConnected] = useState(false);
   const [latestReading, setLatestReading] = useState<WaterQualityReading | null>(null);

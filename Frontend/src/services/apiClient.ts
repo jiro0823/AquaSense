@@ -1,5 +1,26 @@
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import type { ApiResponse, SuccessResponse } from '../types/api';
+import { API_BASE_URL } from '../config/runtime';
+
+export const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (!axios.isAxiosError<ApiResponse>(error)) {
+    return fallback;
+  }
+
+  if (error.response?.data?.message) {
+    return error.response.data.message;
+  }
+
+  if (error.code === 'ECONNABORTED') {
+    return 'The server took too long to respond. Please try again.';
+  }
+
+  if (!error.response) {
+    return 'Cannot connect to the AquaSense server. Make sure the backend is running.';
+  }
+
+  return fallback;
+};
 
 /**
  * API client for backend communication
@@ -9,7 +30,7 @@ class ApiClient {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = (import.meta.env.VITE_API_URL as string) || 'http://localhost:5000/api/v1';
+    this.baseURL = API_BASE_URL;
     this.client = axios.create({
       baseURL: this.baseURL,
       withCredentials: true,

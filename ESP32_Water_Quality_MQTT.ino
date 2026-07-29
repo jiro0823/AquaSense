@@ -271,11 +271,18 @@ float readpH() {
   // Read analog value
   int raw = analogRead(PH_SENSOR_PIN);
   
+  // Detect disconnected probe (pin floating to GND or pulled to VCC)
+  if (raw <= 10 || raw >= 4090) {
+    Serial.println("  ! pH sensor disconnected or out of range");
+    return -1.0; // Error code
+  }
+  
   // Convert to voltage
   float voltage = (raw / (float)ADC_MAX) * VOLTAGE_REF;
   
-  // Convert voltage to pH (adjust calibration as needed)
-  // Typical: pH 4.0 = 2.5V, pH 7.0 = 2.8V, pH 10.0 = 3.2V
+  // Standard calibration for many analog pH sensors (e.g. DF-Robot)
+  // Voltage at pH 7 is usually 2.5V (if 5V powered) or ~1.65V (if 3.3V powered)
+  // Adjust these based on actual buffer solutions!
   float ph = 3.5 * voltage - 2.0;  // Example calibration
   
   // Apply offset and scale
@@ -292,11 +299,14 @@ float readDO() {
   // Read analog value
   int raw = analogRead(DO_SENSOR_PIN);
   
+  if (raw <= 10 || raw >= 4090) {
+     return -1.0; // Error code for disconnected
+  }
+  
   // Convert to voltage
   float voltage = (raw / (float)ADC_MAX) * VOLTAGE_REF;
   
   // Convert voltage to DO (mg/L)
-  // Typical: 0V = 0 mg/L, 3.3V = 15 mg/L
   float doLevel = (voltage / VOLTAGE_REF) * 15.0;
   
   // Apply offset and scale
@@ -321,15 +331,18 @@ float readTurbidity() {
   
   int raw = sum / samples;
   
+  if (raw <= 10) {
+    Serial.println("  ! Turbidity sensor disconnected (0V)");
+    return -1.0; 
+  }
+  
   // Convert to voltage
   float voltage = (raw / (float)ADC_MAX) * VOLTAGE_REF;
   
-  // Convert voltage to NTU (Nephelometric Turbidity Units)
-  // Simple linear approximation: Assume 2.5V is 0 NTU (clean) and 0V is 150 NTU (turbid).
-  // Note: if using a 5V sensor straight into 3.3V ESP32 ADC, the voltage will cap at 3.3V.
+  // Convert voltage to NTU ('\' Turbidity Units)
   float turbidity = 0.0;
   if (voltage > 2.5) {
-    turbidity = 0.0;
+    turbidity = 0.0; // Clean water
   } else {
     // Map 2.5V -> 0 NTU, 0V -> 150 NTU
     turbidity = (2.5 - voltage) * (150.0 / 2.5);

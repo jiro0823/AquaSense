@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { apiClient } from '../services/apiClient';
+import { apiClient, getApiErrorMessage } from '../services/apiClient';
 
 interface PasswordStrength {
   score: number;
@@ -99,7 +99,7 @@ const SignupPage: React.FC = () => {
         setError(response.message || 'Signup failed');
       }
     } catch (err) {
-      setError('Failed to create account. Check your details and backend connection.');
+      setError(getApiErrorMessage(err, 'Failed to create account. Please try again.'));
     } finally {
       setLoading(false);
     }

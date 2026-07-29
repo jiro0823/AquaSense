@@ -15,8 +15,6 @@ const isCriticalAlert = (alert: HealthAlert) => {
   return severity === 'CRITICAL' || severity === 'EMERGENCY';
 };
 
-const isWarningAlert = (alert: HealthAlert) => normalizeSeverity(alert.severity) === 'WARNING';
-
 const getSeverityTone = (severity: AlertSeverity | string): 'cyan' | 'amber' | 'rose' | 'emerald' | 'slate' => {
   const normalized = normalizeSeverity(severity);
   if (normalized === 'EMERGENCY' || normalized === 'CRITICAL') return 'rose';
@@ -101,7 +99,6 @@ const DashboardAlertsPage: React.FC = () => {
   const active = activeAlerts || [];
   const recent = recentAlerts?.length ? recentAlerts : active;
   const critical = active.filter(isCriticalAlert);
-  const warningAlerts = active.filter(isWarningAlert).length;
   const sentSms = smsLogs.filter((log) => log.success).length;
   const failedSms = smsLogs.filter((log) => !log.success).length;
   const latestCritical = critical[0];

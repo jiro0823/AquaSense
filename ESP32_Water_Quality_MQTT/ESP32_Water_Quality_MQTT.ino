@@ -11,8 +11,8 @@ const char* password = "PLDTWIFIGkUeS";
 const char* mqtt_server = "broker.hivemq.com";
 
 // PIN SETUP (based on your board)
-#define PH_PIN 35        // SVP
-#define TURB_PIN 34     // SVN
+#define PH_PIN 34        // P34
+#define TURB_PIN 36     // SVP (GPIO 36)
 #define ONE_WIRE_BUS 4   // P4
 
 // TEMP SENSOR

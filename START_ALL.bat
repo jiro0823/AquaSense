@@ -7,7 +7,7 @@ echo =====================================================
 echo     AquaSense - Water Quality IoT System
 echo =====================================================
 echo.
-echo Starting Backend Server (Port 5000)...
+echo Starting Backend Server (Port 5001)...
 echo Starting Frontend Server (Port 3000)...
 echo.
 
@@ -24,7 +24,7 @@ echo.
 echo =====================================================
 echo Servers starting...
 echo.
-echo Backend: http://localhost:5000
+echo Backend: http://localhost:5001
 echo Frontend: http://localhost:3000
 echo.
 echo Press any key when ready...

@@ -9,7 +9,7 @@ cd Backend
 npm run dev
 
 # Expected output:
-# ✓ Server is running on http://localhost:5000
+# Server is running on http://localhost:5001
 # ✓ Database connected: AquaSense on localhost:5432
 # ✓ Backend is connected to PostgreSQL database
 

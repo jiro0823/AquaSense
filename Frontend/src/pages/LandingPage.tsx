@@ -6,6 +6,7 @@ import ContactSection from '../components/ContactSection';
 import FaqSection from '../components/FaqSection';
 import NewsBlogsSection from '../components/NewsBlogsSection';
 import TestimonySection from '../components/TestimonySection';
+import { API_BASE_URL } from '../config/runtime';
 
 interface HealthResponse {
   success: boolean;
@@ -21,10 +22,7 @@ const LandingPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const apiBase = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
-      ?.VITE_API_URL || 'http://localhost:5000/api/v1';
-    const normalizedBase = apiBase.replace(/\/+$/, '');
-    const healthUrl = `${normalizedBase}/health`;
+    const healthUrl = `${API_BASE_URL}/health`;
 
     const checkBackend = async () => {
       try {

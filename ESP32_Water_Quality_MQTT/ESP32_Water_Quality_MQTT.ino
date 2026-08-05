@@ -11,8 +11,8 @@ const char* password = "YOUR_WIFI_PASSWORD";
 const char* mqtt_server = "broker.hivemq.com";
 
 // PIN SETUP (based on your board)
-#define PH_PIN 34        // P34
-#define TURB_PIN 36     // SVP (GPIO 36)
+#define PH_PIN 35       // P34
+#define TURB_PIN 34    // SVP (GPIO 36)
 #define ONE_WIRE_BUS 4   // P4
 
 // TEMP SENSOR

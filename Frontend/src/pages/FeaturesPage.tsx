@@ -169,7 +169,7 @@ const FeaturesPage: React.FC = () => {
                     <li>Maintains dissolved oxygen in the ideal 5-8 mg/L range.</li>
                     <li>Uses schedule-based aeration during peak activity periods.</li>
                     <li>Triggers emergency operation on oxygen drop events.</li>
-                    <li>Supports energy-efficient and solar-assisted operation.</li>
+                    <li>Supports energy-efficient, low-maintenance operation.</li>
                   </ul>
                 </div>
 
@@ -180,6 +180,15 @@ const FeaturesPage: React.FC = () => {
                     <li>Offers adjustable portions and feeding frequency.</li>
                     <li>Reduces overfeeding and protects water quality stability.</li>
                     <li>Allows remote monitoring and quick feeding adjustments.</li>
+                  </ul>
+                </div>
+
+                <div className="mb-7">
+                  <h4 className="mb-2 text-lg font-semibold text-yellow-700">Automated Water Exchange</h4>
+                  <ul className="space-y-2 text-base text-slate-700">
+                    <li>Automatically drains and refills a controlled amount of water</li>
+                    <li>when sensor readings become unsafe or at scheduled times,</li>  
+                    <li>helping maintain stable water quality while reducing manual work.</li>
                   </ul>
                 </div>
 
@@ -236,10 +245,10 @@ const FeaturesPage: React.FC = () => {
               </div>
             </div>
             <div className="flex gap-4">
-              <div className="flex-shrink-0 text-3xl">☀️</div>
+              <div className="flex-shrink-0 text-3xl">💾</div>
               <div>
-                <h4 className="mb-2 text-lg font-bold text-cyan-300">Renewable Energy</h4>
-                <p className="text-slate-700">Solar-powered operation with battery backup for 24/7 monitoring capability</p>
+                <h4 className="mb-2 text-lg font-bold text-cyan-300">Reliable Data Storage</h4>
+                <p className="text-slate-700">Persistent historical data logging and export for long-term trend analysis and reporting</p>
               </div>
             </div>
             <div className="flex gap-4">

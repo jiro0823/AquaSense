@@ -22,7 +22,7 @@ const AboutPage: React.FC = () => {
                 About <span className="text-accent">AquaSense</span>
               </h1>
               <p className="text-base text-gray-700 sm:text-lg">
-                Revolutionizing Water Quality Monitoring with IoT, Solar Power, and Sustainable Aquaculture for crayfish farmers worldwide.
+                Revolutionizing Water Quality Monitoring with IoT, Smart Automation, and Sustainable Aquaculture for crayfish farmers worldwide.
               </p>
             </div>
 
@@ -46,7 +46,7 @@ const AboutPage: React.FC = () => {
         <section className="mb-20">
           <h2 className="mb-8 text-3xl font-bold text-primary sm:text-4xl">Our Integrated System</h2>
           <p className="mb-6 text-lg leading-relaxed text-gray-700">
-           AquaSense is a comprehensive IoT-powered water quality monitoring solution designed to enhance sustainable aquaculture operations. Our system integrates advanced sensor technology, renewable energy, and intelligent automation to create a smart ecosystem that is both environmentally responsible and highly efficient. By enabling real-time monitoring and data-driven insights, AquaSense empowers users to optimize water conditions, improve productivity, and ensure healthier aquatic environments.
+           AquaSense is a comprehensive IoT-powered water quality monitoring and management solution designed to support sustainable crayfish farming. It integrates real-time sensor monitoring, intelligent automation, automated feeding, water exchange, aeration, and alert notifications to maintain safe and stable water conditions. The system also uses mortality risk assessment and predictive analytics to identify potential threats early, helping farmers take preventive action, reduce crayfish losses, improve productivity, and make better data-driven farm management decisions.
           </p>
         </section>
 
@@ -83,33 +83,33 @@ const AboutPage: React.FC = () => {
             </ul>
           </div>
 
-          {/* Solar Power Component */}
+          {/* Smart Alerts & Automation Component */}
           <div className="h-full card">
             <div className="w-full mb-5 overflow-hidden rounded-xl aspect-[4/3]">
-              <img 
-                src={aboutSolarImage} 
-                alt="Solar Powered" 
+              <img
+                src={aboutSolarImage}
+                alt="Smart Alerts and Automation"
                 className="object-cover w-full h-full"
               />
             </div>
-            <h3 className="mb-4 text-2xl font-bold text-primary">Solar Powered</h3>
-            <p className="mb-4 text-gray-700">Sustainable renewable energy integration:</p>
+            <h3 className="mb-4 text-2xl font-bold text-primary">Smart Alerts & Automation</h3>
+            <p className="mb-4 text-gray-700">Real-time notifications and intelligent farm control:</p>
             <ul className="space-y-2 text-gray-700">
               <li className="flex items-start gap-2">
                 <span className="font-bold text-warning">✓</span>
-                <span>Zero Operating Costs</span>
+                <span>Instant SMS & Mobile Alerts</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-warning">✓</span>
-                <span>24/7 Operation Capability</span>
+                <span>24/7 Automated Monitoring</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-warning">✓</span>
-                <span>Battery Backup System</span>
+                <span>Automated Feeding & Aeration</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-warning">✓</span>
-                <span>Environmentally Friendly</span>
+                <span>Automated Water Exchange</span>
               </li>
             </ul>
           </div>
@@ -151,7 +151,7 @@ const AboutPage: React.FC = () => {
           <div className="p-8 border border-blue-400 bg-primary rounded-xl border-opacity-30">
             <h3 className="mb-4 text-2xl font-bold text-white">Our Vision</h3>
             <p className="text-blue-200">
-              To revolutionize aquaculture through intelligent IoT systems powered by renewable energy, enabling sustainable food production while preserving water quality and environmental integrity for future generations.
+             To become a trusted smart aquaculture platform that empowers farmers through real-time water-quality monitoring, intelligent automation, and predictive insights to reduce mortality risks, improve productivity, and support sustainable farm operations.
             </p>
           </div>
           <div className="p-8 border border-blue-400 bg-primary rounded-xl border-opacity-30">
@@ -170,7 +170,7 @@ const AboutPage: React.FC = () => {
               <div className="flex-shrink-0 text-3xl">💰</div>
               <div>
                 <h4 className="mb-2 text-lg font-bold text-primary">Cost Effective</h4>
-                <p className="text-slate-900">Solar-powered operation eliminates energy costs and reduces operational expenses significantly.</p>
+                <p className="text-slate-900">Automated feeding, aeration, and water exchange reduce manual labor and operational expenses significantly.</p>
               </div>
             </div>
             <div className="flex gap-4">
@@ -184,7 +184,7 @@ const AboutPage: React.FC = () => {
               <div className="flex-shrink-0 text-3xl">🌱</div>
               <div>
                 <h4 className="mb-2 text-lg font-bold text-primary">Sustainable</h4>
-                <p className="text-slate-900">Renewable energy and eco-friendly operations ensure environmental responsibility.</p>
+                <p className="text-slate-900">Automated water management and predictive analytics minimize waste and support environmentally responsible aquaculture.</p>
               </div>
             </div>
             <div className="flex gap-4">
@@ -213,8 +213,8 @@ const AboutPage: React.FC = () => {
               <div>
                 <h4 className="mb-3 font-bold text-green-300">For Sustainability</h4>
                 <ul className="space-y-2 text-blue-200">
-                  <li>✓ Zero carbon footprint operations</li>
-                  <li>✓ Solar energy independence</li>
+                  <li>✓ Reduced water waste through automated exchange</li>
+                  <li>✓ Predictive risk detection for early intervention</li>
                   <li>✓ Water quality preservation</li>
                   <li>✓ Ecosystem-friendly automation</li>
                   <li>✓ Scalable sustainable solution</li>

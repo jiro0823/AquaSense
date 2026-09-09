@@ -3,7 +3,7 @@ import Navigation from '../components/Navigation';
 import Footer from '../components/Footer';
 import aboutPeopleImage from '../assets/images/about/about_people.jpg';
 import aboutIotImage from '../assets/images/about/about_iot.jpg';
-import aboutSolarImage from '../assets/images/about/about_solar.jpg';
+import aboutSmartAlert from '../assets/images/about/about_smart_alert_automation.jpg';
 import aboutCrayImage from '../assets/images/about/about_cray.jpg';
 
 const AboutPage: React.FC = () => {
@@ -87,7 +87,7 @@ const AboutPage: React.FC = () => {
           <div className="h-full card">
             <div className="w-full mb-5 overflow-hidden rounded-xl aspect-[4/3]">
               <img
-                src={aboutSolarImage}
+                src={aboutSmartAlert}
                 alt="Smart Alerts and Automation"
                 className="object-cover w-full h-full"
               />

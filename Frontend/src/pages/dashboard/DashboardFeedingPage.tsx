@@ -1,6 +1,27 @@
 import React, { useState } from 'react';
-import { DashboardIcon, PageHeader, Panel, StatusBadge } from '../../components/WaterQuality/DashboardUi';
+import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
 import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
+
+const inputClass = 'rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400';
+
+const Pill = ({ label, tone }: { label: string; tone: 'emerald' | 'amber' | 'gray' }) => {
+  const styles = {
+    emerald: 'bg-emerald-100 text-emerald-700',
+    amber: 'bg-amber-100 text-amber-700',
+    gray: 'bg-gray-100 text-gray-600',
+  }[tone];
+  const dot = {
+    emerald: 'bg-emerald-500',
+    amber: 'bg-amber-500',
+    gray: 'bg-gray-400',
+  }[tone];
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${styles}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      {label}
+    </span>
+  );
+};
 
 const DashboardFeedingPage: React.FC = () => {
   const { feedingSchedules, feedingLoading, triggerManual, addSchedule, toggleSchedule, removeSchedule, updateSchedule } = useDashboardData();
@@ -31,63 +52,89 @@ const DashboardFeedingPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Feeding" subtitle={`${enabledCount} active schedule(s), ${feedingSchedules.length} total`} tone="amber" icon={<DashboardIcon name="feed" />} />
+    <div className="flex flex-col gap-3 lg:h-full lg:min-h-0">
+      <header className="shrink-0 flex items-center gap-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-3">
+        <div className="bg-amber-50 p-2 rounded-lg flex-shrink-0">
+          <span className="text-amber-600"><DashboardIcon name="feed" /></span>
+        </div>
+        <div>
+          <h1 className="text-base lg:text-lg font-bold tracking-tight text-gray-900">Feeding</h1>
+          <p className="text-xs text-gray-500 mt-0.5">{enabledCount} active schedule(s), {feedingSchedules.length} total</p>
+        </div>
+      </header>
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Panel title="Manual Control" tone="emerald" icon={<StatusBadge label={manualBusy ? 'Sending' : 'Ready'} tone={manualBusy ? 'amber' : 'emerald'} />}>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <button disabled={manualBusy} onClick={() => void runManual('ON')} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">ON</button>
-            <button disabled={manualBusy} onClick={() => void runManual('OFF')} className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">OFF</button>
-            <button disabled={manualBusy} onClick={() => void runManual('TRIGGER')} className="rounded-lg bg-slate-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Feed</button>
+      <section className="shrink-0 grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Manual Control
+            </h3>
+            <Pill label={manualBusy ? 'Sending' : 'Ready'} tone={manualBusy ? 'amber' : 'emerald'} />
           </div>
-          <p className="mt-3 text-xs text-gray-500">Manual commands are sent directly to the feeder controller.</p>
-        </Panel>
+          <div className="grid grid-cols-3 gap-2">
+            <button disabled={manualBusy} onClick={() => void runManual('ON')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-40">ON</button>
+            <button disabled={manualBusy} onClick={() => void runManual('OFF')} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 transition-colors disabled:opacity-40">OFF</button>
+            <button disabled={manualBusy} onClick={() => void runManual('TRIGGER')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-40">Feed</button>
+          </div>
+          <p className="mt-2 text-[10px] text-gray-400">Manual commands are sent directly to the feeder controller.</p>
+        </div>
 
-        <Panel title="Add Schedule" tone="cyan" icon={<DashboardIcon name="clock" />}>
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-3">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-cyan-600"><DashboardIcon name="clock" /></span>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Add Schedule</h3>
+          </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-            <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
-            <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
-            <input type="text" value={scheduleLabel} onChange={(e) => setScheduleLabel(e.target.value)} placeholder="Label" className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+            <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} className={inputClass} />
+            <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className={inputClass} />
+            <input type="text" value={scheduleLabel} onChange={(e) => setScheduleLabel(e.target.value)} placeholder="Label" className={inputClass} />
           </div>
-          <button disabled={feedingLoading || !scheduleTime} onClick={() => void saveSchedule()} className="mt-3 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+          <button disabled={feedingLoading || !scheduleTime} onClick={() => void saveSchedule()} className="mt-2.5 rounded-lg bg-cyan-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 transition-colors disabled:opacity-40">
             Save Schedule
           </button>
-        </Panel>
+        </div>
       </section>
 
-      <Panel title="Scheduled Feedings" tone="amber" icon={<StatusBadge label={`${enabledCount} enabled`} tone="amber" />}>
+      <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-sm p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Scheduled Feedings
+          </h3>
+          <Pill label={`${enabledCount} enabled`} tone="amber" />
+        </div>
         {feedingLoading ? (
-          <p className="text-sm text-gray-400">Loading schedules...</p>
+          <p className="text-xs text-gray-400">Loading schedules...</p>
         ) : feedingSchedules.length === 0 ? (
-          <p className="text-sm text-gray-400">No schedules yet.</p>
+          <p className="text-xs text-gray-400">No schedules yet.</p>
         ) : (
           <div className="space-y-2">
             {feedingSchedules.map((item) => (
-              <div key={item.id} className="rounded-lg border border-white/10 bg-[#101117] p-3">
+              <div key={item.id} className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
                 {editingScheduleId === item.id ? (
                   <div className="space-y-2">
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                      <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
-                      <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
-                      <input type="text" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} className="rounded-lg border border-white/10 bg-[#0f1015] px-3 py-2 text-sm text-gray-200" />
+                      <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className={inputClass} />
+                      <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} className={inputClass} />
+                      <input type="text" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} className={inputClass} />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => void updateSchedule(item.id, editDate, editTime, editLabel).then(() => setEditingScheduleId(null))} className="rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white">Save</button>
-                      <button onClick={() => setEditingScheduleId(null)} className="rounded-lg bg-slate-600 px-3 py-2 text-xs font-semibold text-white">Cancel</button>
+                      <button onClick={() => void updateSchedule(item.id, editDate, editTime, editLabel).then(() => setEditingScheduleId(null))} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-700 transition-colors">Save</button>
+                      <button onClick={() => setEditingScheduleId(null)} className="rounded-lg bg-gray-200 px-3 py-1.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-300 transition-colors">Cancel</button>
                     </div>
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold text-white">{item.date ? `${item.date} ` : 'Daily '}@ {item.time}</p>
-                      {item.label && <p className="text-xs text-gray-400">{item.label}</p>}
+                      <p className="text-xs font-semibold text-gray-900">{item.date ? `${item.date} ` : 'Daily '}@ {item.time}</p>
+                      {item.label && <p className="text-[10px] text-gray-500">{item.label}</p>}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge label={item.enabled ? 'Enabled' : 'Disabled'} tone={item.enabled ? 'emerald' : 'slate'} />
-                      <button onClick={() => { setEditingScheduleId(item.id); setEditDate(item.date || ''); setEditTime(item.time); setEditLabel(item.label || ''); }} className="rounded-lg bg-slate-600 px-3 py-1.5 text-xs text-white">Edit</button>
-                      <button onClick={() => void toggleSchedule(item)} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs text-white">{item.enabled ? 'Disable' : 'Enable'}</button>
-                      <button onClick={() => void removeSchedule(item.id)} className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs text-white">Remove</button>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Pill label={item.enabled ? 'Enabled' : 'Disabled'} tone={item.enabled ? 'emerald' : 'gray'} />
+                      <button onClick={() => { setEditingScheduleId(item.id); setEditDate(item.date || ''); setEditTime(item.time); setEditLabel(item.label || ''); }} className="rounded-lg bg-gray-200 px-2.5 py-1 text-[10px] font-semibold text-gray-700 hover:bg-gray-300 transition-colors">Edit</button>
+                      <button onClick={() => void toggleSchedule(item)} className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-amber-600 transition-colors">{item.enabled ? 'Disable' : 'Enable'}</button>
+                      <button onClick={() => void removeSchedule(item.id)} className="rounded-lg bg-rose-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-rose-600 transition-colors">Remove</button>
                     </div>
                   </div>
                 )}
@@ -95,7 +142,7 @@ const DashboardFeedingPage: React.FC = () => {
             ))}
           </div>
         )}
-      </Panel>
+      </div>
     </div>
   );
 };

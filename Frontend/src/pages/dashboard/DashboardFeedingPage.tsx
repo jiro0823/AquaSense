@@ -20,7 +20,7 @@ const Pill = ({ label, tone }: { label: string; tone: 'emerald' | 'amber' | 'gra
       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
       {label}
     </span>
-  );
+  );  
 };
 
 const DashboardFeedingPage: React.FC = () => {
@@ -53,19 +53,19 @@ const DashboardFeedingPage: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-3 lg:h-full lg:min-h-0">
-      <header className="shrink-0 flex items-center gap-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-3">
-        <div className="bg-amber-50 p-2 rounded-lg flex-shrink-0">
+      <header className="flex items-center gap-3 p-3 bg-white border border-gray-200 shadow-sm shrink-0 rounded-2xl">
+        <div className="flex-shrink-0 p-2 rounded-lg bg-amber-50">
           <span className="text-amber-600"><DashboardIcon name="feed" /></span>
         </div>
         <div>
-          <h1 className="text-base lg:text-lg font-bold tracking-tight text-gray-900">Feeding</h1>
+          <h1 className="text-base font-bold tracking-tight text-gray-900 lg:text-lg">Feeding</h1>
           <p className="text-xs text-gray-500 mt-0.5">{enabledCount} active schedule(s), {feedingSchedules.length} total</p>
         </div>
       </header>
 
       <section className="shrink-0 grid grid-cols-1 gap-2.5 lg:grid-cols-2">
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="p-3 bg-white border border-gray-200 shadow-sm rounded-xl">
+          <div className="flex items-center justify-between gap-2 mb-2">
             <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Manual Control
@@ -73,14 +73,14 @@ const DashboardFeedingPage: React.FC = () => {
             <Pill label={manualBusy ? 'Sending' : 'Ready'} tone={manualBusy ? 'amber' : 'emerald'} />
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <button disabled={manualBusy} onClick={() => void runManual('ON')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-40">ON</button>
-            <button disabled={manualBusy} onClick={() => void runManual('OFF')} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 transition-colors disabled:opacity-40">OFF</button>
-            <button disabled={manualBusy} onClick={() => void runManual('TRIGGER')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-40">Feed</button>
+            <button disabled={manualBusy} onClick={() => void runManual('ON')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">ON</button>
+            <button disabled={manualBusy} onClick={() => void runManual('OFF')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-40">OFF</button>
+            <button disabled={manualBusy} onClick={() => void runManual('TRIGGER')} className="px-3 py-2 text-xs font-semibold text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">Feed</button>
           </div>
           <p className="mt-2 text-[10px] text-gray-400">Manual commands are sent directly to the feeder controller.</p>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-3">
+        <div className="p-3 bg-white border border-gray-200 shadow-sm rounded-xl">
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-cyan-600"><DashboardIcon name="clock" /></span>
             <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Add Schedule</h3>
@@ -96,8 +96,8 @@ const DashboardFeedingPage: React.FC = () => {
         </div>
       </section>
 
-      <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-sm p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="p-3 bg-white border border-gray-200 shadow-sm lg:flex-1 lg:min-h-0 lg:overflow-y-auto rounded-xl">
+        <div className="flex items-center justify-between gap-2 mb-2">
           <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
             Scheduled Feedings

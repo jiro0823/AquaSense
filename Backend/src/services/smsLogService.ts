@@ -1,5 +1,7 @@
-import { Op } from 'sequelize';
+import { Op, type Transaction } from 'sequelize';
 import { SmsLog as SmsLogModel } from '../database/models/SmsLog';
+import { Alert } from '../database/models/Alert';
+import { smsService, type SmsSendResult, type SmsStatus } from './sms.service';
 
 export interface SmsLogEntry {
   id: string;
@@ -15,25 +17,64 @@ export interface SmsLogEntry {
   sentAt: Date;
   createdAt: Date;
   updatedAt: Date;
+  deliveryStatus?: SmsStatus;
+  referenceId?: string;
 }
 
 class SmsLogService {
-  async createLog(entry: Omit<SmsLogEntry, 'id' | 'createdAt' | 'updatedAt'>): Promise<SmsLogEntry> {
-    const record = await SmsLogModel.create(entry);
+  private reconciling = false;
+
+  async createLog(entry: Omit<SmsLogEntry, 'id' | 'createdAt' | 'updatedAt'>, transaction?: Transaction): Promise<SmsLogEntry> {
+    const record = await SmsLogModel.create(entry, { transaction });
     return this.mapLog(record);
   }
 
-  async getLatestLog(deviceId: string, category: string): Promise<SmsLogEntry | null> {
+  async getLatestLog(deviceId: string, category: string, transaction?: Transaction): Promise<SmsLogEntry | null> {
     const record = await SmsLogModel.findOne({
       where: {
         deviceId,
         category,
-        success: true,
       },
       order: [['sentAt', 'DESC']],
+      transaction,
     });
 
     return record ? this.mapLog(record) : null;
+  }
+
+  async updateOutcome(id: string, result: SmsSendResult, alertIds: string[] = []): Promise<void> {
+    await SmsLogModel.update({
+      success: result.success,
+      retryCount: result.retryCount,
+      providerResponse: JSON.stringify({ ...JSON.parse(result.response), alertIds }),
+    }, { where: { id } });
+    if (result.success && alertIds.length) {
+      await Alert.update({ smsSentAt: new Date() }, { where: { id: { [Op.in]: alertIds } } });
+    }
+  }
+
+  async reconcilePending(): Promise<void> {
+    if (this.reconciling) return;
+    this.reconciling = true;
+    try {
+      const logs = await SmsLogModel.findAll({
+        where: { success: false, [Op.or]: [
+          { providerResponse: { [Op.like]: '%"deliveryStatus":"pending"%' } },
+          { providerResponse: { [Op.like]: '%"deliveryStatus":"retrying"%' } },
+        ] },
+        order: [['updatedAt', 'ASC']], limit: 20,
+      });
+      for (const log of logs) {
+        const details = JSON.parse(log.providerResponse) as { referenceId?: string; alertIds?: string[] };
+        if (!details.referenceId) continue;
+        const result = await smsService.getStatus(details.referenceId);
+        if (result.status !== 'unknown') {
+          await this.updateOutcome(log.id, { ...result, retryCount: log.retryCount }, details.alertIds || (log.alertId ? [log.alertId] : []));
+        }
+      }
+    } finally {
+      this.reconciling = false;
+    }
   }
 
   async getLogsForAlert(alertId: string): Promise<SmsLogEntry[]> {
@@ -77,6 +118,13 @@ class SmsLogService {
   }
 
   private mapLog(log: SmsLogModel): SmsLogEntry {
+    let deliveryStatus: SmsStatus = log.success ? 'sent' : 'failed';
+    let referenceId: string | undefined;
+    try {
+      const details = JSON.parse(log.providerResponse);
+      deliveryStatus = details.deliveryStatus || details.message?.status || deliveryStatus;
+      referenceId = details.referenceId || details.message?.reference_id;
+    } catch { /* Legacy logs may contain plain text. */ }
     return {
       id: log.id,
       alertId: log.alertId,
@@ -91,6 +139,8 @@ class SmsLogService {
       sentAt: log.sentAt,
       createdAt: log.createdAt,
       updatedAt: log.updatedAt,
+      deliveryStatus,
+      referenceId,
     };
   }
 }

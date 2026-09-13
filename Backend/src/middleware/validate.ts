@@ -41,6 +41,7 @@ export const sensorIngestSchema = z.object({
 });
 
 export const waterReadingSchema = z.object({
+  orp: z.number().finite().nullable().optional(),
   deviceId: z.string().trim().min(1).max(120).optional(),
   temperature: z.coerce.number().finite(),
   ph: z.coerce.number().finite(),

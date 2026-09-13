@@ -1,9 +1,7 @@
 import { alertService } from './alert.service';
-import { cooldownService } from './cooldown.service';
 import { predictiveAnalyticsService } from './predictiveAnalytics.service';
 import { ruleEngine, type AlertSeverity, type RuleAlertResult } from './ruleEngine.service';
-import { smsService } from './sms.service';
-import { smsLogService } from './smsLogService';
+import { smsNotificationService } from './smsNotification.service';
 import { buildCombinedAlertSmsTemplate, buildPredictiveSmsTemplate } from './smsTemplate.service';
 import { config } from '../config/config';
 import { logger } from '../utils/logger';
@@ -13,6 +11,7 @@ export interface WaterAlertNotificationInput {
   temperature: number;
   ph: number;
   dissolvedOxygen: number;
+  dissolvedOxygenMeasured?: boolean;
   turbidity: number;
   ammonia?: number;
 }
@@ -82,6 +81,9 @@ class WaterAlertNotificationService {
       }
     }
 
+    // This prediction model requires measured oxygen. Other measured-parameter
+    // rule alerts above remain active when that sensor is unavailable.
+    if (input.dissolvedOxygenMeasured === false) return { alertsCreated, smsSentCount };
     const predictive = await predictiveAnalyticsService.persistCurrentPrediction(60, triggeredAlertId);
     const predictiveRiskLevel = predictive.warningCard.riskLevel;
     if (smsCandidates.length === 0 && (predictiveRiskLevel === 'HIGH' || predictiveRiskLevel === 'CRITICAL')) {
@@ -133,18 +135,12 @@ class WaterAlertNotificationService {
     const alerts = alertsToNotify.map((entry) => entry.alert);
     const severity = selectHighestSeverity(alerts);
     const category = 'WATER_QUALITY_ALERT';
-    const shouldSend = await cooldownService.shouldSendSms(deviceId, category, severity);
-    if (!shouldSend) {
-      logger.info('Rule SMS skipped due to cooldown', { deviceId, category, severity });
-      return false;
-    }
-
     const tankName = config.farm.tankName || deviceId;
     const smsMessage = buildCombinedAlertSmsTemplate({
       farmName: config.farm.farmName,
       tankName,
       severity,
-      problems: alerts.map((alert) => ({
+      problems: [...alerts].sort((a, b) => severityRank[b.severity] - severityRank[a.severity]).map((alert) => ({
         message: alert.message,
         value: alert.currentValue,
         unit: alert.unit,
@@ -152,26 +148,11 @@ class WaterAlertNotificationService {
       action: selectPrimaryAction(alerts),
     });
 
-    const sendResult = await smsService.sendSms(recipient, smsMessage);
-    await smsLogService.createLog({
-      alertId: alertsToNotify[0]?.alertId ?? null,
-      deviceId,
-      category,
-      severity,
-      recipient,
-      provider: config.sms.provider,
-      providerResponse: sendResult.response,
-      success: sendResult.success,
-      retryCount: sendResult.retryCount,
-      sentAt: new Date(),
+    const result = await smsNotificationService.send({
+      deviceId, category, severity, recipient, message: smsMessage,
+      alertIds: alertsToNotify.map((entry) => entry.alertId),
     });
-
-    if (sendResult.success) {
-      const sentAt = new Date();
-      await Promise.all(alertsToNotify.map((entry) => alertService.markSmsSent(entry.alertId, sentAt)));
-    }
-
-    return sendResult.success;
+    return result?.success ?? false;
   }
 
   private async sendPredictiveSms(
@@ -190,12 +171,6 @@ class WaterAlertNotificationService {
 
     const category = 'PREDICTIVE_WARNING';
     const severity: AlertSeverity = warningCard.riskLevel === 'CRITICAL' ? 'EMERGENCY' : 'CRITICAL';
-    const shouldSend = await cooldownService.shouldSendSms(deviceId, category, severity);
-    if (!shouldSend) {
-      logger.info('Predictive SMS skipped due to cooldown', { deviceId, category, severity });
-      return false;
-    }
-
     const smsMessage = buildPredictiveSmsTemplate({
       farmName: config.farm.farmName,
       tankName: config.farm.tankName || deviceId,
@@ -204,21 +179,10 @@ class WaterAlertNotificationService {
       etaMinutes: warningCard.estimatedUnsafeInMinutes,
     });
 
-    const sendResult = await smsService.sendSms(recipient, smsMessage);
-    await smsLogService.createLog({
-      alertId: null,
-      deviceId,
-      category,
-      severity,
-      recipient,
-      provider: config.sms.provider,
-      providerResponse: sendResult.response,
-      success: sendResult.success,
-      retryCount: sendResult.retryCount,
-      sentAt: new Date(),
+    const result = await smsNotificationService.send({
+      deviceId, category, severity, recipient, message: smsMessage,
     });
-
-    return sendResult.success;
+    return result?.success ?? false;
   }
 }
 

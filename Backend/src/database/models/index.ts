@@ -7,6 +7,7 @@ import { initializeFeedingCommandModel } from './FeedingCommand';
 import { initializePredictionLogModel } from './PredictionLog';
 import { initializeDeviceModel } from './Device';
 import { initializeAuditLogModel } from './AuditLog';
+import { initializeHardwareControlModels } from './HardwareControl';
 import { User } from './User';
 import { SensorReading } from './SensorReading';
 import { Alert } from './Alert';
@@ -31,6 +32,7 @@ export const initializeAllModels = async (): Promise<void> => {
     initializePredictionLogModel();
     initializeDeviceModel();
     initializeAuditLogModel();
+    initializeHardwareControlModels();
     await ensureSensorReadingSchemaCompat();
     await ensureUserSchemaCompat();
     await ensureFeedingSchemaCompat();
@@ -41,7 +43,10 @@ export const initializeAllModels = async (): Promise<void> => {
 
 const ensureSensorReadingSchemaCompat = async (): Promise<void> => {
   const sequelize = getDatabase();
+  await sequelize.query('ALTER TABLE IF EXISTS sensor_readings ADD COLUMN IF NOT EXISTS "orp" DOUBLE PRECISION NULL;');
   await sequelize.query('ALTER TABLE sensor_readings ADD COLUMN IF NOT EXISTS "ammonia" DOUBLE PRECISION NOT NULL DEFAULT 0;');
+  // Historical rows have no evidence that DO was measured rather than defaulted.
+  await sequelize.query('ALTER TABLE sensor_readings ADD COLUMN IF NOT EXISTS "do_measured" BOOLEAN NOT NULL DEFAULT false;');
 };
 
 const ensureUserSchemaCompat = async (): Promise<void> => {

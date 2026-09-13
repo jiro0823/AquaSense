@@ -304,7 +304,10 @@ class PredictiveAnalyticsService {
   async getWarningCard(minutes: number = 60): Promise<PredictiveAnalyticsResult> {
     const horizonMinutes = clamp(Math.round(minutes || 60), 15, 1440);
     const readingsDesc = await sensorReadingService.getReadingsByTimeRange(horizonMinutes);
-    const readings = [...readingsDesc].reverse().map(normalizeReading);
+    // Do not infer oxygen emergencies from legacy/default placeholders, or use
+    // older measurements to imply that a currently missing sensor is healthy.
+    const usableReadings = readingsDesc[0]?.doMeasured === false ? [] : readingsDesc.filter((reading) => reading.doMeasured !== false);
+    const readings = [...usableReadings].reverse().map(normalizeReading);
     const dataQuality = calculateDataQuality(readings, horizonMinutes);
 
     if (readings.length === 0) {

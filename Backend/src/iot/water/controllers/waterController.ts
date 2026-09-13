@@ -3,6 +3,7 @@
  * API endpoints for water quality monitoring
  */
 import { Request, Response } from 'express';
+import { parseOrp } from '../../../services/sensorValues';
 import { waterQualityService } from '../services/waterQualityService';
 import type { WaterQualityStats } from '../types';
 import { sendSuccess, sendError } from '../../../utils/response';
@@ -57,6 +58,7 @@ const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStat
 
   return {
     timestamp: new Date(),
+    orp: dbStats.orp,
     temperature: {
       current: dbStats.temperature.current,
       average: dbStats.temperature.average,
@@ -146,7 +148,9 @@ export const addReading = async (req: Request, res: Response): Promise<void> => 
       turbidityValue,
       ammoniaValue,
       location || 'Unknown',
-      new Date()
+      new Date(),
+      true,
+      parseOrp(req.body.orp)
     );
     const reading = stored || {
       temperature: tempValue,

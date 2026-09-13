@@ -10,7 +10,9 @@ export class SensorReading extends Model {
   declare temperature: number;
   declare ph: number;
   declare do: number; // Dissolved Oxygen
+  declare doMeasured: boolean;
   declare turbidity: number;
+  declare orp: number | null; // Millivolts; never substituted for dissolved oxygen.
   declare ammonia: number;
   declare location: string;
   declare timestamp: Date;
@@ -60,6 +62,11 @@ export const initializeSensorReadingModel = (): void => {
           max: 20,
         },
       },
+      doMeasured: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
       turbidity: {
         type: DataTypes.FLOAT,
         allowNull: false,
@@ -68,6 +75,7 @@ export const initializeSensorReadingModel = (): void => {
           max: 5000,
         },
       },
+      orp: { type: DataTypes.DOUBLE, allowNull: true, defaultValue: null },
       ammonia: {
         type: DataTypes.FLOAT,
         allowNull: false,

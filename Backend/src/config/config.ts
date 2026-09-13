@@ -41,7 +41,7 @@ const nodeEnv = getEnv('NODE_ENV', 'development') || 'development';
 export const config = {
   server: {
     nodeEnv,
-    port: parseInt(getEnv('PORT', '5000') || '5000', 10),
+    port: parseInt(getEnv('PORT', '5001') || '5001', 10),
     host: getEnv('HOST', 'localhost') || 'localhost',
   },
   api: {
@@ -107,7 +107,7 @@ const configSchema = z.object({
   }),
   sms: z.object({
     provider: z.literal('unisms'),
-    apiSecretKey: z.string().min(1, 'UNISMS_API_SECRET_KEY is required'),
+    apiSecretKey: z.string({ required_error: 'UNISMS_API_SECRET_KEY is required' }).min(1, 'UNISMS_API_SECRET_KEY is required'),
     maxMessageLength: z.number().int().min(1).max(160),
     failureThreshold: z.number().int().min(1).max(20),
     circuitCooldownMs: z.number().int().min(1000).max(3600000),

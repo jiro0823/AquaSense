@@ -5,6 +5,7 @@
  */
 
 import mqtt, { MqttClient } from 'mqtt';
+import { parseOrp } from './sensorValues';
 import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
@@ -15,7 +16,6 @@ interface MQTTConfig {
   username?: string;
   password?: string;
   clientId?: string;
-  defaultDo: number;
   topics: {
     readings: string;
     sensorWildcard: string;
@@ -35,6 +35,7 @@ export class MQTTService {
     turbidity?: number;
     do?: number;
     ammonia?: number;
+    orp?: number | null;
   } = {};
   private pendingBatchFlags = {
     temperature: false,
@@ -44,6 +45,8 @@ export class MQTTService {
   private onReadingReceived?: (reading: WaterQualityReading) => void;
   private onStatsUpdated?: (stats: WaterQualityStats) => void;
   private lastConnectionWarningAt = 0;
+  private latestDoReceivedAt = 0;
+  private latestOrpReceivedAt = 0;
 
   constructor(config?: Partial<MQTTConfig>) {
     this.config = {
@@ -51,7 +54,6 @@ export class MQTTService {
       username: config?.username || process.env.MQTT_USERNAME,
       password: config?.password || process.env.MQTT_PASSWORD,
       clientId: config?.clientId || `aquasense-backend-${Date.now()}`,
-      defaultDo: Number(config?.defaultDo ?? process.env.MQTT_DEFAULT_DO ?? 0),
       topics: {
         readings: config?.topics?.readings || process.env.MQTT_TOPIC_READINGS || 'water/esp32/readings',
         sensorWildcard: config?.topics?.sensorWildcard || process.env.MQTT_TOPIC_SENSOR_WILDCARD || 'aquasense/+',
@@ -81,7 +83,7 @@ export class MQTTService {
       // Connection established
       this.client.on('connect', () => {
         this.isConnected = true;
-        logger.info('✓ MQTT Connected successfully');
+        logger.info('âœ“ MQTT Connected successfully');
         this.subscribe();
         this.publishStatus('online');
 
@@ -138,7 +140,7 @@ export class MQTTService {
           logger.error('MQTT subscription error:', err.message);
         } else {
           logger.info(
-            `✓ Subscribed to topics: ${this.config.topics.readings}, ${this.config.topics.sensorWildcard}, ${this.config.topics.commands}`
+            `âœ“ Subscribed to topics: ${this.config.topics.readings}, ${this.config.topics.sensorWildcard}, ${this.config.topics.commands}`
           );
         }
       });
@@ -176,7 +178,10 @@ export class MQTTService {
       const data = JSON.parse(payload);
 
       // Accept both `do` and `dissolvedOxygen` key names.
-      const doValue = data.do ?? data.dissolvedOxygen ?? this.config.defaultDo;
+      const suppliedDo = data.do ?? data.dissolvedOxygen;
+      const doMeasured = suppliedDo !== undefined && suppliedDo !== null && String(suppliedDo).trim() !== '' && Number.isFinite(Number(suppliedDo));
+      // Keep the legacy numeric storage format, explicitly tagging placeholders.
+      const doValue = doMeasured ? suppliedDo : 0;
 
       // Validate required fields
       if (
@@ -193,6 +198,7 @@ export class MQTTService {
       const dissolvedOxygen = parseFloat(doValue);
       const turbidity = parseFloat(data.turbidity);
       const ammonia = parseFloat(data.ammonia ?? 0);
+      const orp = parseOrp(data.orp);
 
       const sanitized = this.sanitizeSensorValues({
         temperature,
@@ -232,13 +238,17 @@ export class MQTTService {
         sanitized.turbidity,
         sanitized.ammonia,
         data.location || 'ESP32-Sensor',
-        timestamp
+        timestamp,
+        doMeasured,
+        orp
       );
       const reading = {
         id: persisted?.id || `mqtt-${Date.now()}`,
         temperature: sanitized.temperature,
         ph: sanitized.ph,
         do: sanitized.dissolvedOxygen,
+        doMeasured,
+        orp,
         turbidity: sanitized.turbidity,
         ammonia: sanitized.ammonia,
         location: data.location || 'ESP32-Sensor',
@@ -251,6 +261,7 @@ export class MQTTService {
         temperature: reading.temperature,
         ph: reading.ph,
         dissolvedOxygen: reading.do,
+        dissolvedOxygenMeasured: doMeasured,
         turbidity: reading.turbidity,
         ammonia: reading.ammonia,
       });
@@ -259,6 +270,7 @@ export class MQTTService {
       const dbStats = await sensorReadingService.getStatistics(60);
       this.onStatsUpdated?.({
         timestamp: new Date(),
+        orp: dbStats.orp,
         temperature: dbStats.temperature,
         ph: dbStats.ph,
         do: dbStats.do,
@@ -267,16 +279,10 @@ export class MQTTService {
         healthScore: 0,
       });
 
-      this.latestSensorPayload = {
-        temperature: reading.temperature,
-        ph: reading.ph,
-        turbidity: reading.turbidity,
-        do: reading.do,
-        ammonia: reading.ammonia,
-      };
+      // Do not overwrite in-progress numeric-topic aggregation after async DB work.
 
       logger.info(
-        `[ESP32] Sensor reading received: Temp=${reading.temperature}°C, pH=${reading.ph}, DO=${reading.do}, Turbidity=${reading.turbidity}`
+        `[ESP32] Sensor reading received: Temp=${reading.temperature}Â°C, pH=${reading.ph}, DO=${reading.do}, Turbidity=${reading.turbidity}`
       );
     } catch (error) {
       logger.error('Failed to process sensor reading:', error);
@@ -319,9 +325,14 @@ export class MQTTService {
         this.latestSensorPayload.turbidity = parsed;
         this.pendingBatchFlags.turbidity = true;
         break;
+      case 'orp':
+        this.latestSensorPayload.orp = parsed;
+        this.latestOrpReceivedAt = Date.now();
+        break;
       case 'do':
       case 'dissolved-oxygen':
         this.latestSensorPayload.do = parsed;
+        this.latestDoReceivedAt = Date.now();
         break;
       case 'ammonia':
       case 'nh3':
@@ -343,9 +354,10 @@ export class MQTTService {
       const normalizedPayload = {
         temperature: this.latestSensorPayload.temperature,
         ph: this.latestSensorPayload.ph,
-        do: this.config.defaultDo,
+        do: Date.now() - this.latestDoReceivedAt <= 15000 ? this.latestSensorPayload.do : undefined,
         turbidity: this.latestSensorPayload.turbidity,
         ammonia: this.latestSensorPayload.ammonia ?? 0,
+        orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
         location: 'ESP32-MQTT',
         timestamp: new Date().toISOString(),
       };
@@ -481,7 +493,7 @@ export class MQTTService {
       this.publishStatus('offline');
       this.client.end(false, () => {
         this.isConnected = false;
-        logger.info('✓ MQTT disconnected');
+        logger.info('âœ“ MQTT disconnected');
         resolve();
       });
     });

@@ -8,6 +8,8 @@ export interface WaterQualityReading {
   temperature: number; // Celsius (0-50)
   ph: number; // pH level (0-14)
   do: number; // Dissolved Oxygen (0-14 mg/L)
+  doMeasured?: boolean;
+  orp?: number | null; // ORP in mV; distinct from dissolved oxygen.
   turbidity: number; // Turbidity (0-1000 NTU)
   ammonia: number; // Ammonia (0-10 ppm)
   location: string;
@@ -40,6 +42,7 @@ export interface WaterQualityThresholds {
 }
 
 export interface WaterQualityStats {
+  orp?: { current: number | null; average: number | null; min: number | null; max: number | null };
   timestamp: Date;
   temperature: {
     current: number;

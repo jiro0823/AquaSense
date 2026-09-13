@@ -5,8 +5,7 @@ import { Request, Response } from 'express';
 import { sendError, sendSuccess } from '../../../utils/response';
 import { logger } from '../../../utils/logger';
 import { alertService } from '../../../services/alert.service';
-import { smsService } from '../../../services/sms.service';
-import { smsLogService } from '../../../services/smsLogService';
+import { smsNotificationService } from '../../../services/smsNotification.service';
 import { buildSmsTemplate } from '../../../services/smsTemplate.service';
 import { config } from '../../../config/config';
 import type { AlertStatus } from '../../../services/alert.service';
@@ -103,28 +102,22 @@ export const resendAlert = async (req: Request, res: Response): Promise<void> =>
       action: alert.action,
     });
 
-    const sendResult = await smsService.sendSms(recipient, smsMessage);
-    const sentAt = new Date();
-
-    await smsLogService.createLog({
-      alertId: alert.id,
-      deviceId: alert.deviceId,
-      category: alert.category,
-      severity: alert.severity,
-      recipient,
-      provider: config.sms.provider,
-      providerResponse: sendResult.response,
-      success: sendResult.success,
-      retryCount: sendResult.retryCount,
-      sentAt,
+    const result = await smsNotificationService.send({
+      deviceId: alert.deviceId, category: 'WATER_QUALITY_ALERT', severity: alert.severity as AlertSeverity,
+      recipient, message: smsMessage, alertIds: [alert.id],
     });
-
-    if (sendResult.success) {
-      await alertService.markSmsSent(alert.id, sentAt);
+    if (!result) {
+      sendError(res, 409, 'A notification is already pending or cooling down');
+      return;
     }
-
-    sendSuccess(res, 200, 'Alert resent', {
-      success: sendResult.success,
+    if (!result.accepted) {
+      sendError(res, result.status === 'rejected' ? 422 : 502, 'Alert SMS was not confirmed sent', {
+        status: result.status, details: JSON.parse(result.response),
+      });
+      return;
+    }
+    sendSuccess(res, result.success ? 200 : 202, result.success ? 'Provider reports alert SMS sent' : 'Alert SMS accepted; awaiting provider status', {
+      success: result.success, status: result.status, referenceId: result.referenceId,
     });
   } catch (error) {
     logger.error('Failed to resend alert SMS', error);

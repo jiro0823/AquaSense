@@ -5,6 +5,7 @@
 import { logger } from '../utils/logger';
 import { SensorReading as SensorReadingModel } from '../database/models/SensorReading';
 import { Op } from 'sequelize';
+import { orpStatistics, type OrpStatistics } from './sensorValues';
 
 export interface SensorReading {
   id: string;
@@ -12,7 +13,9 @@ export interface SensorReading {
   temperature: number;
   ph: number;
   do: number;
+  doMeasured?: boolean;
   turbidity: number;
+  orp?: number | null;
   ammonia: number;
   location: string;
   timestamp: Date;
@@ -40,7 +43,9 @@ class SensorReadingService {
     turbidity: number,
     ammonia: number = 0,
     location: string = 'Default Location',
-    timestamp: Date = new Date()
+    timestamp: Date = new Date(),
+    doMeasured: boolean = true,
+    orp: number | null = null
   ): Promise<SensorReading | null> {
     try {
       const reading = await SensorReadingModel.create({
@@ -48,6 +53,8 @@ class SensorReadingService {
         temperature,
         ph,
         do: do_value,
+        doMeasured,
+        orp,
         turbidity,
         ammonia,
         location,
@@ -118,12 +125,14 @@ class SensorReadingService {
     do: SensorStatistics;
     turbidity: SensorStatistics;
     ammonia: SensorStatistics;
+    orp: OrpStatistics;
   }> {
     try {
       const readings = await this.getReadingsByTimeRange(minutes);
 
       if (readings.length === 0) {
         return {
+          orp: orpStatistics([]),
           temperature: { parameter: 'Temperature', current: 0, average: 0, min: 0, max: 0 },
           ph: { parameter: 'pH', current: 0, average: 0, min: 0, max: 0 },
           do: { parameter: 'Dissolved Oxygen', current: 0, average: 0, min: 0, max: 0 },
@@ -148,6 +157,7 @@ class SensorReadingService {
       const ammonias = readings.map((r) => r.ammonia);
 
       return {
+        orp: orpStatistics(readings),
         temperature: {
           parameter: 'Temperature',
           current: latestReading.temperature,
@@ -177,6 +187,7 @@ class SensorReadingService {
     } catch (error) {
       logger.error('Error calculating statistics', error);
       return {
+        orp: orpStatistics([]),
         temperature: { parameter: 'Temperature', current: 0, average: 0, min: 0, max: 0 },
         ph: { parameter: 'pH', current: 0, average: 0, min: 0, max: 0 },
         do: { parameter: 'Dissolved Oxygen', current: 0, average: 0, min: 0, max: 0 },
@@ -239,6 +250,8 @@ class SensorReadingService {
       temperature: reading.temperature,
       ph: reading.ph,
       do: reading.do,
+      doMeasured: reading.doMeasured,
+      orp: reading.orp ?? null,
       turbidity: reading.turbidity,
       ammonia: reading.ammonia,
       location: reading.location,

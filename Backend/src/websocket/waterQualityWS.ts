@@ -93,6 +93,7 @@ class WaterQualityWebSocketServer {
     const dbStats = await sensorReadingService.getStatistics(minutes);
     return {
       timestamp: new Date(),
+    orp: dbStats.orp,
       temperature: {
         current: dbStats.temperature.current,
         average: dbStats.temperature.average,

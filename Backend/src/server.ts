@@ -15,6 +15,7 @@ import { WaterQualityWebSocketServer } from './websocket/waterQualityWS';
 import { initializeDatabase, closeDatabase, syncDatabase } from './database/connection';
 import { initializeAllModels } from './database/models';
 import { mqttService } from './services/mqttService';
+import { smsLogService } from './services/smsLogService';
 
 /**
  * Initialize Express application
@@ -164,6 +165,11 @@ const startServer = async (): Promise<void> => {
     await initializeAllModels();
     logger.info('Synchronizing database schema...');
     await syncDatabase();
+    const refreshSmsStatus = (): void => {
+      void smsLogService.reconcilePending().catch(() => logger.warn('Unable to refresh pending SMS status'));
+    };
+    refreshSmsStatus();
+    setInterval(refreshSmsStatus, 30000).unref();
 
     const app = createApp();
     const PORT = config.server.port;

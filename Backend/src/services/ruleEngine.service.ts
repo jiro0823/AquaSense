@@ -21,6 +21,7 @@ export interface RuleEngineInput {
   temperature: number;
   ph: number;
   dissolvedOxygen: number;
+  dissolvedOxygenMeasured?: boolean;
   turbidity: number;
   ammonia?: number;
 }
@@ -128,7 +129,7 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
   }
 
   // Dissolved Oxygen
-  if (input.dissolvedOxygen < 2) {
+  if (input.dissolvedOxygenMeasured !== false && input.dissolvedOxygen < 2) {
     alerts.push({
       category: 'DO_LOW',
       severity: 'EMERGENCY',
@@ -138,7 +139,7 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
       action: 'AERATOR_ON_IMMEDIATE',
       message: 'Dissolved oxygen dangerously low',
     });
-  } else if (input.dissolvedOxygen < 3) {
+  } else if (input.dissolvedOxygenMeasured !== false && input.dissolvedOxygen < 3) {
     alerts.push({
       category: 'DO_LOW',
       severity: 'CRITICAL',
@@ -148,7 +149,7 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
       action: 'AERATOR_ON_IMMEDIATE',
       message: 'Dissolved oxygen critically low',
     });
-  } else if (input.dissolvedOxygen < 5) {
+  } else if (input.dissolvedOxygenMeasured !== false && input.dissolvedOxygen < 5) {
     alerts.push({
       category: 'DO_LOW',
       severity: 'WARNING',

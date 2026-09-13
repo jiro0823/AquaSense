@@ -1,19 +1,10 @@
+#include <Arduino.h>
+#include "config.h"
+
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-
-// WIFI
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-
-// MQTT
-const char* mqtt_server = "broker.hivemq.com";
-
-// PIN SETUP (based on your board)
-#define PH_PIN 35       // P34
-#define TURB_PIN 34    // SVP (GPIO 36)
-#define ONE_WIRE_BUS 4   // P4
 
 // TEMP SENSOR
 OneWire oneWire(ONE_WIRE_BUS);
@@ -50,7 +41,7 @@ void setup_wifi() {
 void reconnect() {
   while (!client.connected()) {
     Serial.print("Connecting to MQTT...");
-    if (client.connect("ESP32_AquaSense")) {
+    if (client.connect(MQTT_CLIENT_ID)) {
       Serial.println("Connected!");
     } else {
       Serial.print("Failed, rc=");
@@ -66,7 +57,7 @@ void setup() {
   analogSetAttenuation(ADC_11db); // full range
 
   setup_wifi();
-  client.setServer(mqtt_server, 1883);
+  client.setServer(mqtt_server, MQTT_PORT);
 
   sensors.begin();
 }
@@ -105,9 +96,9 @@ void loop() {
   phValue = 7 + ((2.5 - voltage) / 0.18);
 
   // 📡 MQTT PUBLISH
-  client.publish("aquasense/temperature", String(temperature).c_str());
-  client.publish("aquasense/turbidity", String(turbidity).c_str());
-  client.publish("aquasense/ph", String(phValue).c_str());
+  client.publish(MQTT_TOPIC_TEMPERATURE, String(temperature).c_str());
+  client.publish(MQTT_TOPIC_TURBIDITY, String(turbidity).c_str());
+  client.publish(MQTT_TOPIC_PH, String(phValue).c_str());
 
   // DEBUG
   Serial.println("===== SENSOR DATA =====");

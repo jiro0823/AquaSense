@@ -1,29 +1,15 @@
+#include <Arduino.h>
+#include "config.h"
+
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ESP32Servo.h>
 #include <ArduinoJson.h>
 #include <time.h>
 
-// ===== WiFi =====
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-
-// ===== Backend =====
-const char* API_BASE_URL = "http://192.168.1.100:5000/api/v1"; // change to your backend host
-const char* DEVICE_ID = "esp32-feeder-1";
-const char* DEVICE_KEY = "replace-with-your-device-key";
-
 // ===== Servo =====
-const int SERVO_PIN = 13;
 Servo feederServo;
 bool motorOnState = false;
-
-// ===== NTP =====
-const long GMT_OFFSET_SEC = 8 * 3600;   // Philippines UTC+8
-const int DAYLIGHT_OFFSET_SEC = 0;
-const char* NTP_SERVER_1 = "pool.ntp.org";
-const char* NTP_SERVER_2 = "time.nist.gov";
-const char* NTP_SERVER_3 = "asia.pool.ntp.org";
 
 // ===== Scheduler State =====
 struct FeedingSchedule {
@@ -38,7 +24,6 @@ int scheduleCount = 0;
 String firedKeys[20]; // per schedule anti-repeat cache (id + date + time + minute)
 
 unsigned long lastSyncMs = 0;
-const unsigned long SYNC_INTERVAL_MS = 30000;
 
 void connectWiFi() {
   Serial.print("Connecting WiFi");

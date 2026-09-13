@@ -222,5 +222,3 @@ For hosting, run `npm start` in the built backend and serve `Frontend/dist/` thr
 
 - [Implemented database diagram](docs/ERD.md) — compare with current models; [extended ERD](docs/ERD_final.md) also contains proposed tables that are not implemented.
 - [Backend API structure](Backend/API_STRUCTURE.md) — development organization and examples; current routes are in `Backend/src/api/v1/routes/` and `Backend/src/iot/water/routes.ts`.
-- [Prediction evaluation](PREDICTIVE_ANALYTICS_EVALUATION.md) and [SMS evaluation](SMS_ALERT_EVALUATION.md) — implementation background and earlier verification notes.
-- [Security evaluation](SECURITY_EVALUATION.md) — previous assessment and follow-up work; current code and the limitations above take precedence over older claims.

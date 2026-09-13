@@ -89,7 +89,7 @@ if (!(Test-Path Frontend/.env)) { Copy-Item Frontend/.env.example Frontend/.env 
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | PostgreSQL details: `localhost`, `5432`, `AquaSense`, `postgres`, and your password. Keep `DB_DIALECT=postgres`. |
 | `PORT`, `HOST`, `CORS_ORIGIN` | Local defaults: `5001`, `localhost`, and the allowed website `http://localhost:3000`. |
 | `JWT_SECRET` | A private random value of at least 32 characters. Replace the template value. |
-| `UNISMS_API_SECRET_KEY`, `FARMER_PHONE` | SMS credentials and recipient. Startup requires a nonempty key; a placeholder allows development but cannot send messages. Leave the phone blank to skip SMS. |
+| `UNISMS_API_SECRET_KEY`, `UNISMS_SENDER_ID`, `FARMER_PHONE` | Valid provider key, assigned/approved sender ID, and real farmer mobile. A placeholder key permits startup but cannot send. Leave the phone blank to skip automatic SMS. |
 | `MQTT_*`, `DEVICE_KEYS` | Sensor messaging settings and device credentials; see integration instructions below. |
 
 Generate `JWT_SECRET` with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. Keep secrets out of Git and screenshots. Backend `.env` overrides matching process environment settings.
@@ -139,13 +139,15 @@ npm.cmd --prefix Frontend run dev
 
 Open **http://localhost:3000** and create an account. **http://localhost:5001/health** checks whether the backend responds. `START_ALL.bat` is a Windows shortcut after setup. Stop each server with `Ctrl+C`.
 
+Run only one backend instance. `npm run dev` checks the configured port before starting: if a healthy AquaSense backend already uses it, the command reports that and exits normally. To restart, stop the existing backend in its own terminal with `Ctrl+C`, then run the command again. An occupied port without a verified healthy backend produces a diagnostic instead. Run `npm.cmd --prefix Backend run test:startup` to check this startup guard.
+
 `Frontend/.env`: `VITE_API_URL=http://localhost:5001/api/v1` and `VITE_WS_URL=http://localhost:5001`. Restart after changes. Older guides mention 5000; the supplied templates use **5001**.
 
 ## 6. Integration setup
 
 **Water sensors through MQTT.** Configure Wi-Fi and match the sketch's broker/topics with backend `MQTT_*` settings. Template topics are `water/esp32/readings` and `aquasense/+`; broker credentials use `MQTT_USERNAME` and `MQTT_PASSWORD`.
 
-- The folder sketch sends temperature, pH, and raw turbidity separately. Oxygen uses `MQTT_DEFAULT_DO` (default zero); ammonia is unmeasured. These fallback values can cause misleading alerts.
+- The folder sketch sends temperature, pH, and raw turbidity separately. Missing oxygen is tagged as unmeasured (`do_measured=false`), excluded from oxygen alerts/predictions, and hidden in dashboard oxygen values/charts. `MQTT_DEFAULT_DO` is no longer used. Historical rows lack measurement provenance and are also marked unmeasured. Calibrate raw turbidity to NTU and the pH sensor before relying on their alerts; ammonia is unmeasured.
 - The root sketch uses `capstone2026/water/esp32/readings`. Match that topic and replace its `millis()` timestamp with real date/time, or omit it to use backend receipt time.
 - The sketches use different pins. Follow the selected sketch's definitions and calibrate sensors; raw turbidity is not a calibrated NTU measurement.
 
@@ -155,7 +157,7 @@ Open **http://localhost:3000** and create an account. **http://localhost:5001/he
 
 Match firmware `DEVICE_ID` and backend `FEEDER_DEVICE_ID` (default `esp32-feeder-1`). Set firmware `API_BASE_URL` to the backend computer's network address, port **5001**. Local-network access requires backend `HOST=0.0.0.0` and a firewall allowance. The powered ESP32 runs up to 20 schedules, polls `/feeding/device/sync` every 30 seconds, and confirms through `/feeding/device/ack`. It uses servo GPIO 13 and UTC+8 time; backend `FEEDING_TIMEZONE` defaults to `Asia/Manila`. Manual commands may wait for the next poll.
 
-**SMS through UniSMS.** Set a valid API key and international `FARMER_PHONE` (`+63` plus the mobile number without its initial `0`). Configure `FARMER_NAME`, `TANK_NAME`, and optional `FARM_NAME`. Custom `UNISMS_SENDER_ID` values need provider approval. Critical/emergency alerts and high/critical predictions trigger texts. Cooldowns reduce repeats; retries and outcomes are recorded in `sms_logs`.
+**SMS through UniSMS.** Set a valid API key and international `FARMER_PHONE` (`+63` plus the mobile number without its initial `0`). Configure `FARMER_NAME`, `TANK_NAME`, and optional `FARM_NAME`. Set `UNISMS_SENDER_ID` to the exact sender assigned/approved by UniSMS. Critical/emergency alerts and eligible high/critical predictions trigger texts. Every submission is reserved in `sms_logs` before sending, with database locking to prevent duplicates. Pending messages are checked by reference ID every 30 seconds; only provider-confirmed sent messages are labeled Sent. Validation failures are not automatically retried within a submission; automatic alerts back off for at least one minute after a failed attempt. Timeouts with uncertain submission status are labeled Unconfirmed and blocked from automatic resending until reviewed against provider history. This is provider send status, not a handset delivery receipt.
 
 **Access boundaries.** HTTP has session, role, and device checks, with development exceptions. MQTT and Socket.IO lack equivalent authentication; water records are shared across accounts. Public or separate-farm deployment needs these gaps addressed and a private, authenticated broker.
 

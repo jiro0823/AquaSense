@@ -30,7 +30,7 @@ const parameterCards: CardConfig[] = [
 const formatValue = (value: number, unit: string) => `${value.toFixed(unit === '' ? 2 : 1)}${unit ? ` ${unit}` : ''}`;
 
 const DashboardParametersPage: React.FC = () => {
-  const { statistics, chartData, predictiveWarning } = useDashboardData();
+  const { statistics, chartData, predictiveWarning, latestReading } = useDashboardData();
 
   const currentRiskScore = predictiveWarning?.riskScore ?? 22;
 
@@ -68,6 +68,12 @@ const DashboardParametersPage: React.FC = () => {
         <section className="lg:flex-1 lg:min-h-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2 gap-2.5">
           {parameterCards.map((item) => {
             const isRisk = item.key === 'riskScore';
+            if (item.key === 'do' && latestReading?.doMeasured === false) {
+              return <div key={item.key} className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
+                <h3 className="font-semibold text-gray-900">Dissolved Oxygen</h3>
+                <p className="mt-2">Not measured. Connect a calibrated oxygen sensor to enable oxygen alerts.</p>
+              </div>;
+            }
             const stats: CardStats = isRisk ? riskStats : (statistics[item.key as ParameterKey] as WaterQualityStats[ParameterKey]);
             const isNormal = item.normal(stats.current);
             const chart = isRisk ? riskChartData : chartData.slice(-20);

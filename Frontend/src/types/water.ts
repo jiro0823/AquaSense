@@ -9,6 +9,7 @@ export interface WaterQualityReading {
   temperature: number;
   ph: number;
   do: number;
+  doMeasured?: boolean;
   turbidity: number;
   ammonia: number;
   location: string;
@@ -145,11 +146,4 @@ export interface PredictionLog {
   createdAt: string;
 }
 
-export interface SmsLogEntry {
-  id: string;
-  category: string;
-  severity: string;
-  recipient: string;
-  success: boolean;
-  sentAt: string;
-}
+export type { SmsDeliveryStatus, SmsLogEntry } from './sms';

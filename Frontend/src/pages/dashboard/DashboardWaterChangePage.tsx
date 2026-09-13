@@ -73,9 +73,8 @@ const loadWaterChangeState = (): WaterChangeState => {
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const notifyFarmer = async (message: string) => {
-  const trimmed = message.length > 160 ? `${message.slice(0, 157)}...` : message;
   try {
-    await apiClient.post('/sms/test', { message: trimmed });
+    await apiClient.post('/sms/test', { message });
   } catch {
     // best-effort notification; the water change is still logged locally
   }
@@ -146,7 +145,7 @@ const DashboardWaterChangePage: React.FC = () => {
 
     if (trigger === 'automatic') {
       void notifyFarmer(
-        `AquaSense ALERT: Critical water quality detected (${reason}). Automatic water change was started to protect your crayfish. Please check the tank soon.`
+        'AquaSense critical risk warning. Please check the tank now. The dashboard water-change simulation has finished; a physical water change is not confirmed.'
       );
     }
   }, []);

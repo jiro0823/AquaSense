@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useWaterQualityWebSocket } from '../../hooks/useWaterQualityWebSocket';
 import { apiClient } from '../../services/apiClient';
-import type { PredictiveAnalyticsResult, PredictionLog, SmsLogEntry } from '../../types/water';
+import type { PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
+import type { SmsLogEntry } from '../../types/sms';
 
 interface ChartDataPoint {
   time: string;

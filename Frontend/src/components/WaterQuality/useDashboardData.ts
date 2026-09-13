@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useWaterQualityWebSocket } from '../../hooks/useWaterQualityWebSocket';
 import { apiClient } from '../../services/apiClient';
-import type { HealthAlert, PredictiveAnalyticsResult, PredictionLog, SmsLogEntry } from '../../types/water';
+import type { HealthAlert, PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
+import type { SmsLogEntry } from '../../types/sms';
 
 interface ChartDataPoint {
   time: string;
@@ -51,7 +52,7 @@ export const useDashboardData = () => {
         time: new Date(reading.timestamp).toLocaleTimeString(),
         temperature: reading.temperature,
         ph: reading.ph,
-        do: reading.do,
+        do: reading.doMeasured === false ? undefined : reading.do,
         turbidity: reading.turbidity,
         ammonia: reading.ammonia,
       }));
@@ -69,7 +70,7 @@ export const useDashboardData = () => {
           time,
           temperature: latestReading.temperature,
           ph: latestReading.ph,
-          do: latestReading.do,
+          do: latestReading.doMeasured === false ? undefined : latestReading.do,
           turbidity: latestReading.turbidity,
           ammonia: latestReading.ammonia,
         },

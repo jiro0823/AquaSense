@@ -48,7 +48,7 @@ const DashboardOverviewPage: React.FC = () => {
   const metrics: Array<{ title: string; value: string; color: string; icon: ParameterIconName; status: { label: string; color: string; bg: string } }> = [
     { title: 'TEMPERATURE', value: latestReading ? `${latestReading.temperature.toFixed(1)} °C` : '--', color: '#f59e0b', icon: 'temperature', status: getStatus('temp', latestReading?.temperature || 0) },
     { title: 'pH LEVEL', value: latestReading ? latestReading.ph.toFixed(1) : '--', color: '#3b82f6', icon: 'ph', status: getStatus('ph', latestReading?.ph || 0) },
-    { title: 'DISSOLVED OXYGEN', value: latestReading ? `${latestReading.do.toFixed(1)} mg/L` : '--', color: '#22c55e', icon: 'do', status: getStatus('do', latestReading?.do || 0) },
+    { title: 'DISSOLVED OXYGEN', value: latestReading && latestReading.doMeasured !== false ? `${latestReading.do.toFixed(1)} mg/L` : '--', color: '#22c55e', icon: 'do', status: latestReading?.doMeasured === false ? { label: 'Unmeasured', color: 'text-gray-600', bg: 'bg-gray-100' } : getStatus('do', latestReading?.do || 0) },
     { title: 'TURBIDITY', value: latestReading ? `${latestReading.turbidity.toFixed(0)} NTU` : '--', color: '#a855f7', icon: 'turbidity', status: getStatus('turbidity', latestReading?.turbidity || 0) },
     { title: 'AMMONIA (NH3)', value: latestReading ? `${latestReading.ammonia.toFixed(2)} mg/L` : '--', color: '#ef4444', icon: 'ammonia', status: getStatus('ammonia', latestReading?.ammonia || 0) },
   ];
@@ -60,11 +60,11 @@ const DashboardOverviewPage: React.FC = () => {
 
   const renderChart = (title: string, dataKey: string, color: string, yDomain: [number | string, number | string], idealLabel: string) => (
     <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-2.5 lg:p-2 h-[220px] lg:h-full lg:min-h-0 flex flex-col relative">
-      <div className="flex justify-between items-center mb-1 shrink-0 gap-2">
+      <div className="flex items-center justify-between gap-2 mb-1 shrink-0">
         <h3 className="text-xs font-semibold flex items-center gap-1.5 truncate" style={{ color }}><CustomIcon name={dataKey === 'temperature' ? 'temperature' : dataKey === 'ph' ? 'ph' : dataKey === 'do' ? 'do' : dataKey === 'turbidity' ? 'turbidity' : dataKey === 'ammonia' ? 'ammonia' : 'shield'} color={color} size="h-4 w-4" /> <span className="truncate">{title}</span></h3>
         <span className="text-[9px] text-gray-400 whitespace-nowrap">{idealLabel}</span>
       </div>
-      <div className="flex-1 min-h-0 w-full relative">
+      <div className="relative flex-1 w-full min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={processedChartData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
             <defs>
@@ -93,24 +93,24 @@ const DashboardOverviewPage: React.FC = () => {
 
       {/* Top Header Section */}
       <header className="shrink-0 flex flex-col xl:flex-row justify-between items-center gap-4 bg-white border border-gray-200 shadow-sm rounded-2xl p-3 lg:p-2.5 text-center xl:text-left">
-        <div className="flex flex-col sm:flex-row items-center gap-3">
-          <div className="bg-blue-50 p-2 rounded-lg flex-shrink-0">
+        <div className="flex flex-col items-center gap-3 sm:flex-row">
+          <div className="flex-shrink-0 p-2 rounded-lg bg-blue-50">
              <CustomIcon name="shield" color="#2563eb" size="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-base md:text-lg lg:text-xl font-bold tracking-tight text-gray-900 uppercase">AQUASENSE WATER QUALITY MONITORING DASHBOARD</h1>
+            <h1 className="text-base font-bold tracking-tight text-gray-900 uppercase md:text-lg lg:text-xl">AQUASENSE WATER QUALITY MONITORING DASHBOARD</h1>
             <p className="text-xs text-gray-500 mt-0.5">Real-time Water Quality Monitoring and Mortality Risk Assessment</p>
           </div>
         </div>
-        <div className="flex flex-wrap justify-center xl:justify-end items-center gap-3 md:gap-6 text-xs md:text-sm w-full xl:w-auto">
-          <div className="flex items-center gap-2 border-r border-gray-200 pr-3 md:pr-6">
+        <div className="flex flex-wrap items-center justify-center w-full gap-3 text-xs xl:justify-end md:gap-6 md:text-sm xl:w-auto">
+          <div className="flex items-center gap-2 pr-3 border-r border-gray-200 md:pr-6">
             <CustomIcon name="temperature" color="#9ca3af" size="h-5 w-5" />
             <div className="flex flex-col text-left">
               <span className="text-gray-500">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               <span className="font-semibold text-gray-900">{new Date().toLocaleTimeString('en-US')}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 border-r border-gray-200 pr-3 md:pr-6">
+          <div className="flex items-center gap-2 pr-3 border-r border-gray-200 md:pr-6">
              <div className="flex flex-col text-right">
                 <span className="text-gray-500">Tank ID</span>
                 <span className="font-semibold text-blue-600">{profile.tankName || 'POND-01'}</span>
@@ -128,13 +128,13 @@ const DashboardOverviewPage: React.FC = () => {
         </div>
       </header>
 
-      {error && <div className="shrink-0 rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">Connection error: {error}</div>}
+      {error && <div className="p-2 text-sm border shrink-0 rounded-xl border-rose-200 bg-rose-50 text-rose-700">Connection error: {error}</div>}
 
       {/* Top Metrics Cards */}
       <section className="shrink-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 lg:gap-2">
         {metrics.map((metric, idx) => (
           <div key={idx} className="bg-white border border-gray-200 shadow-sm rounded-xl p-2.5 lg:p-2 flex flex-col justify-between items-center text-center relative overflow-hidden group hover:border-gray-300 transition-colors">
-             <div className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-opacity">
+             <div className="absolute transition-opacity -right-4 -top-4 opacity-5 group-hover:opacity-10">
                 <CustomIcon name={metric.icon} color={metric.color} size="h-8 w-8" />
              </div>
              <div className="flex items-center gap-1.5 mb-1 w-full justify-center">
@@ -153,7 +153,7 @@ const DashboardOverviewPage: React.FC = () => {
         {/* Mortality Risk Top Card */}
         <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-2.5 lg:p-2 flex flex-col justify-between items-center text-center relative overflow-hidden group hover:border-gray-300 transition-colors">
             <span className="text-[10px] font-semibold text-gray-500 tracking-wider uppercase mb-1">MORTALITY RISK LEVEL</span>
-            <div className="text-lg lg:text-xl font-bold mb-1 tracking-tight uppercase" style={{ color: riskColor }}>{riskLevel}</div>
+            <div className="mb-1 text-lg font-bold tracking-tight uppercase lg:text-xl" style={{ color: riskColor }}>{riskLevel}</div>
             <div className="flex items-center gap-1.5">
                <CustomIcon name="shield" color={riskColor} size="h-4 w-4" />
                <span className="text-xs font-semibold text-gray-600">Risk Score: {currentRiskScore.toFixed(0)}%</span>
@@ -201,7 +201,7 @@ const DashboardOverviewPage: React.FC = () => {
                    </Pie>
                  </PieChart>
                </ResponsiveContainer>
-               <div className="absolute bottom-1 flex flex-col items-center">
+               <div className="absolute flex flex-col items-center bottom-1">
                   <span className="text-2xl font-bold text-gray-900">{currentRiskScore.toFixed(0)}%</span>
                   <span className="text-sm font-bold mt-0.5 uppercase" style={{ color: riskColor }}>{riskLevel}</span>
                </div>
@@ -215,19 +215,19 @@ const DashboardOverviewPage: React.FC = () => {
           <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto bg-white border border-gray-200 shadow-sm rounded-xl p-3 lg:p-2.5">
              <h3 className="text-[10px] font-semibold text-gray-500 tracking-widest uppercase mb-2 border-b border-gray-200 pb-1.5">RISK LEVEL GUIDE</h3>
              <div className="flex flex-col gap-1.5">
-                <div className="flex justify-between items-center text-xs">
+                <div className="flex items-center justify-between text-xs">
                    <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div><span className="font-semibold text-rose-600">EXTREME</span></div>
                    <span className="text-gray-500">76 - 100</span>
                 </div>
-                <div className="flex justify-between items-center text-xs">
+                <div className="flex items-center justify-between text-xs">
                    <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-orange-500"></div><span className="font-semibold text-orange-600">HIGH</span></div>
                    <span className="text-gray-500">51 - 75</span>
                 </div>
-                <div className="flex justify-between items-center text-xs">
+                <div className="flex items-center justify-between text-xs">
                    <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-yellow-500"></div><span className="font-semibold text-yellow-600">MEDIUM</span></div>
                    <span className="text-gray-500">26 - 50</span>
                 </div>
-                <div className="flex justify-between items-center text-xs">
+                <div className="flex items-center justify-between text-xs">
                    <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div><span className="font-semibold text-emerald-600">LOW</span></div>
                    <span className="text-gray-500">0 - 25</span>
                 </div>
@@ -245,7 +245,7 @@ const DashboardOverviewPage: React.FC = () => {
                   { name: 'Turbidity', status: metrics[3].status.label, color: metrics[3].color, icon: 'turbidity', good: metrics[3].status.label === 'Moderate' },
                   { name: 'pH Level', status: metrics[1].status.label, color: metrics[1].color, icon: 'ph', good: metrics[1].status.label === 'Normal' },
                 ] as Array<{ name: string; status: string; color: string; icon: ParameterIconName; good: boolean }>).map((factor, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs">
+                  <div key={idx} className="flex items-center justify-between text-xs">
                      <div className="flex items-center gap-2">
                         <CustomIcon name={factor.icon} color={factor.color} size="h-4 w-4" />
                         <span className="text-gray-600">{factor.name}</span>
@@ -265,7 +265,7 @@ const DashboardOverviewPage: React.FC = () => {
 
       {/* Footer Status Bar */}
       <footer className="shrink-0 flex flex-col md:flex-row justify-between items-center gap-3 bg-white border border-gray-200 shadow-sm rounded-xl p-2.5 lg:p-2 text-center md:text-left">
-         <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+         <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-4">
             <span className="text-[10px] text-gray-500 uppercase tracking-wider">Update Interval</span>
             <div className="flex items-center gap-2 text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-lg text-xs font-semibold">
                <svg className="w-3.5 h-3.5 animate-spin-slow flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>

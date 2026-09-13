@@ -2,6 +2,7 @@ import React from 'react';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
 import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
 import type { AlertSeverity, HealthAlert } from '../../types/water';
+import type { SmsLogEntry } from '../../types/sms';
 
 type Tone = 'emerald' | 'amber' | 'cyan' | 'rose' | 'gray';
 
@@ -109,7 +110,7 @@ const AlertRow = ({ alert, showAction = false }: { alert: HealthAlert; showActio
   </div>
 );
 
-const SmsRow = ({ log }: { log: { id: string; category: string; severity: string; recipient: string; success: boolean; sentAt: string } }) => (
+const SmsRow = ({ log }: { log: SmsLogEntry }) => (
   <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
     <div className="min-w-0">
       <p className="truncate text-xs font-semibold text-gray-900">{log.category.replace(/_/g, ' ')}</p>
@@ -117,7 +118,7 @@ const SmsRow = ({ log }: { log: { id: string; category: string; severity: string
     </div>
     <div className="shrink-0 text-right">
       <p className="mb-1 text-[10px] text-gray-500">{maskPhone(log.recipient)}</p>
-      <Pill label={log.success ? 'Sent' : 'Failed'} tone={log.success ? 'emerald' : 'rose'} />
+      <Pill label={log.deliveryStatus === 'unknown' ? 'Unconfirmed' : (log.deliveryStatus || (log.success ? 'Sent' : 'Failed'))} tone={log.success ? 'emerald' : ['pending', 'retrying', 'unknown'].includes(log.deliveryStatus || '') ? 'amber' : 'rose'} />
     </div>
   </div>
 );
@@ -141,7 +142,8 @@ const DashboardAlertsPage: React.FC = () => {
   const recent = recentAlerts?.length ? recentAlerts : active;
   const critical = active.filter(isCriticalAlert);
   const sentSms = smsLogs.filter((log) => log.success).length;
-  const failedSms = smsLogs.filter((log) => !log.success).length;
+  const failedSms = smsLogs.filter((log) => !log.success && !['pending', 'retrying', 'unknown'].includes(log.deliveryStatus || '')).length;
+  const pendingSms = smsLogs.filter((log) => ['pending', 'retrying', 'unknown'].includes(log.deliveryStatus || '')).length;
   const latestCritical = critical[0];
 
   return (
@@ -159,7 +161,7 @@ const DashboardAlertsPage: React.FC = () => {
       <section className="shrink-0 grid grid-cols-2 xl:grid-cols-4 gap-2.5">
         <MetricTile label="Active Alerts" value={`${active.length}`} detail={active.length ? 'Needs farmer review' : 'No active issues'} tone={active.length > 0 ? 'amber' : 'emerald'} icon={<DashboardIcon name="bell" />} />
         <MetricTile label="Critical" value={`${critical.length}`} detail={critical.length ? 'Check tank first' : 'No urgent issue'} tone={critical.length > 0 ? 'rose' : 'gray'} icon={<DashboardIcon name="alert" />} />
-        <MetricTile label="SMS Sent" value={`${sentSms}`} detail="Successful notifications" tone="cyan" icon={<DashboardIcon name="sms" />} />
+        <MetricTile label="SMS Sent" value={`${sentSms}`} detail={`${pendingSms} pending or unconfirmed`} tone="cyan" icon={<DashboardIcon name="sms" />} />
         <MetricTile label="SMS Failed" value={`${failedSms}`} detail={failedSms ? 'Review connection/API' : 'No failed sends'} tone={failedSms > 0 ? 'amber' : 'gray'} icon={<DashboardIcon name="sms" />} />
       </section>
 

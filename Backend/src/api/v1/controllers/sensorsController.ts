@@ -8,29 +8,12 @@ import { sensorReadingService } from '../../../services/sensorReadingService';
 import type { DeviceAuthenticatedRequest } from '../../../middleware/deviceAuthMiddleware';
 import { waterAlertNotificationService } from '../../../services/waterAlertNotification.service';
 
-interface SensorPayload {
-  deviceId?: string;
-  temperature?: number;
-  ph?: number;
-  dissolvedOxygen?: number;
-  turbidity?: number;
-  ammonia?: number;
-}
-
-const parseNumber = (value: unknown): number | null => {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(parsed)) {
-    return null;
-  }
-  return parsed;
-};
-
 /**
  * POST /api/v1/sensors/data
  */
 export const ingestSensorData = async (req: DeviceAuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const payload = req.body as SensorPayload;
+    const payload = req.body;
     const deviceId = payload.deviceId;
 
     if (!deviceId) {
@@ -38,36 +21,8 @@ export const ingestSensorData = async (req: DeviceAuthenticatedRequest, res: Res
       return;
     }
 
-    const temperature = parseNumber(payload.temperature);
-    const ph = parseNumber(payload.ph);
-    const dissolvedOxygen = parseNumber(payload.dissolvedOxygen);
-    const turbidity = parseNumber(payload.turbidity);
-    const ammonia = parseNumber(payload.ammonia ?? 0);
-
-    if (temperature === null || ph === null || dissolvedOxygen === null || turbidity === null || ammonia === null) {
-      sendError(res, 400, 'Invalid sensor values');
-      return;
-    }
-
-    await sensorReadingService.addSensorReading(
-      deviceId,
-      temperature,
-      ph,
-      dissolvedOxygen,
-      turbidity,
-      ammonia,
-      deviceId,
-      new Date()
-    );
-
-    const notificationResult = await waterAlertNotificationService.processReading({
-      deviceId,
-      temperature,
-      ph,
-      dissolvedOxygen,
-      turbidity,
-      ammonia,
-    });
+    const reading = await sensorReadingService.ingest(deviceId, payload);
+    const notificationResult = await waterAlertNotificationService.processReading({ ...reading, dissolvedOxygen: reading.do, dissolvedOxygenMeasured: reading.doMeasured });
 
     logger.info('[ESP32] Sensor payload processed', {
       deviceId,

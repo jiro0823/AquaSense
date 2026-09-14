@@ -5,6 +5,7 @@
 export interface WaterQualityReading {
   id: string;
   timestamp: Date;
+<<<<<<< Updated upstream
   temperature: number; // Celsius (0-50)
   ph: number; // pH level (0-14)
   do: number; // Dissolved Oxygen (0-14 mg/L)
@@ -12,8 +13,18 @@ export interface WaterQualityReading {
   orp?: number | null; // ORP in mV; distinct from dissolved oxygen.
   turbidity: number; // Turbidity (0-1000 NTU)
   ammonia: number; // Ammonia (0-10 ppm)
+=======
+  temperature: number | null; // Celsius (0-50)
+  ph: number | null; // pH level (0-14)
+  do: number | null; // Dissolved Oxygen (0-14 mg/L)
+  doMeasured?: boolean;
+  orp?: number | null; // ORP in mV; distinct from dissolved oxygen.
+  turbidity: number | null; // Interpret using turbidityUnit; raw ADC is not NTU.
+  ammonia: number | null; // NH3-N mg/L as N; null without validated TAN.
+>>>>>>> Stashed changes
   location: string;
-  status: 'normal' | 'warning' | 'critical';
+  status: 'normal' | 'warning' | 'critical' | 'unavailable';
+  turbidityUnit?: string;
 }
 
 export interface WaterQualityThresholds {
@@ -45,36 +56,36 @@ export interface WaterQualityStats {
   orp?: { current: number | null; average: number | null; min: number | null; max: number | null };
   timestamp: Date;
   temperature: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   ph: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   do: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   turbidity: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   ammonia: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
-  healthScore: number; // 0-100
+  healthScore: number | null; // 0-100
 }
 
 export interface HealthAlert {

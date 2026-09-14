@@ -1,3 +1,4 @@
+import type { HealthSummary } from './sensorHealth';
 import { alertService } from './alert.service';
 import { predictiveAnalyticsService } from './predictiveAnalytics.service';
 import { ruleEngine, type AlertSeverity, type RuleAlertResult } from './ruleEngine.service';
@@ -8,12 +9,23 @@ import { logger } from '../utils/logger';
 
 export interface WaterAlertNotificationInput {
   deviceId: string;
+<<<<<<< Updated upstream
   temperature: number;
   ph: number;
   dissolvedOxygen: number;
   dissolvedOxygenMeasured?: boolean;
   turbidity: number;
   ammonia?: number;
+=======
+  temperature: number | null;
+  ph: number | null;
+  dissolvedOxygen: number | null;
+  dissolvedOxygenMeasured?: boolean;
+  turbidity: number | null;
+  ammonia?: number | null;
+  sensorHealth?: HealthSummary;
+  turbidityUnit?: string;
+>>>>>>> Stashed changes
 }
 
 export interface WaterAlertNotificationResult {
@@ -106,7 +118,7 @@ class WaterAlertNotificationService {
   async processPredictiveWarning(
     deviceId: string,
     warningCard: {
-      riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+      riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | 'UNAVAILABLE';
       cause: string;
       estimatedUnsafeInMinutes: number | null;
     }

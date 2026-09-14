@@ -16,43 +16,6 @@ import { smsLogService } from '../../../services/smsLogService';
 import { alertService } from '../../../services/alert.service';
 import { waterAlertNotificationService } from '../../../services/waterAlertNotification.service';
 
-const calculateHealthScore = (
-  temperature: number,
-  ph: number,
-  dissolvedOxygen: number,
-  turbidity: number
-): number => {
-  let score = 100;
-
-  if (temperature < 15 || temperature > 35) {
-    score -= 20;
-  } else if (temperature > 30) {
-    score -= 10;
-  }
-
-  if (ph < 6.5 || ph > 8.5) {
-    score -= 25;
-  } else if (ph < 7.0 || ph > 8.0) {
-    score -= 10;
-  }
-
-  if (dissolvedOxygen < 3) {
-    score -= 30;
-  } else if (dissolvedOxygen < 5) {
-    score -= 15;
-  } else if (dissolvedOxygen < 8) {
-    score -= 5;
-  }
-
-  if (turbidity > 100) {
-    score -= 20;
-  } else if (turbidity > 50) {
-    score -= 10;
-  }
-
-  return Math.max(0, score);
-};
-
 const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStats> => {
   const dbStats = await sensorReadingService.getStatistics(minutes);
 
@@ -89,12 +52,7 @@ const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStat
       min: dbStats.ammonia.min,
       max: dbStats.ammonia.max,
     },
-    healthScore: calculateHealthScore(
-      dbStats.temperature.current,
-      dbStats.ph.current,
-      dbStats.do.current,
-      dbStats.turbidity.current
-    ),
+    healthScore: dbStats.healthScore,
   };
 };
 
@@ -116,6 +74,7 @@ const ingestMeta: IngestMeta = {
  */
 export const addReading = async (req: Request, res: Response): Promise<void> => {
   try {
+<<<<<<< Updated upstream
     const { deviceId, temperature, ph, do: dissolvedOxygen, turbidity, location, ammonia } = req.body;
 
     if (temperature === undefined || ph === undefined || dissolvedOxygen === undefined || turbidity === undefined) {
@@ -162,6 +121,10 @@ export const addReading = async (req: Request, res: Response): Promise<void> => 
       timestamp: new Date(),
     };
 
+=======
+    const deviceId = req.body.deviceId || 'unknown-device';
+    const reading = await sensorReadingService.ingest(deviceId, req.body);
+>>>>>>> Stashed changes
     ingestMeta.lastReceivedAt = new Date(reading.timestamp).toISOString();
     ingestMeta.lastSourceIp = req.ip || null;
     ingestMeta.lastLocation = reading.location || null;
@@ -176,14 +139,7 @@ export const addReading = async (req: Request, res: Response): Promise<void> => 
       location: ingestMeta.lastLocation,
     });
 
-    await waterAlertNotificationService.processReading({
-      deviceId: deviceId || 'unknown-device',
-      temperature: tempValue,
-      ph: phValue,
-      dissolvedOxygen: doValue,
-      turbidity: turbidityValue,
-      ammonia: ammoniaValue,
-    });
+    await waterAlertNotificationService.processReading({ ...reading, dissolvedOxygen: reading.do, dissolvedOxygenMeasured: reading.doMeasured });
 
     sendSuccess(res, 201, 'Reading added successfully', reading);
   } catch (error) {

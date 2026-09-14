@@ -5,7 +5,11 @@
  */
 
 import mqtt, { MqttClient } from 'mqtt';
+<<<<<<< Updated upstream
 import { parseOrp } from './sensorValues';
+=======
+import { numeric } from './sensorHealth';
+>>>>>>> Stashed changes
 import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
@@ -30,12 +34,21 @@ export class MQTTService {
   private isConnected = false;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private latestSensorPayload: {
+<<<<<<< Updated upstream
     temperature?: number;
     ph?: number;
     turbidity?: number;
     do?: number;
     ammonia?: number;
     orp?: number | null;
+=======
+    temperature?: unknown;
+    ph?: unknown;
+    turbidity?: unknown;
+    do?: unknown;
+    ammonia?: unknown;
+    orp?: unknown;
+>>>>>>> Stashed changes
   } = {};
   private pendingBatchFlags = {
     temperature: false,
@@ -45,6 +58,10 @@ export class MQTTService {
   private onReadingReceived?: (reading: WaterQualityReading) => void;
   private onStatsUpdated?: (stats: WaterQualityStats) => void;
   private lastConnectionWarningAt = 0;
+<<<<<<< Updated upstream
+=======
+  private sensorTimestamps: Record<string,string> = {};
+>>>>>>> Stashed changes
   private latestDoReceivedAt = 0;
   private latestOrpReceivedAt = 0;
 
@@ -95,8 +112,8 @@ export class MQTTService {
       });
 
       // New messages
-      this.client.on('message', (topic: string, payload: Buffer) => {
-        this.handleMessage(topic, payload);
+      this.client.on('message', (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) => {
+        if (!packet.retain) this.handleMessage(topic, payload);
       });
 
       // Disconnection
@@ -176,6 +193,7 @@ export class MQTTService {
   private async handleSensorReading(payload: string): Promise<void> {
     try {
       const data = JSON.parse(payload);
+<<<<<<< Updated upstream
 
       // Accept both `do` and `dissolvedOxygen` key names.
       const suppliedDo = data.do ?? data.dissolvedOxygen;
@@ -287,6 +305,16 @@ export class MQTTService {
     } catch (error) {
       logger.error('Failed to process sensor reading:', error);
     }
+=======
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+      const deviceId = typeof data.deviceId === 'string' ? data.deviceId : 'mqtt-device';
+      const reading = await sensorReadingService.ingest(deviceId, data);
+      await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured});
+      this.onReadingReceived?.(reading);
+      const stats = await sensorReadingService.getStatistics(60);
+      this.onStatsUpdated?.({...stats,timestamp:new Date()});
+    } catch { logger.warn('Malformed sensor payload or ingestion failed'); }
+>>>>>>> Stashed changes
   }
 
   setRealtimeHandlers(handlers: {
@@ -305,38 +333,44 @@ export class MQTTService {
    */
   private handleAquasenseTopicValue(topic: string, payload: string): void {
     const topicSuffix = topic.split('/').pop();
-    const parsed = Number(payload);
+    const parsed = numeric(payload);
 
-    if (!Number.isFinite(parsed)) {
-      logger.warn(`[MQTT] Ignoring non-numeric payload on ${topic}: ${payload}`);
-      return;
-    }
+    const value = parsed === null ? payload : parsed;
 
+    if(topicSuffix) this.sensorTimestamps[topicSuffix]=new Date().toISOString();
     switch (topicSuffix) {
       case 'temperature':
-        this.latestSensorPayload.temperature = parsed;
+        this.latestSensorPayload.temperature = value;
         this.pendingBatchFlags.temperature = true;
         break;
       case 'ph':
-        this.latestSensorPayload.ph = parsed;
+        this.latestSensorPayload.ph = value;
         this.pendingBatchFlags.ph = true;
         break;
       case 'turbidity':
-        this.latestSensorPayload.turbidity = parsed;
+        this.latestSensorPayload.turbidity = value;
         this.pendingBatchFlags.turbidity = true;
         break;
       case 'orp':
+<<<<<<< Updated upstream
         this.latestSensorPayload.orp = parsed;
+=======
+        this.latestSensorPayload.orp = value;
+>>>>>>> Stashed changes
         this.latestOrpReceivedAt = Date.now();
         break;
       case 'do':
       case 'dissolved-oxygen':
+<<<<<<< Updated upstream
         this.latestSensorPayload.do = parsed;
+=======
+        this.latestSensorPayload.do = value;
+>>>>>>> Stashed changes
         this.latestDoReceivedAt = Date.now();
         break;
       case 'ammonia':
       case 'nh3':
-        this.latestSensorPayload.ammonia = parsed;
+        this.latestSensorPayload.ammonia = value;
         break;
       default:
         logger.debug(`[MQTT] Unsupported aquasense topic suffix: ${topicSuffix}`);
@@ -344,20 +378,26 @@ export class MQTTService {
     }
 
     if (
-      this.pendingBatchFlags.temperature &&
+      (parsed === null || (this.pendingBatchFlags.temperature &&
       this.pendingBatchFlags.ph &&
       this.pendingBatchFlags.turbidity &&
       this.latestSensorPayload.temperature !== undefined &&
       this.latestSensorPayload.ph !== undefined &&
-      this.latestSensorPayload.turbidity !== undefined
+      this.latestSensorPayload.turbidity !== undefined))
     ) {
       const normalizedPayload = {
         temperature: this.latestSensorPayload.temperature,
         ph: this.latestSensorPayload.ph,
         do: Date.now() - this.latestDoReceivedAt <= 15000 ? this.latestSensorPayload.do : undefined,
         turbidity: this.latestSensorPayload.turbidity,
+<<<<<<< Updated upstream
         ammonia: this.latestSensorPayload.ammonia ?? 0,
         orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
+=======
+        turbidityUnit: 'raw_adc',
+        orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
+        sensorTimestamps: {...this.sensorTimestamps},
+>>>>>>> Stashed changes
         location: 'ESP32-MQTT',
         timestamp: new Date().toISOString(),
       };
@@ -374,62 +414,6 @@ export class MQTTService {
 
   private isAquasenseSensorTopic(topic: string): boolean {
     return topic.startsWith('aquasense/');
-  }
-
-  private sanitizeSensorValues(values: {
-    temperature: number;
-    ph: number;
-    dissolvedOxygen: number;
-    turbidity: number;
-    ammonia: number;
-  }): {
-    temperature: number | null;
-    ph: number | null;
-    dissolvedOxygen: number | null;
-    turbidity: number | null;
-    ammonia: number;
-    warnings: string[];
-  } {
-    const warnings: string[] = [];
-
-    let temperature: number | null = values.temperature;
-    if (!Number.isFinite(temperature)) {
-      temperature = null;
-      warnings.push('temperature invalid -> dropped reading');
-    }
-
-    let ph: number | null = values.ph;
-    if (!Number.isFinite(ph)) {
-      ph = null;
-      warnings.push('pH invalid -> dropped reading');
-    }
-
-    let dissolvedOxygen: number | null = values.dissolvedOxygen;
-    if (!Number.isFinite(dissolvedOxygen)) {
-      dissolvedOxygen = null;
-      warnings.push('dissolved oxygen invalid -> dropped reading');
-    }
-
-    let turbidity: number | null = values.turbidity;
-    if (!Number.isFinite(values.turbidity)) {
-      turbidity = null;
-      warnings.push('turbidity invalid -> dropped reading');
-    }
-
-    let ammonia = values.ammonia;
-    if (!Number.isFinite(ammonia)) {
-      ammonia = 0;
-      warnings.push('ammonia unavailable -> set to 0');
-    }
-
-    return {
-      temperature,
-      ph,
-      dissolvedOxygen,
-      turbidity,
-      ammonia,
-      warnings,
-    };
   }
 
   /**

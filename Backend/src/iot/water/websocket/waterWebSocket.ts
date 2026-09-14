@@ -13,7 +13,7 @@ export class WaterQualityWebSocketHandler {
   constructor(io: SocketIOServer) {
     this.io = io;
     this.setupEventHandlers();
-    this.startDataSimulation();
+    // Production streams never synthesize sensor measurements.
   }
 
   /**
@@ -101,33 +101,7 @@ export class WaterQualityWebSocketHandler {
    * Simulate real-time data from IoT device (for testing/demo)
    * Remove or modify this in production when connecting real ESP32
    */
-  private startDataSimulation(): void {
-    setInterval(() => {
-      // Generate realistic water quality data with slight variations
-      const baseData = {
-        temperature: 25 + (Math.random() - 0.5) * 4,
-        ph: 7.5 + (Math.random() - 0.5) * 0.5,
-        do: 7.5 + (Math.random() - 0.5) * 2,
-        turbidity: 30 + (Math.random() - 0.5) * 20,
-        ammonia: 0.2 + Math.random() * 0.15,
-        location: 'Main Water Body',
-        timestamp: new Date(),
-      };
 
-      const reading = waterQualityService.addReading(baseData);
-      this.broadcastReading(reading);
-
-      // Update statistics every 5 readings
-      if (Math.random() < 0.2) {
-        try {
-          const stats = waterQualityService.getStatistics(60);
-          this.broadcastStats(stats);
-        } catch {
-          logger.debug('Stats calculation not available');
-        }
-      }
-    }, 5000); // Simulate data every 5 seconds
-  }
 }
 
 /**

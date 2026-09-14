@@ -1,15 +1,16 @@
+import { refreshHealth } from './sensorHealth';
 import { sensorReadingService, type SensorReading } from './sensorReadingService';
 import { predictionLogService } from './predictionLog.service';
 
 export type TrendDirection = 'INCREASING' | 'DECREASING' | 'STABLE';
-export type PredictiveRiskLevel = 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+export type PredictiveRiskLevel = 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | 'UNAVAILABLE';
 
 interface Snapshot {
   temperature: number;
   ph: number;
   turbidity: number;
   dissolvedOxygen: number;
-  ammonia: number;
+  ammonia: number | null;
 }
 
 interface TrendMeta {
@@ -30,7 +31,9 @@ export interface PredictiveAnalyticsResult {
   generatedAt: string;
   modelVersion: string;
   horizonMinutes: number;
-  riskScore: number;
+  analysisStatus: 'AVAILABLE' | 'INSUFFICIENT_VALID_SENSOR_DATA';
+  calibration: 'REQUIRED';
+  riskScore: number | null;
   riskLevel: PredictiveRiskLevel;
   predictedIssue: string;
   warningCard: {
@@ -55,7 +58,7 @@ export interface PredictiveAnalyticsResult {
 
 type MetricKey = keyof Snapshot;
 
-const MODEL_VERSION = 'rules-v2.0.0';
+const MODEL_VERSION = 'rules-v3.0.0-sensor-health';
 const MOVING_AVERAGE_WINDOW = 5;
 const MIN_RELIABLE_SAMPLES = 6;
 const IDEAL = {
@@ -67,7 +70,7 @@ const IDEAL = {
 };
 const WEIGHTS: Record<MetricKey, number> = {
   dissolvedOxygen: 0.34,
-  ammonia: 0.24,
+  ammonia: 0,
   temperature: 0.18,
   ph: 0.14,
   turbidity: 0.1,
@@ -108,21 +111,14 @@ const linearSlopePerMinute = (points: Array<{ value: number; timestamp: Date }>)
   return numerator / denominator;
 };
 
-const estimateAmmonia = (temperature: number, ph: number, turbidity: number): number => {
-  const tempFactor = Math.max(0, temperature - 26) * 0.35;
-  const phFactor = Math.max(0, ph - 7.5) * 1.4;
-  const turbidityFactor = Math.max(0, turbidity - 50) * 0.015;
-  return round(clamp(tempFactor + phFactor + turbidityFactor, 0, 10), 2);
-};
-
 const normalizeReading = (reading: SensorReading): Snapshot & { timestamp: Date; hasMeasuredAmmonia: boolean } => {
-  const hasMeasuredAmmonia = Number.isFinite(reading.ammonia) && reading.ammonia > 0;
+  const hasMeasuredAmmonia = Number.isFinite(reading.ammonia) && reading.ammonia !== null;
   return {
-    temperature: reading.temperature,
-    ph: reading.ph,
-    turbidity: reading.turbidity,
-    dissolvedOxygen: reading.do,
-    ammonia: hasMeasuredAmmonia ? reading.ammonia : estimateAmmonia(reading.temperature, reading.ph, reading.turbidity),
+    temperature: reading.temperature!,
+    ph: reading.ph!,
+    turbidity: reading.turbidity!,
+    dissolvedOxygen: reading.do!,
+    ammonia: reading.ammonia,
     timestamp: reading.timestamp,
     hasMeasuredAmmonia,
   };
@@ -171,13 +167,12 @@ const scoreSnapshot = (snapshot: Snapshot): Record<MetricKey, number> => ({
     IDEAL.dissolvedOxygen.critical,
     IDEAL.dissolvedOxygen.emergency
   ),
-  ammonia: scoreAbove(snapshot.ammonia, IDEAL.ammonia.ideal, IDEAL.ammonia.warning, IDEAL.ammonia.critical, IDEAL.ammonia.emergency),
+  ammonia: 0, // No commissioned NH3-N toxicity policy.
 });
 
 const trendPenalty = (trends: Record<MetricKey, TrendMeta>): number => {
   const penalties = [
     trends.dissolvedOxygen.direction === 'DECREASING' ? Math.min(12, Math.abs(trends.dissolvedOxygen.slope) * 18) : 0,
-    trends.ammonia.direction === 'INCREASING' ? Math.min(10, trends.ammonia.slope * 20) : 0,
     trends.temperature.direction === 'INCREASING' ? Math.min(8, trends.temperature.slope * 10) : 0,
     trends.ph.direction !== 'STABLE' ? Math.min(6, Math.abs(trends.ph.slope) * 25) : 0,
     trends.turbidity.direction === 'INCREASING' ? Math.min(6, trends.turbidity.slope * 0.35) : 0,
@@ -207,7 +202,6 @@ const etaToThreshold = (current: number, slopePerMinute: number, unsafeThreshold
 const estimateUnsafeMinutes = (latest: Snapshot, trends: Record<MetricKey, TrendMeta>): number | null => {
   const estimates = [
     etaToThreshold(latest.dissolvedOxygen, trends.dissolvedOxygen.slope, IDEAL.dissolvedOxygen.critical, 'below'),
-    etaToThreshold(latest.ammonia, trends.ammonia.slope, IDEAL.ammonia.critical, 'above'),
     etaToThreshold(latest.temperature, trends.temperature.slope, IDEAL.temperature.criticalHigh, 'above'),
     etaToThreshold(latest.ph, trends.ph.slope, IDEAL.ph.criticalHigh, 'above'),
     etaToThreshold(latest.ph, trends.ph.slope, IDEAL.ph.criticalLow, 'below'),
@@ -221,7 +215,7 @@ const calculateDataQuality = (
   readings: Array<Snapshot & { timestamp: Date; hasMeasuredAmmonia: boolean }>,
   requestedWindowMinutes: number
 ): DataQuality => {
-  const notes: string[] = [];
+  const notes: string[] = ['PRELIMINARY: source sensors require formal calibration'];
   const sampleCount = readings.length;
   const measuredAmmoniaRatio = sampleCount > 0 ? readings.filter((reading) => reading.hasMeasuredAmmonia).length / sampleCount : 0;
   const newest = readings[readings.length - 1];
@@ -243,8 +237,8 @@ const calculateDataQuality = (
     notes.push('Newest sample is stale');
   }
   if (measuredAmmoniaRatio < 0.5) {
-    score -= 12;
-    notes.push('Ammonia is mostly estimated from temperature, pH, and turbidity');
+
+    notes.push('Actual NH3-N requires measured TAN; ammonia is excluded from risk scoring');
   }
 
   return {
@@ -262,7 +256,7 @@ const buildTrend = (
   metric: MetricKey,
   stableBand: number
 ): TrendMeta => {
-  const slope = linearSlopePerMinute(readings.map((reading) => ({ value: reading[metric], timestamp: reading.timestamp })));
+  const slope = linearSlopePerMinute(readings.map((reading) => ({ value: reading[metric]!, timestamp: reading.timestamp })));
   return {
     slope: round(slope, 4),
     direction: direction(slope, stableBand),
@@ -272,12 +266,10 @@ const buildTrend = (
 const buildCause = (scores: Record<MetricKey, number>, trends: Record<MetricKey, TrendMeta>): string => {
   const causes = [
     scores.dissolvedOxygen >= 40 ? 'low dissolved oxygen' : null,
-    scores.ammonia >= 40 ? 'elevated ammonia' : null,
     scores.temperature >= 40 ? 'temperature outside safe range' : null,
     scores.ph >= 40 ? 'pH outside safe range' : null,
     scores.turbidity >= 40 ? 'high turbidity' : null,
     trends.dissolvedOxygen.direction === 'DECREASING' ? 'DO trending down' : null,
-    trends.ammonia.direction === 'INCREASING' ? 'ammonia trending up' : null,
   ].filter((cause): cause is string => cause !== null);
 
   return causes.length > 0 ? Array.from(new Set(causes)).join(' + ') : 'No critical trend shifts detected';
@@ -293,7 +285,7 @@ const issueFor = (level: PredictiveRiskLevel): string => {
 const actionFor = (level: PredictiveRiskLevel, scores: Record<MetricKey, number>): string => {
   if (level === 'CRITICAL') return 'Start aeration, inspect stock, and prepare immediate water correction';
   if (scores.dissolvedOxygen >= 40) return 'Increase aeration and monitor dissolved oxygen closely';
-  if (scores.ammonia >= 40 || scores.turbidity >= 40) return 'Inspect filtration, reduce feeding, and prepare partial water exchange';
+  if (scores.turbidity >= 40) return 'Inspect filtration, reduce feeding, and prepare partial water exchange';
   if (scores.ph >= 40) return 'Check pH calibration and correct alkalinity gradually';
   if (level === 'HIGH') return 'Inspect tank and prepare corrective action';
   if (level === 'MODERATE') return 'Increase monitoring frequency and inspect tank';
@@ -306,7 +298,15 @@ class PredictiveAnalyticsService {
     const readingsDesc = await sensorReadingService.getReadingsByTimeRange(horizonMinutes);
     // Do not infer oxygen emergencies from legacy/default placeholders, or use
     // older measurements to imply that a currently missing sensor is healthy.
+<<<<<<< Updated upstream
     const usableReadings = readingsDesc[0]?.doMeasured === false ? [] : readingsDesc.filter((reading) => reading.doMeasured !== false);
+=======
+    const currentReading = await sensorReadingService.getLatestReading();
+    const usable = (r: SensorReading) => r.doMeasured && r.do !== null && r.temperature !== null && r.ph !== null && r.turbidity !== null && r.turbidityUnit === 'NTU' && !!r.sensorHealth &&
+      ['temperature','ph','turbidity'].every(n => r.sensorHealth[n as 'temperature'|'ph'|'turbidity'].valid);
+    const currentValid = currentReading && usable(currentReading) && Object.values(refreshHealth(currentReading.sensorHealth)).filter(s=>['temperature','ph','turbidity'].includes(s.name)).every(s=>s.valid);
+    const usableReadings = currentValid ? readingsDesc.filter(r=>r.deviceId===currentReading!.deviceId && usable(r)) : [];
+>>>>>>> Stashed changes
     const readings = [...usableReadings].reverse().map(normalizeReading);
     const dataQuality = calculateDataQuality(readings, horizonMinutes);
 
@@ -315,15 +315,16 @@ class PredictiveAnalyticsService {
         generatedAt: new Date().toISOString(),
         modelVersion: MODEL_VERSION,
         horizonMinutes,
-        riskScore: 0,
-        riskLevel: 'LOW',
-        predictedIssue: 'Insufficient data for prediction',
+        analysisStatus:'INSUFFICIENT_VALID_SENSOR_DATA', calibration:'REQUIRED',
+        riskScore: null,
+        riskLevel: 'UNAVAILABLE',
+        predictedIssue: 'INSUFFICIENT VALID SENSOR DATA',
         warningCard: {
-          riskLevel: 'LOW',
-          predictedIssue: 'Insufficient data for prediction',
-          cause: 'No recent sensor samples available',
+          riskLevel: 'UNAVAILABLE',
+          predictedIssue: 'INSUFFICIENT VALID SENSOR DATA',
+          cause: 'Valid fresh temperature, pH, measured oxygen and turbidity in NTU are required',
           action: 'Wait for sensor stream and monitor dashboard',
-          confidence: 10,
+          confidence: 0,
           estimatedUnsafeInMinutes: null,
         },
         movingAverage: null,
@@ -347,7 +348,7 @@ class PredictiveAnalyticsService {
       ph: round(movingAverage(readings.map((reading) => reading.ph))),
       turbidity: round(movingAverage(readings.map((reading) => reading.turbidity))),
       dissolvedOxygen: round(movingAverage(readings.map((reading) => reading.dissolvedOxygen))),
-      ammonia: round(movingAverage(readings.map((reading) => reading.ammonia))),
+      ammonia: null,
     };
 
     const trends: Record<MetricKey, TrendMeta> = {
@@ -355,7 +356,7 @@ class PredictiveAnalyticsService {
       ph: buildTrend(readings, 'ph', 0.005),
       turbidity: buildTrend(readings, 'turbidity', 0.1),
       dissolvedOxygen: buildTrend(readings, 'dissolvedOxygen', 0.01),
-      ammonia: buildTrend(readings, 'ammonia', 0.01),
+      ammonia: {slope:0,direction:'STABLE'},
     };
 
     const latestScores = scoreSnapshot(latest);
@@ -365,7 +366,7 @@ class PredictiveAnalyticsService {
     ) as Record<MetricKey, number>;
 
     const baseRisk = (Object.keys(WEIGHTS) as MetricKey[]).reduce((sum, key) => sum + combinedScores[key] * WEIGHTS[key], 0);
-    const riskScore = round(clamp(baseRisk + trendPenalty(trends), 0, 100), 2);
+    const riskScore = round(clamp(baseRisk / Object.values(WEIGHTS).reduce((a,b)=>a+b,0) + trendPenalty(trends), 0, 100), 2);
     const level = riskLevel(riskScore);
     const predictedIssue = issueFor(level);
     const estimatedUnsafeInMinutes = estimateUnsafeMinutes(latest, trends);
@@ -374,6 +375,7 @@ class PredictiveAnalyticsService {
     );
 
     return {
+      analysisStatus:'AVAILABLE', calibration:'REQUIRED',
       generatedAt: new Date().toISOString(),
       modelVersion: MODEL_VERSION,
       horizonMinutes,
@@ -383,7 +385,7 @@ class PredictiveAnalyticsService {
       warningCard: {
         riskLevel: level,
         predictedIssue,
-        cause: buildCause(combinedScores, trends),
+        cause: buildCause(combinedScores, trends) + '; preliminary, calibration required',
         action: actionFor(level, combinedScores),
         confidence,
         estimatedUnsafeInMinutes,
@@ -399,8 +401,8 @@ class PredictiveAnalyticsService {
     const prediction = await this.getWarningCard(minutes);
     if (prediction.latest) {
       await predictionLogService.createLog({
-        riskScore: prediction.riskScore,
-        riskLevel: prediction.riskLevel,
+        riskScore: prediction.riskScore!,
+        riskLevel: prediction.riskLevel as Exclude<PredictiveRiskLevel,'UNAVAILABLE'>,
         predictedIssue: prediction.predictedIssue,
         etaMinutes: prediction.warningCard.estimatedUnsafeInMinutes,
         triggeredAlertId: triggeredAlertId || null,

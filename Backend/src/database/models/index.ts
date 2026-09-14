@@ -45,6 +45,13 @@ const ensureSensorReadingSchemaCompat = async (): Promise<void> => {
   const sequelize = getDatabase();
   await sequelize.query('ALTER TABLE IF EXISTS sensor_readings ADD COLUMN IF NOT EXISTS "orp" DOUBLE PRECISION NULL;');
   await sequelize.query('ALTER TABLE sensor_readings ADD COLUMN IF NOT EXISTS "ammonia" DOUBLE PRECISION NOT NULL DEFAULT 0;');
+<<<<<<< Updated upstream
+=======
+  await sequelize.query('ALTER TABLE sensor_readings ADD COLUMN IF NOT EXISTS sensor_health JSONB NULL, ADD COLUMN IF NOT EXISTS speciation JSONB NULL, ADD COLUMN IF NOT EXISTS turbidity_unit VARCHAR(16) NULL;');
+  for (const column of ['temperature','ph','do','turbidity','ammonia']) {
+    await sequelize.query('ALTER TABLE sensor_readings ALTER COLUMN "' + column + '" DROP NOT NULL, ALTER COLUMN "' + column + '" DROP DEFAULT;');
+  }
+>>>>>>> Stashed changes
   // Historical rows have no evidence that DO was measured rather than defaulted.
   await sequelize.query('ALTER TABLE sensor_readings ADD COLUMN IF NOT EXISTS "do_measured" BOOLEAN NOT NULL DEFAULT false;');
 };

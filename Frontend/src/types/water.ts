@@ -1,3 +1,4 @@
+import type { HealthSummary, Speciation } from './sensorHealth';
 /**
  * Water Quality Types
  * Frontend type definitions for water quality monitoring
@@ -6,12 +7,27 @@
 export interface WaterQualityReading {
   id: string;
   timestamp: Date;
+<<<<<<< Updated upstream
   temperature: number;
   ph: number;
   do: number;
   doMeasured?: boolean;
   turbidity: number;
   ammonia: number;
+=======
+  createdAt?: Date;
+  temperature: number | null;
+  ph: number | null;
+  do: number | null;
+  doMeasured?: boolean;
+  waterQuality?: Record<string,string>;
+  sensorHealth?: HealthSummary;
+  speciation?: Speciation;
+  orp?: number|null;
+  turbidityUnit?: string;
+  turbidity: number | null;
+  ammonia: number | null;
+>>>>>>> Stashed changes
   location: string;
   status: 'normal' | 'warning' | 'critical';
 }
@@ -19,36 +35,36 @@ export interface WaterQualityReading {
 export interface WaterQualityStats {
   timestamp: Date;
   temperature: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   ph: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   do: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   turbidity: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
   ammonia: {
-    current: number;
-    average: number;
-    min: number;
-    max: number;
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
   };
-  healthScore: number;
+  healthScore: number | null;
 }
 
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL' | 'EMERGENCY' | 'info' | 'warning' | 'critical';
@@ -75,7 +91,7 @@ export interface HealthAlert {
 }
 
 export interface PredictiveWarningCard {
-  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | 'UNAVAILABLE';
   predictedIssue: string;
   cause: string;
   action: string;
@@ -87,23 +103,24 @@ export interface PredictiveAnalyticsResult {
   generatedAt: string;
   modelVersion: string;
   horizonMinutes: number;
-  riskScore: number;
-  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+  analysisStatus?: 'AVAILABLE' | 'INSUFFICIENT_VALID_SENSOR_DATA';
+  riskScore: number|null;
+  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | 'UNAVAILABLE';
   predictedIssue: string;
   warningCard: PredictiveWarningCard;
   latest: {
-    temperature: number;
-    ph: number;
-    turbidity: number;
+    temperature: number | null;
+    ph: number | null;
+    turbidity: number | null;
     dissolvedOxygen: number;
-    ammonia: number;
+    ammonia: number | null;
   } | null;
   movingAverage: {
-    temperature: number;
-    ph: number;
-    turbidity: number;
+    temperature: number | null;
+    ph: number | null;
+    turbidity: number | null;
     dissolvedOxygen: number;
-    ammonia: number;
+    ammonia: number | null;
   } | null;
   dataQuality: {
     score: number;
@@ -140,7 +157,7 @@ export interface PredictiveAnalyticsResult {
 export interface PredictionLog {
   id: string;
   riskScore: number;
-  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | 'UNAVAILABLE';
   predictedIssue: string;
   etaMinutes: number | null;
   createdAt: string;

@@ -1,3 +1,4 @@
+import { SensorValidator, refreshHealth, type HealthSummary } from './sensorHealth';
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL' | 'EMERGENCY';
 export type AlertCategory = 'TEMP_HIGH' | 'TEMP_LOW' | 'PH_LOW' | 'PH_HIGH' | 'DO_LOW' | 'TURBIDITY_HIGH' | 'AMMONIA_HIGH';
 export type AlertAction =
@@ -18,18 +19,33 @@ export interface RuleAlertResult {
 }
 
 export interface RuleEngineInput {
+<<<<<<< Updated upstream
   temperature: number;
   ph: number;
   dissolvedOxygen: number;
   dissolvedOxygenMeasured?: boolean;
   turbidity: number;
   ammonia?: number;
+=======
+  temperature: number | null;
+  ph: number | null;
+  dissolvedOxygen: number | null;
+  dissolvedOxygenMeasured?: boolean;
+  turbidity: number | null;
+  ammonia?: number | null;
+  sensorHealth?: HealthSummary;
+  turbidityUnit?: string;
+>>>>>>> Stashed changes
 }
 
 export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
   const alerts: RuleAlertResult[] = [];
 
+  const check = new SensorValidator();
+  const health = input.sensorHealth ? refreshHealth(input.sensorHealth) : null;
+  const usable = (name: 'temperature'|'ph'|'turbidity', value: unknown) => health ? health[name].valid : check.validate('rule',name,value,new Date()).valid;
   // Temperature
+  if (input.temperature !== null && usable('temperature', input.temperature)) {
   if (input.temperature < 10) {
     alerts.push({
       category: 'TEMP_LOW',
@@ -82,6 +98,8 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
     });
   }
 
+  }
+  if (input.ph !== null && usable('ph', input.ph)) {
   // pH Low
   if (input.ph < 6.0) {
     alerts.push({
@@ -128,6 +146,8 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
     });
   }
 
+  }
+  if (input.dissolvedOxygen !== null && Number.isFinite(input.dissolvedOxygen) && input.dissolvedOxygen >= 0 && input.dissolvedOxygen <= 20) {
   // Dissolved Oxygen
   if (input.dissolvedOxygenMeasured !== false && input.dissolvedOxygen < 2) {
     alerts.push({
@@ -161,6 +181,8 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
     });
   }
 
+  }
+  if (input.turbidity !== null && input.turbidityUnit === 'NTU' && usable('turbidity', input.turbidity)) {
   // Turbidity
   if (input.turbidity > 100) {
     alerts.push({
@@ -184,39 +206,8 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
     });
   }
 
-  // Ammonia
-  const ammonia = input.ammonia ?? 0;
-  if (ammonia > 7.5) {
-    alerts.push({
-      category: 'AMMONIA_HIGH',
-      severity: 'EMERGENCY',
-      currentValue: ammonia,
-      thresholdValue: 7.5,
-      unit: 'ppm',
-      action: 'WATER_REPLACEMENT',
-      message: 'Ammonia dangerously high',
-    });
-  } else if (ammonia > 5) {
-    alerts.push({
-      category: 'AMMONIA_HIGH',
-      severity: 'CRITICAL',
-      currentValue: ammonia,
-      thresholdValue: 5,
-      unit: 'ppm',
-      action: 'WATER_REPLACEMENT',
-      message: 'Ammonia critically high',
-    });
-  } else if (ammonia > 2) {
-    alerts.push({
-      category: 'AMMONIA_HIGH',
-      severity: 'WARNING',
-      currentValue: ammonia,
-      thresholdValue: 2,
-      unit: 'ppm',
-      action: 'DASHBOARD_ONLY',
-      message: 'Ammonia above ideal range',
-    });
   }
-
-  return alerts;
+  // No ammonia toxicity thresholds until a policy with explicit NH3-N units is commissioned.
+  // Speciation percentage alone must never create a toxicity alert.
+  return alerts.map(alert => ({...alert, message: alert.message + ' (preliminary; calibration required)'}));
 };

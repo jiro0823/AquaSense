@@ -1,3 +1,4 @@
+import { SensorHealthPanel, AmmoniaSpeciationCard } from '../../components/WaterQuality/SensorHealthPanel';
 import React, { useMemo, useEffect, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
@@ -15,11 +16,7 @@ const DashboardOverviewPage: React.FC = () => {
   }, []);
 
   const processedChartData = useMemo(() => {
-    return chartData.map((d, i) => {
-      const currentRisk = predictiveWarning?.riskScore || 22;
-      const mockRisk = Math.max(0, Math.min(100, currentRisk + Math.sin(i * 0.5) * 5));
-      return { ...d, riskScore: mockRisk };
-    });
+    return chartData;
   }, [chartData, predictiveWarning?.riskScore]);
 
 
@@ -30,32 +27,40 @@ const DashboardOverviewPage: React.FC = () => {
     if (score <= 75) return '#f97316'; // orange
     return '#ef4444'; // red
   };
-  const currentRiskScore = predictiveWarning?.riskScore || 22;
-  const riskLevel = predictiveWarning?.warningCard?.riskLevel || 'LOW';
-  const riskColor = getRiskColor(currentRiskScore);
+  const currentRiskScore = predictiveWarning?.riskScore ?? null;
+  const riskLevel = currentRiskScore === null ? 'INSUFFICIENT DATA' : predictiveWarning?.warningCard?.riskLevel;
+  const riskColor = getRiskColor(currentRiskScore ?? 0);
 
-  const getStatus = (param: string, value: number) => {
+  const getStatus = (param: string, value: number|null|undefined) => {
+    if(value==null) return {label:'Unavailable',color:'text-gray-600',bg:'bg-gray-100'};
     switch(param) {
       case 'temp': return (value >= 24 && value <= 32) ? { label: 'Normal', color: 'text-emerald-700', bg: 'bg-emerald-100' } : { label: 'Warning', color: 'text-amber-700', bg: 'bg-amber-100' };
       case 'ph': return (value >= 6.5 && value <= 8.5) ? { label: 'Normal', color: 'text-emerald-700', bg: 'bg-emerald-100' } : { label: 'Warning', color: 'text-amber-700', bg: 'bg-amber-100' };
       case 'do': return (value > 5) ? { label: 'Good', color: 'text-emerald-700', bg: 'bg-emerald-100' } : { label: 'Low', color: 'text-rose-700', bg: 'bg-rose-100' };
       case 'turbidity': return (value < 25) ? { label: 'Moderate', color: 'text-amber-700', bg: 'bg-amber-100' } : { label: 'High', color: 'text-rose-700', bg: 'bg-rose-100' };
-      case 'ammonia': return (value < 0.2) ? { label: 'Safe', color: 'text-emerald-700', bg: 'bg-emerald-100' } : { label: 'High', color: 'text-rose-700', bg: 'bg-rose-100' };
       default: return { label: 'Unknown', color: 'text-gray-600', bg: 'bg-gray-100' };
     }
   };
 
   const metrics: Array<{ title: string; value: string; color: string; icon: ParameterIconName; status: { label: string; color: string; bg: string } }> = [
+<<<<<<< Updated upstream
     { title: 'TEMPERATURE', value: latestReading ? `${latestReading.temperature.toFixed(1)} °C` : '--', color: '#f59e0b', icon: 'temperature', status: getStatus('temp', latestReading?.temperature || 0) },
     { title: 'pH LEVEL', value: latestReading ? latestReading.ph.toFixed(1) : '--', color: '#3b82f6', icon: 'ph', status: getStatus('ph', latestReading?.ph || 0) },
     { title: 'DISSOLVED OXYGEN', value: latestReading && latestReading.doMeasured !== false ? `${latestReading.do.toFixed(1)} mg/L` : '--', color: '#22c55e', icon: 'do', status: latestReading?.doMeasured === false ? { label: 'Unmeasured', color: 'text-gray-600', bg: 'bg-gray-100' } : getStatus('do', latestReading?.do || 0) },
     { title: 'TURBIDITY', value: latestReading ? `${latestReading.turbidity.toFixed(0)} NTU` : '--', color: '#a855f7', icon: 'turbidity', status: getStatus('turbidity', latestReading?.turbidity || 0) },
     { title: 'AMMONIA (NH3)', value: latestReading ? `${latestReading.ammonia.toFixed(2)} mg/L` : '--', color: '#ef4444', icon: 'ammonia', status: getStatus('ammonia', latestReading?.ammonia || 0) },
+=======
+    { title: 'TEMPERATURE', value: latestReading?.temperature != null ? `${latestReading.temperature?.toFixed(1)} °C` : '--', color: '#f59e0b', icon: 'temperature', status: getStatus('temp', latestReading?.temperature) },
+    { title: 'pH LEVEL', value: latestReading?.ph != null ? latestReading.ph?.toFixed(1) : '--', color: '#3b82f6', icon: 'ph', status: getStatus('ph', latestReading?.ph) },
+    { title: 'DISSOLVED OXYGEN', value: latestReading && latestReading.doMeasured !== false ? `${latestReading.do?.toFixed(1)} mg/L` : '--', color: '#22c55e', icon: 'do', status: latestReading?.doMeasured === false ? { label: 'Unmeasured', color: 'text-gray-600', bg: 'bg-gray-100' } : getStatus('do', latestReading?.do) },
+    { title: 'TURBIDITY', value: latestReading?.turbidity != null ? `${latestReading.turbidity?.toFixed(0)} ${latestReading.turbidityUnit}` : '--', color: '#a855f7', icon: 'turbidity', status: latestReading?.turbidityUnit==='NTU'?getStatus('turbidity', latestReading?.turbidity):getStatus('turbidity', null) },
+    { title: 'NH3 FRACTION OF TAN', value: latestReading?.speciation?.percent != null ? latestReading.speciation.percent.toFixed(2)+'%' : '--', color: '#ef4444', icon: 'ammonia', status: {label:'TAN required for concentration',color:'text-gray-600',bg:'bg-gray-100'} },
+>>>>>>> Stashed changes
   ];
 
   const gaugeData = [
-    { name: 'Risk', value: currentRiskScore, fill: riskColor },
-    { name: 'Safe', value: 100 - currentRiskScore, fill: '#e5e7eb' }
+    { name: 'Risk', value: currentRiskScore ?? 0, fill: riskColor },
+    { name: 'Safe', value: currentRiskScore === null ? 0 : 100 - currentRiskScore, fill: '#e5e7eb' }
   ];
 
   const renderChart = (title: string, dataKey: string, color: string, yDomain: [number | string, number | string], idealLabel: string) => (
@@ -130,6 +135,7 @@ const DashboardOverviewPage: React.FC = () => {
 
       {error && <div className="p-2 text-sm border shrink-0 rounded-xl border-rose-200 bg-rose-50 text-rose-700">Connection error: {error}</div>}
 
+      <SensorHealthPanel reading={latestReading} />
       {/* Top Metrics Cards */}
       <section className="shrink-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 lg:gap-2">
         {metrics.map((metric, idx) => (
@@ -156,7 +162,7 @@ const DashboardOverviewPage: React.FC = () => {
             <div className="mb-1 text-lg font-bold tracking-tight uppercase lg:text-xl" style={{ color: riskColor }}>{riskLevel}</div>
             <div className="flex items-center gap-1.5">
                <CustomIcon name="shield" color={riskColor} size="h-4 w-4" />
-               <span className="text-xs font-semibold text-gray-600">Risk Score: {currentRiskScore.toFixed(0)}%</span>
+               <span className="text-xs font-semibold text-gray-600">Risk Score: {currentRiskScore?.toFixed(0) ?? '--'}%</span>
             </div>
         </div>
       </section>
@@ -169,9 +175,9 @@ const DashboardOverviewPage: React.FC = () => {
           {renderChart('Temperature (°C)', 'temperature', '#f59e0b', [20, 36], 'Ideal 24-32°C')}
           {renderChart('pH Level', 'ph', '#3b82f6', [4, 10], 'Ideal 6.5-8.5')}
           {renderChart('Dissolved Oxygen (mg/L)', 'do', '#22c55e', [0, 12], 'Ideal > 5 mg/L')}
-          {renderChart('Turbidity (NTU)', 'turbidity', '#a855f7', [0, 50], 'Ideal < 25 NTU')}
-          {renderChart('Ammonia (NH3) (mg/L)', 'ammonia', '#ef4444', [0, 1.0], 'Safe < 0.2 mg/L')}
-          {renderChart('Mortality Risk Score (%)', 'riskScore', '#ef4444', [0, 100], 'Goal < 25%')}
+          {renderChart('Turbidity ('+(latestReading?.turbidityUnit || 'unit unknown')+')', 'turbidity', '#a855f7', ['auto', 'auto'], 'Calibration required')}
+          <AmmoniaSpeciationCard reading={latestReading} />
+          <div className="rounded-xl bg-white p-3 text-xs">Mortality analysis: {currentRiskScore === null ? 'INSUFFICIENT VALID SENSOR DATA' : 'PRELIMINARY / CALIBRATION REQUIRED'}</div>
         </div>
 
         {/* Right Side: Risk Assessment Panel */}
@@ -202,7 +208,11 @@ const DashboardOverviewPage: React.FC = () => {
                  </PieChart>
                </ResponsiveContainer>
                <div className="absolute flex flex-col items-center bottom-1">
+<<<<<<< Updated upstream
                   <span className="text-2xl font-bold text-gray-900">{currentRiskScore.toFixed(0)}%</span>
+=======
+                  <span className="text-2xl font-bold text-gray-900">{currentRiskScore?.toFixed(0) ?? '--'}%</span>
+>>>>>>> Stashed changes
                   <span className="text-sm font-bold mt-0.5 uppercase" style={{ color: riskColor }}>{riskLevel}</span>
                </div>
              </div>
@@ -240,7 +250,7 @@ const DashboardOverviewPage: React.FC = () => {
              <div className="flex flex-col gap-1.5 lg:gap-1.5">
                 {([
                   { name: 'Dissolved Oxygen', status: metrics[2].status.label, color: metrics[2].color, icon: 'do', good: metrics[2].status.label === 'Good' },
-                  { name: 'Ammonia (NH3)', status: metrics[4].status.label, color: metrics[4].color, icon: 'ammonia', good: metrics[4].status.label === 'Safe' },
+                  { name: 'NH3 fraction (not toxicity)', status: metrics[4].status.label, color: metrics[4].color, icon: 'ammonia', good: metrics[4].status.label === 'Safe' },
                   { name: 'Temperature', status: metrics[0].status.label, color: metrics[0].color, icon: 'temperature', good: metrics[0].status.label === 'Normal' },
                   { name: 'Turbidity', status: metrics[3].status.label, color: metrics[3].color, icon: 'turbidity', good: metrics[3].status.label === 'Moderate' },
                   { name: 'pH Level', status: metrics[1].status.label, color: metrics[1].color, icon: 'ph', good: metrics[1].status.label === 'Normal' },
@@ -274,7 +284,7 @@ const DashboardOverviewPage: React.FC = () => {
          </div>
          <div className="flex items-start sm:items-center gap-2 text-[11px] text-gray-500 text-left">
             <div className="mt-0.5 sm:mt-0 flex-shrink-0"><CustomIcon name="shield" color="#9ca3af" size="h-4 w-4" /></div>
-            <span>All readings are real-time and refreshed every 5 seconds. Ensure regular calibration.</span>
+            <span>Freshness and sensor health are checked separately. Formal calibration is required.</span>
          </div>
       </footer>
     </div>

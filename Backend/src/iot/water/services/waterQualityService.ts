@@ -1,3 +1,4 @@
+import { SensorValidator, SENSOR_NAMES } from '../../../services/sensorHealth';
 /**
  * Water Quality Monitoring Service
  * Handles data storage, analysis, and threshold checking
@@ -50,6 +51,14 @@ export class WaterQualityService {
    * Add a new reading from IoT device or API
    */
   addReading(data: Omit<WaterQualityReading, 'id' | 'status'>): WaterQualityReading {
+    const validator = new SensorValidator();
+    data = {...data, ammonia:null};
+    for (const name of SENSOR_NAMES) {
+      if (name === 'orp') continue;
+      if (!validator.validate('memory',name,data[name],data.timestamp).valid) data[name]=null;
+    }
+    if (data.doMeasured !== true || data.do === null || !Number.isFinite(data.do) || data.do < 0 || data.do > 20) data.do=null;
+    if(data.turbidityUnit !== 'NTU') data.turbidity=null;
     const reading: WaterQualityReading = {
       ...data,
       id: uuidv4(),
@@ -109,41 +118,42 @@ export class WaterQualityService {
       return {
         timestamp: new Date(),
         temperature: {
-          current: 0,
-          average: 0,
-          min: 0,
-          max: 0,
+          current: null,
+          average: null,
+          min: null,
+          max: null,
         },
         ph: {
-          current: 0,
-          average: 0,
-          min: 0,
-          max: 0,
+          current: null,
+          average: null,
+          min: null,
+          max: null,
         },
         do: {
-          current: 0,
-          average: 0,
-          min: 0,
-          max: 0,
+          current: null,
+          average: null,
+          min: null,
+          max: null,
         },
         turbidity: {
-          current: 0,
-          average: 0,
-          min: 0,
-          max: 0,
+          current: null,
+          average: null,
+          min: null,
+          max: null,
         },
         ammonia: {
-          current: 0,
-          average: 0,
-          min: 0,
-          max: 0,
+          current: null,
+          average: null,
+          min: null,
+          max: null,
         },
-        healthScore: 0,
+        healthScore: null,
       };
     }
 
     const calculateStats = (param: keyof Omit<WaterQualityReading, 'id' | 'timestamp' | 'location' | 'status'>) => {
-      const values = timeRangeReadings.map((r) => r[param] as number);
+      const values = timeRangeReadings.map((r) => r[param]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (!values.length) return {current:null,average:null,min:null,max:null};
       return {
         current: values[values.length - 1],
         average: values.reduce((a, b) => a + b, 0) / values.length,
@@ -202,6 +212,7 @@ export class WaterQualityService {
    */
 
   private checkThresholds(reading: WaterQualityReading): void {
+    if (reading.temperature !== null) {
     // Temperature check
     if (reading.temperature < this.thresholds.temperature.min) {
       this.createAlert(reading, 'temperature', 'critical', `Temperature too low: ${reading.temperature}°C`, this.thresholds.temperature.min);
@@ -209,6 +220,8 @@ export class WaterQualityService {
       this.createAlert(reading, 'temperature', 'warning', `Temperature elevated: ${reading.temperature}°C`, this.thresholds.temperature.max);
     }
 
+    }
+    if (reading.ph !== null) {
     // pH check
     if (reading.ph < this.thresholds.ph.min || reading.ph > this.thresholds.ph.max) {
       this.createAlert(reading, 'ph', 'critical', `pH out of range: ${reading.ph}`, this.thresholds.ph.max);
@@ -216,6 +229,8 @@ export class WaterQualityService {
       this.createAlert(reading, 'ph', 'warning', `pH not optimal: ${reading.ph}`, this.thresholds.ph.optimal.max);
     }
 
+    }
+    if (reading.do !== null) {
     // DO (Dissolved Oxygen) check
     if (reading.do < this.thresholds.do.critical) {
       this.createAlert(reading, 'do', 'critical', `Critical low oxygen: ${reading.do} mg/L`, this.thresholds.do.critical);
@@ -223,12 +238,16 @@ export class WaterQualityService {
       this.createAlert(reading, 'do', 'warning', `Low oxygen level: ${reading.do} mg/L`, this.thresholds.do.min);
     }
 
+    }
+    if (reading.turbidity !== null) {
     // Turbidity check
     if (reading.turbidity > this.thresholds.turbidity.max) {
       this.createAlert(reading, 'turbidity', 'critical', `High turbidity: ${reading.turbidity} NTU`, this.thresholds.turbidity.max);
     } else if (reading.turbidity > this.thresholds.turbidity.warning) {
       this.createAlert(reading, 'turbidity', 'warning', `Elevated turbidity: ${reading.turbidity} NTU`, this.thresholds.turbidity.warning);
     }
+  }
+
   }
 
   private createAlert(reading: WaterQualityReading, parameter: HealthAlert['parameter'], severity: HealthAlert['severity'], message: string, threshold: number): void {
@@ -238,7 +257,7 @@ export class WaterQualityService {
       severity,
       parameter,
       message,
-      value: reading[parameter],
+      value: reading[parameter]!,
       threshold,
     };
 
@@ -254,7 +273,8 @@ export class WaterQualityService {
     });
   }
 
-  private evaluateStatus(temperature: number, ph: number, _do: number, turbidity: number): 'normal' | 'warning' | 'critical' {
+  private evaluateStatus(temperature: number|null, ph: number|null, _do: number|null, turbidity: number|null): 'normal' | 'warning' | 'critical' | 'unavailable' {
+    if (temperature===null || ph===null || _do===null || turbidity===null) return 'unavailable';
     const issues = [
       temperature < this.thresholds.temperature.min || temperature > this.thresholds.temperature.warning,
       ph < this.thresholds.ph.min || ph > this.thresholds.ph.max,
@@ -276,7 +296,8 @@ export class WaterQualityService {
     return warnings.some((w) => w) ? 'warning' : 'normal';
   }
 
-  private calculateHealthScore(reading: WaterQualityReading): number {
+  private calculateHealthScore(reading: WaterQualityReading): number|null {
+    if (reading.temperature===null || reading.ph===null || reading.do===null || reading.turbidity===null || Date.now()-new Date(reading.timestamp).getTime()>15000) return null;
     let score = 100;
 
     // Temperature score

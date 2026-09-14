@@ -1,16 +1,21 @@
+import { refreshDisplayReading } from './sensorDisplay';
 import { useEffect, useState } from 'react';
 import { useWaterQualityWebSocket } from '../../hooks/useWaterQualityWebSocket';
 import { apiClient } from '../../services/apiClient';
+<<<<<<< Updated upstream
 import type { HealthAlert, PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
+=======
+import type { WaterQualityReading, HealthAlert, PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
+>>>>>>> Stashed changes
 import type { SmsLogEntry } from '../../types/sms';
 
 interface ChartDataPoint {
   time: string;
-  temperature?: number;
-  ph?: number;
-  do?: number;
-  turbidity?: number;
-  ammonia?: number;
+  temperature?: number|null;
+  ph?: number|null;
+  do?: number|null;
+  turbidity?: number|null;
+  ammonia?: number|null;
 }
 
 interface FeedingSchedule {
@@ -25,6 +30,11 @@ export const useDashboardData = () => {
   const ws = useWaterQualityWebSocket();
   const { isConnected, latestReading, historyReadings, requestStatistics, requestLatestReading, requestHistory } = ws;
 
+  const [polledReading, setPolledReading] = useState<WaterQualityReading|null>(null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const timer=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(timer); },[]);
+  const newest = polledReading && (!latestReading || new Date(polledReading.createdAt || polledReading.timestamp)>=new Date(latestReading.createdAt || latestReading.timestamp)) ? polledReading : latestReading;
+  const displayReading = refreshDisplayReading(newest,now);
   const [batteryLevel, setBatteryLevel] = useState(92);
   const [tankWaterLevel, setTankWaterLevel] = useState(78);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
@@ -54,7 +64,7 @@ export const useDashboardData = () => {
         ph: reading.ph,
         do: reading.doMeasured === false ? undefined : reading.do,
         turbidity: reading.turbidity,
-        ammonia: reading.ammonia,
+        ammonia: reading.speciation?.percent ?? null,
       }));
     setChartData(sorted);
   }, [historyReadings]);
@@ -72,7 +82,7 @@ export const useDashboardData = () => {
           ph: latestReading.ph,
           do: latestReading.doMeasured === false ? undefined : latestReading.do,
           turbidity: latestReading.turbidity,
-          ammonia: latestReading.ammonia,
+          ammonia: latestReading.speciation?.percent ?? null,
         },
       ];
     });
@@ -95,7 +105,8 @@ export const useDashboardData = () => {
   useEffect(() => {
     const loadPredictiveBundle = async () => {
       try {
-        const response = await apiClient.get<{ predictiveWarning: PredictiveAnalyticsResult; predictionHistory: PredictionLog[]; smsLogs: SmsLogEntry[] }>('/water/dashboard');
+        const response = await apiClient.get<{ latest:WaterQualityReading|null; predictiveWarning: PredictiveAnalyticsResult; predictionHistory: PredictionLog[]; smsLogs: SmsLogEntry[] }>('/water/dashboard');
+        setPolledReading(response.data.latest);
         setPredictiveWarning(response.data.predictiveWarning);
         setSmsLogs(response.data.smsLogs || []);
       } catch {
@@ -104,7 +115,7 @@ export const useDashboardData = () => {
     };
 
     void loadPredictiveBundle();
-    const interval = setInterval(() => void loadPredictiveBundle(), 15000);
+    const interval = setInterval(() => void loadPredictiveBundle(), 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -171,6 +182,7 @@ export const useDashboardData = () => {
 
   return {
     ...ws,
+    latestReading: displayReading,
     alerts: activeAlerts.length > 0 ? activeAlerts : ws.alerts,
     activeAlerts,
     recentAlerts,
@@ -179,7 +191,7 @@ export const useDashboardData = () => {
     chartData,
     feedingSchedules,
     feedingLoading,
-    predictiveWarning,
+    predictiveWarning: displayReading?.sensorHealth?.temperature.valid && displayReading.sensorHealth.ph.valid && displayReading.sensorHealth.turbidity.valid && displayReading.doMeasured ? predictiveWarning : null,
     smsLogs,
     setTankWaterLevel,
     drainWater,

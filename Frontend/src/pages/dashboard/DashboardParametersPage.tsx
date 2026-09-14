@@ -1,3 +1,4 @@
+import { SensorHealthPanel, AmmoniaSpeciationCard } from '../../components/WaterQuality/SensorHealthPanel';
 import React, { useMemo } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
@@ -6,7 +7,7 @@ import type { WaterQualityStats } from '../../types/water';
 
 type ParameterKey = 'temperature' | 'ph' | 'do' | 'turbidity' | 'ammonia';
 
-type CardStats = { current: number; average: number; min: number; max: number };
+type CardStats = { current: number|null; average: number|null; min: number|null; max: number|null };
 
 type CardConfig = {
   key: ParameterKey | 'riskScore';
@@ -23,26 +24,26 @@ const parameterCards: CardConfig[] = [
   { key: 'ph', label: 'pH Level', unit: '', color: '#3b82f6', normal: (value) => value >= 6.5 && value <= 8.5, normalLabel: 'Normal', warnLabel: 'Needs attention' },
   { key: 'do', label: 'Dissolved Oxygen', unit: 'mg/L', color: '#22c55e', normal: (value) => value >= 5, normalLabel: 'Normal', warnLabel: 'Needs attention' },
   { key: 'turbidity', label: 'Turbidity', unit: 'NTU', color: '#a855f7', normal: (value) => value < 25, normalLabel: 'Normal', warnLabel: 'Needs attention' },
-  { key: 'ammonia', label: 'Ammonia', unit: 'ppm', color: '#ef4444', normal: (value) => value < 0.2, normalLabel: 'Normal', warnLabel: 'Needs attention' },
+  { key: 'ammonia', label: 'NH3 fraction of TAN', unit: '%', color: '#ef4444', normal: () => false, normalLabel: 'Preliminary', warnLabel: 'TAN required' },
   { key: 'riskScore', label: 'Mortality Risk Score', unit: '%', color: '#ef4444', normal: (value) => value <= 25, normalLabel: 'Low Risk', warnLabel: 'Elevated' },
 ];
 
-const formatValue = (value: number, unit: string) => `${value.toFixed(unit === '' ? 2 : 1)}${unit ? ` ${unit}` : ''}`;
+const formatValue = (value: number|null, unit: string) => value === null ? '--' : `${value.toFixed(unit === '' ? 2 : 1)}${unit ? ` ${unit}` : ''}`;
 
 const DashboardParametersPage: React.FC = () => {
   const { statistics, chartData, predictiveWarning, latestReading } = useDashboardData();
 
-  const currentRiskScore = predictiveWarning?.riskScore ?? 22;
+  const currentRiskScore = predictiveWarning?.riskScore ?? null;
 
   const riskChartData = useMemo(() => {
-    return chartData.slice(-20).map((point, i) => ({
+    return chartData.slice(-20).map((point) => ({
       ...point,
-      riskScore: Math.max(0, Math.min(100, currentRiskScore + Math.sin(i * 0.5) * 5)),
+      riskScore: null,
     }));
   }, [chartData, currentRiskScore]);
 
   const riskStats: CardStats = useMemo(() => {
-    const values = riskChartData.map((point) => point.riskScore);
+    const values: number[] = []; // No historical predictions were supplied; do not fabricate a trend.
     if (!values.length) return { current: currentRiskScore, average: currentRiskScore, min: currentRiskScore, max: currentRiskScore };
     return {
       current: currentRiskScore,
@@ -64,10 +65,17 @@ const DashboardParametersPage: React.FC = () => {
         </div>
       </header>
 
+      <SensorHealthPanel reading={latestReading} />
       {statistics ? (
         <section className="lg:flex-1 lg:min-h-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2 gap-2.5">
           {parameterCards.map((item) => {
             const isRisk = item.key === 'riskScore';
+<<<<<<< Updated upstream
+=======
+            if(item.key==='ammonia') return <AmmoniaSpeciationCard key={item.key} reading={latestReading} />;
+            if(isRisk && currentRiskScore===null) return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Mortality risk: INSUFFICIENT VALID SENSOR DATA</div>;
+            if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidity ?? '--'} raw ADC. NTU conversion requires formal calibration.</div>;
+>>>>>>> Stashed changes
             if (item.key === 'do' && latestReading?.doMeasured === false) {
               return <div key={item.key} className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
                 <h3 className="font-semibold text-gray-900">Dissolved Oxygen</h3>
@@ -75,7 +83,7 @@ const DashboardParametersPage: React.FC = () => {
               </div>;
             }
             const stats: CardStats = isRisk ? riskStats : (statistics[item.key as ParameterKey] as WaterQualityStats[ParameterKey]);
-            const isNormal = item.normal(stats.current);
+            const isNormal = stats.current!==null && item.normal(stats.current);
             const chart = isRisk ? riskChartData : chartData.slice(-20);
 
             return (

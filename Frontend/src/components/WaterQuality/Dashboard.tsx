@@ -8,10 +8,10 @@ import type { SmsLogEntry } from '../../types/sms';
 
 interface ChartDataPoint {
   time: string;
-  temperature?: number;
-  ph?: number;
-  do?: number;
-  turbidity?: number;
+  temperature?: number|null;
+  ph?: number|null;
+  do?: number|null;
+  turbidity?: number|null;
 }
 
 interface FeedingSchedule {
@@ -317,7 +317,7 @@ export const WaterQualityDashboard: React.FC = () => {
           <section className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
               <p className="text-xs tracking-wide text-gray-500 uppercase">Health Score</p>
-              <p className="mt-2 text-3xl font-bold text-white">{statistics ? Math.round(statistics.healthScore) : '--'}</p>
+              <p className="mt-2 text-3xl font-bold text-white">{statistics?.healthScore != null ? Math.round(statistics.healthScore) : '--'}</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
               <p className="text-xs tracking-wide text-gray-500 uppercase">Battery</p>

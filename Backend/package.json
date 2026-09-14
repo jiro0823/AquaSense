@@ -12,7 +12,12 @@
     "lint:fix": "eslint src --ext .ts --fix",
     "type-check": "tsc --noEmit",
     "test:startup": "node --test scripts/dev.test.cjs",
+<<<<<<< Updated upstream
     "test:sms": "node --test -r ts-node/register src/services/sms.service.test.ts src/services/sms.delivery.test.ts"
+=======
+    "test:sms": "node --test -r ts-node/register src/services/sms.service.test.ts src/services/sms.delivery.test.ts",
+    "test:sensors": "node --test -r ts-node/register src/services/sensorHealth.test.ts src/services/sensorIngestion.test.ts"
+>>>>>>> Stashed changes
   },
   "keywords": [
     "capstone",

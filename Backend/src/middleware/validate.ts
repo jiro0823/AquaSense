@@ -31,22 +31,8 @@ export const feedingManualSchema = z.object({
   deviceId: z.string().trim().min(1).max(120).optional(),
 });
 
-<<<<<<< Updated upstream
-export const sensorIngestSchema = z.object({
-  deviceId: z.string().trim().min(1).max(120),
-  temperature: z.coerce.number().finite(),
-  ph: z.coerce.number().finite(),
-  dissolvedOxygen: z.coerce.number().finite(),
-  turbidity: z.coerce.number().finite(),
-  ammonia: z.coerce.number().finite().optional(),
-});
-
-export const waterReadingSchema = z.object({
-  orp: z.number().finite().nullable().optional(),
-=======
 // Keep malformed sensor fields intact for structured diagnostics; never coerce null to zero.
 const diagnosticPayload = z.object({
->>>>>>> Stashed changes
   deviceId: z.string().trim().min(1).max(120).optional(),
   location: z.string().trim().max(255).optional(),
 }).passthrough();

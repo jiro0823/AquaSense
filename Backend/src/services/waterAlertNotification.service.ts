@@ -1,4 +1,4 @@
-import type { HealthSummary } from './sensorHealth';
+import { decisionEligible, type HealthSummary } from './sensorHealth';
 import { alertService } from './alert.service';
 import { predictiveAnalyticsService } from './predictiveAnalytics.service';
 import { ruleEngine, type AlertSeverity, type RuleAlertResult } from './ruleEngine.service';
@@ -9,14 +9,6 @@ import { logger } from '../utils/logger';
 
 export interface WaterAlertNotificationInput {
   deviceId: string;
-<<<<<<< Updated upstream
-  temperature: number;
-  ph: number;
-  dissolvedOxygen: number;
-  dissolvedOxygenMeasured?: boolean;
-  turbidity: number;
-  ammonia?: number;
-=======
   temperature: number | null;
   ph: number | null;
   dissolvedOxygen: number | null;
@@ -25,7 +17,6 @@ export interface WaterAlertNotificationInput {
   ammonia?: number | null;
   sensorHealth?: HealthSummary;
   turbidityUnit?: string;
->>>>>>> Stashed changes
 }
 
 export interface WaterAlertNotificationResult {
@@ -58,6 +49,8 @@ const selectPrimaryAction = (alerts: RuleAlertResult[]): string => {
 
 class WaterAlertNotificationService {
   async processReading(input: WaterAlertNotificationInput): Promise<WaterAlertNotificationResult> {
+    // Diagnostics are displayed with the reading; they are not commissioned incidents.
+    if (!decisionEligible(input.sensorHealth)) return { alertsCreated: 0, smsSentCount: 0 };
     const alerts = ruleEngine(input);
     let alertsCreated = 0;
     let smsSentCount = 0;

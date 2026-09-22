@@ -1,7 +1,11 @@
 #pragma once
 
 namespace CalibrationConfig {
-// Retain the supplied sketch's formulas and zero-seeded smoothing.
+// Provisional legacy conversions; NOT approved calibration coefficients.
+// Keep chemical conversion disabled until module, divider and reference evidence
+// are known. Raw ADC and characterized ADC-pin voltage remain available.
+constexpr bool ANALOG_CONVERSION_VERIFIED = false;
+constexpr const char* PROFILE_ID = "unverified";
 constexpr int ADC_MAX = 4095;
 constexpr float ADC_REFERENCE_VOLTS = 3.3f;
 constexpr float SMOOTH_PREVIOUS_WEIGHT = 0.7f;

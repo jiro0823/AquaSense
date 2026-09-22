@@ -5,15 +5,6 @@
 export interface WaterQualityReading {
   id: string;
   timestamp: Date;
-<<<<<<< Updated upstream
-  temperature: number; // Celsius (0-50)
-  ph: number; // pH level (0-14)
-  do: number; // Dissolved Oxygen (0-14 mg/L)
-  doMeasured?: boolean;
-  orp?: number | null; // ORP in mV; distinct from dissolved oxygen.
-  turbidity: number; // Turbidity (0-1000 NTU)
-  ammonia: number; // Ammonia (0-10 ppm)
-=======
   temperature: number | null; // Celsius (0-50)
   ph: number | null; // pH level (0-14)
   do: number | null; // Dissolved Oxygen (0-14 mg/L)
@@ -21,7 +12,6 @@ export interface WaterQualityReading {
   orp?: number | null; // ORP in mV; distinct from dissolved oxygen.
   turbidity: number | null; // Interpret using turbidityUnit; raw ADC is not NTU.
   ammonia: number | null; // NH3-N mg/L as N; null without validated TAN.
->>>>>>> Stashed changes
   location: string;
   status: 'normal' | 'warning' | 'critical' | 'unavailable';
   turbidityUnit?: string;

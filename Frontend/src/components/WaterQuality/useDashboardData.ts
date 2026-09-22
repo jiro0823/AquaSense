@@ -2,11 +2,7 @@ import { refreshDisplayReading } from './sensorDisplay';
 import { useEffect, useState } from 'react';
 import { useWaterQualityWebSocket } from '../../hooks/useWaterQualityWebSocket';
 import { apiClient } from '../../services/apiClient';
-<<<<<<< Updated upstream
-import type { HealthAlert, PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
-=======
 import type { WaterQualityReading, HealthAlert, PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
->>>>>>> Stashed changes
 import type { SmsLogEntry } from '../../types/sms';
 
 interface ChartDataPoint {

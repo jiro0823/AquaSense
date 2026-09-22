@@ -161,16 +161,17 @@ test('missing oxygen does not trigger DO emergency; measured zero still does', (
 });
 test('MQTT tags missing oxygen before persistence and notifications', async () => {
   setup();
-  const store = mock.method(sensorReadingService, 'addSensorReading', async () => ({ id: 'reading-test' }));
+  const store = mock.method(sensorReadingService, 'ingest', async (_device:string, _payload:Record<string,any>) => ({ id: 'reading-test', do:null, doMeasured:false }));
   mock.method(sensorReadingService, 'getStatistics', async () => ({}));
   const notify = mock.method(waterAlertNotificationService, 'processReading', async () => ({ alertsCreated: 0, smsSentCount: 0 }));
   const mqtt = new MQTTService() as unknown as { handleSensorReading(payload: string): Promise<void> };
   await mqtt.handleSensorReading(JSON.stringify({ temperature: 26, ph: 7.5, turbidity: 5 }));
-  assert.equal(store.mock.calls[0].arguments[8], false);
+  assert.equal(store.mock.calls[0].arguments[1].do, undefined);
   assert.equal(notify.mock.calls[0].arguments[0]!.dissolvedOxygenMeasured, false);
 });
 test('prediction excludes unmeasured oxygen rather than treating it as a real low reading', async () => {
+  mock.method(sensorReadingService, 'getLatestReading', async () => null);
   mock.method(sensorReadingService, 'getReadingsByTimeRange', async () => [{ temperature: 26, ph: 7.5, do: 0, doMeasured: false, turbidity: 5, ammonia: 0, timestamp: new Date() } as SensorReading]);
   const prediction = await predictiveAnalyticsService.getWarningCard();
-  assert.equal(prediction.latest, null); assert.equal(prediction.predictedIssue, 'Insufficient data for prediction');
+  assert.equal(prediction.latest, null); assert.equal(prediction.analysisStatus, 'INSUFFICIENT_VALID_SENSOR_DATA');
 });

@@ -298,19 +298,16 @@ class PredictiveAnalyticsService {
     const readingsDesc = await sensorReadingService.getReadingsByTimeRange(horizonMinutes);
     // Do not infer oxygen emergencies from legacy/default placeholders, or use
     // older measurements to imply that a currently missing sensor is healthy.
-<<<<<<< Updated upstream
-    const usableReadings = readingsDesc[0]?.doMeasured === false ? [] : readingsDesc.filter((reading) => reading.doMeasured !== false);
-=======
     const currentReading = await sensorReadingService.getLatestReading();
     const usable = (r: SensorReading) => r.doMeasured && r.do !== null && r.temperature !== null && r.ph !== null && r.turbidity !== null && r.turbidityUnit === 'NTU' && !!r.sensorHealth &&
-      ['temperature','ph','turbidity'].every(n => r.sensorHealth[n as 'temperature'|'ph'|'turbidity'].valid);
+      ['temperature','ph','turbidity'].every(n => { const s=r.sensorHealth[n as 'temperature'|'ph'|'turbidity']; return s.valid && s.health==='VALID' && s.calibration==='CALIBRATED'; });
     const currentValid = currentReading && usable(currentReading) && Object.values(refreshHealth(currentReading.sensorHealth)).filter(s=>['temperature','ph','turbidity'].includes(s.name)).every(s=>s.valid);
     const usableReadings = currentValid ? readingsDesc.filter(r=>r.deviceId===currentReading!.deviceId && usable(r)) : [];
->>>>>>> Stashed changes
     const readings = [...usableReadings].reverse().map(normalizeReading);
     const dataQuality = calculateDataQuality(readings, horizonMinutes);
 
-    if (readings.length === 0) {
+    const times = readings.map(r=>new Date(r.timestamp).getTime());
+    if (readings.length < 6 || new Set(times).size < 6 || Math.max(...times)-Math.min(...times)<25000) {
       return {
         generatedAt: new Date().toISOString(),
         modelVersion: MODEL_VERSION,
@@ -322,8 +319,8 @@ class PredictiveAnalyticsService {
         warningCard: {
           riskLevel: 'UNAVAILABLE',
           predictedIssue: 'INSUFFICIENT VALID SENSOR DATA',
-          cause: 'Valid fresh temperature, pH, measured oxygen and turbidity in NTU are required',
-          action: 'Wait for sensor stream and monitor dashboard',
+          cause: 'Requires calibrated fresh temperature, pH, measured oxygen, turbidity in NTU and at least six distinct samples spanning 25 seconds',
+          action: 'Complete sensor commissioning and collect eligible measurements',
           confidence: 0,
           estimatedUnsafeInMinutes: null,
         },

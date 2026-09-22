@@ -3,7 +3,6 @@
  * API endpoints for water quality monitoring
  */
 import { Request, Response } from 'express';
-import { parseOrp } from '../../../services/sensorValues';
 import { waterQualityService } from '../services/waterQualityService';
 import type { WaterQualityStats } from '../types';
 import { sendSuccess, sendError } from '../../../utils/response';
@@ -74,57 +73,8 @@ const ingestMeta: IngestMeta = {
  */
 export const addReading = async (req: Request, res: Response): Promise<void> => {
   try {
-<<<<<<< Updated upstream
-    const { deviceId, temperature, ph, do: dissolvedOxygen, turbidity, location, ammonia } = req.body;
-
-    if (temperature === undefined || ph === undefined || dissolvedOxygen === undefined || turbidity === undefined) {
-      sendError(res, 400, 'Missing required parameters: temperature, ph, do, turbidity');
-      return;
-    }
-
-    const tempValue = parseFloat(temperature);
-    const phValue = parseFloat(ph);
-    const doValue = parseFloat(dissolvedOxygen);
-    const turbidityValue = parseFloat(turbidity);
-    const ammoniaValue = ammonia !== undefined ? parseFloat(ammonia) : 0;
-
-    if (
-      !Number.isFinite(tempValue) ||
-      !Number.isFinite(phValue) ||
-      !Number.isFinite(doValue) ||
-      !Number.isFinite(turbidityValue) ||
-      !Number.isFinite(ammoniaValue)
-    ) {
-      sendError(res, 400, 'Invalid sensor values');
-      return;
-    }
-
-    const stored = await sensorReadingService.addSensorReading(
-      deviceId || 'unknown-device',
-      tempValue,
-      phValue,
-      doValue,
-      turbidityValue,
-      ammoniaValue,
-      location || 'Unknown',
-      new Date(),
-      true,
-      parseOrp(req.body.orp)
-    );
-    const reading = stored || {
-      temperature: tempValue,
-      ph: phValue,
-      do: doValue,
-      turbidity: turbidityValue,
-      ammonia: ammoniaValue,
-      location: location || 'Unknown',
-      timestamp: new Date(),
-    };
-
-=======
     const deviceId = req.body.deviceId || 'unknown-device';
     const reading = await sensorReadingService.ingest(deviceId, req.body);
->>>>>>> Stashed changes
     ingestMeta.lastReceivedAt = new Date(reading.timestamp).toISOString();
     ingestMeta.lastSourceIp = req.ip || null;
     ingestMeta.lastLocation = reading.location || null;
@@ -139,7 +89,7 @@ export const addReading = async (req: Request, res: Response): Promise<void> => 
       location: ingestMeta.lastLocation,
     });
 
-    await waterAlertNotificationService.processReading({ ...reading, dissolvedOxygen: reading.do, dissolvedOxygenMeasured: reading.doMeasured });
+    await waterAlertNotificationService.processReading({ ...reading, dissolvedOxygen: reading.do, dissolvedOxygenMeasured: reading.doMeasured }).catch(error=>logger.error('Post-ingestion notification failed', {deviceId, readingId:reading.id, error:String(error)}));
 
     sendSuccess(res, 201, 'Reading added successfully', reading);
   } catch (error) {

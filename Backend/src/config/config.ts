@@ -3,7 +3,8 @@ import path from 'path';
 import { z } from 'zod';
 
 const envPath = path.resolve(__dirname, '..', '..', '.env');
-const fileEnv = dotenv.config({ path: envPath, override: true }).parsed || {};
+// Tests never load deployment secrets or override their isolated environment.
+const fileEnv = process.env.NODE_ENV === 'test' ? {} : dotenv.config({ path: envPath, override: true }).parsed || {};
 
 const getEnv = (key: string, fallback?: string): string | undefined => {
   if (fileEnv[key] !== undefined) {

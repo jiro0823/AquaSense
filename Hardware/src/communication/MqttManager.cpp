@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <ArduinoJson.h>
 #include "config/DeviceConfig.h"
+#include "config/CalibrationConfig.h"
 #if __has_include("secrets/Secrets.h")
 #include "secrets/Secrets.h"
 #else
@@ -14,7 +15,7 @@ bool MqttManager::begin() {
     if (task != nullptr) return true;
     client.setServer(DeviceConfig::MQTT_HOST, DeviceConfig::MQTT_PORT);
     client.setSocketTimeout(DeviceConfig::MQTT_SOCKET_TIMEOUT_SECONDS);
-    if (!client.setBufferSize(768)) return false;
+    if (!client.setBufferSize(3072)) return false;
     snapshots = xQueueCreateStatic(1, sizeof(SensorReadings), queueBytes, &queueStorage);
     if (snapshots == nullptr) return false;
     // PubSubClient/TCP/DNS can block. Keep them off the sensor/display loop.
@@ -38,18 +39,49 @@ bool MqttManager::isRunning() const { return task != nullptr; }
 void MqttManager::runTask(void* context) { static_cast<MqttManager*>(context)->run(); }
 
 bool MqttManager::publishReadings(const SensorReadings& reading) {
-    // One acquisition + device identity prevents cross-cycle ORP association.
-    // Older standalone firmware keeps its numeric-topic protocol.
-    if (!reading.temperatureValid || !reading.phValid || !reading.turbidityValid) return true;
-    StaticJsonDocument<512> payload;
+    // Fault frames are observations too. Never suppress the healthy channels.
+    DynamicJsonDocument payload(3072);
+    const uint32_t nowMs = millis();
+    payload["schemaVersion"] = 2;
     payload["deviceId"] = DeviceConfig::DEVICE_ID;
-    payload["temperature"] = reading.temperatureC; payload["ph"] = reading.ph;
-    payload["turbidity"] = reading.turbidityRaw;
+    payload["bootId"] = reading.bootId;
+    payload["firmwareVersion"] = "water-monitor-precal-1";
+    payload["calibrationProfileId"] = CalibrationConfig::PROFILE_ID;
+    payload["sampleAgeMs"] = uint32_t(nowMs - reading.sampledAtMs);
+    if (reading.temperatureValid) payload["temperature"] = reading.temperatureC; else payload["temperature"] = nullptr;
+    if (reading.phValid) payload["ph"] = reading.ph; else payload["ph"] = nullptr;
+    if (reading.turbidityValid) payload["turbidity"] = reading.turbidityRaw; else payload["turbidity"] = nullptr;
     if (reading.orpValid) payload["orp"] = reading.orpMv; else payload["orp"] = nullptr;
+    payload["doMeasured"] = false;
+    payload["do"] = nullptr;
     payload["turbidityUnit"] = "raw_adc";
     payload["uptimeMs"] = reading.sampledAtMs; payload["sequence"] = reading.sequence;
-    char body[512]; const size_t size = serializeJson(payload, body, sizeof(body));
-    return size < sizeof(body) && client.publish(DeviceConfig::TOPIC_READINGS, body, false);
+    JsonObject sensors = payload.createNestedObject("sensors");
+    JsonObject temperature = sensors.createNestedObject("temperature");
+    temperature["sampleAgeMs"] = uint32_t(nowMs - reading.temperatureSampledAtMs);
+    temperature["health"] = reading.temperatureValid ? "VALID" : "SENSOR_ERROR";
+    const auto addAnalog = [&](const char* name, const AnalogDiagnostics& diagnostic) {
+        JsonObject sensor = sensors.createNestedObject(name);
+        sensor["rawAdc"] = diagnostic.rawAdc;
+        sensor["voltage"] = diagnostic.voltage;
+        sensor["voltageSource"] = diagnostic.efuseCharacterized ? "EFUSE" : "NOMINAL_FALLBACK";
+        sensor["voltageNode"] = "ESP32_ADC_PIN";
+        sensor["conversion"] = "UNVERIFIED";
+        sensor["calibration"] = "REQUIRED";
+        sensor["adcMinimum"] = diagnostic.minimum;
+        sensor["adcMaximum"] = diagnostic.maximum;
+        sensor["adcLast"] = diagnostic.last;
+        sensor["clippedSamples"] = diagnostic.clipped;
+        sensor["sampleAgeMs"] = uint32_t(nowMs - diagnostic.sampledAtMs);
+        sensor["health"] = diagnostic.clipped ? "SATURATED" : "VALID";
+    };
+    addAnalog("ph", reading.phDiagnostics);
+    addAnalog("turbidity", reading.turbidityDiagnostics);
+    addAnalog("orp", reading.orpDiagnostics);
+    char body[2560];
+    if (payload.overflowed() || measureJson(payload) >= sizeof(body)) return false;
+    serializeJson(payload, body, sizeof(body));
+    return client.publish(DeviceConfig::TOPIC_READINGS, body, false);
 }
 
 void MqttManager::run() {

@@ -54,9 +54,9 @@ test('current failure prevents fallback to older healthy prediction history',asy
   await sensorReadingService.ingest('prediction-test',{temperature:-127,ph:7.5,do:6,turbidity:20,turbidityUnit:'NTU'});
   const prediction=await predictiveAnalyticsService.getWarningCard();assert.equal(prediction.analysisStatus,'INSUFFICIENT_VALID_SENSOR_DATA');assert.equal(prediction.riskScore,null);
 });
-test('valid uncalibrated measured parameters produce preliminary analysis without invented ammonia',async()=>{
+test('uncalibrated measured parameters cannot produce a mortality forecast',async()=>{
   storage();await sensorReadingService.ingest('prediction-valid',{temperature:25,ph:7.5,do:6,turbidity:20,turbidityUnit:'NTU'});
-  const prediction=await predictiveAnalyticsService.getWarningCard();assert.equal(prediction.analysisStatus,'AVAILABLE');assert.equal(prediction.latest!.ammonia,null);assert.equal(prediction.calibration,'REQUIRED');
+  const prediction=await predictiveAnalyticsService.getWarningCard();assert.equal(prediction.analysisStatus,'INSUFFICIENT_VALID_SENSOR_DATA');assert.equal(prediction.riskScore,null);assert.equal(prediction.calibration,'REQUIRED');
 });
 test('raw turbidity and absent DO block the existing mortality model',async()=>{
   storage();await sensorReadingService.ingest('raw-risk-test',{temperature:25,ph:8,turbidity:1800,turbidityUnit:'raw_adc'});

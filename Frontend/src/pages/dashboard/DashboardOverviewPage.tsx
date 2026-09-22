@@ -43,19 +43,11 @@ const DashboardOverviewPage: React.FC = () => {
   };
 
   const metrics: Array<{ title: string; value: string; color: string; icon: ParameterIconName; status: { label: string; color: string; bg: string } }> = [
-<<<<<<< Updated upstream
-    { title: 'TEMPERATURE', value: latestReading ? `${latestReading.temperature.toFixed(1)} °C` : '--', color: '#f59e0b', icon: 'temperature', status: getStatus('temp', latestReading?.temperature || 0) },
-    { title: 'pH LEVEL', value: latestReading ? latestReading.ph.toFixed(1) : '--', color: '#3b82f6', icon: 'ph', status: getStatus('ph', latestReading?.ph || 0) },
-    { title: 'DISSOLVED OXYGEN', value: latestReading && latestReading.doMeasured !== false ? `${latestReading.do.toFixed(1)} mg/L` : '--', color: '#22c55e', icon: 'do', status: latestReading?.doMeasured === false ? { label: 'Unmeasured', color: 'text-gray-600', bg: 'bg-gray-100' } : getStatus('do', latestReading?.do || 0) },
-    { title: 'TURBIDITY', value: latestReading ? `${latestReading.turbidity.toFixed(0)} NTU` : '--', color: '#a855f7', icon: 'turbidity', status: getStatus('turbidity', latestReading?.turbidity || 0) },
-    { title: 'AMMONIA (NH3)', value: latestReading ? `${latestReading.ammonia.toFixed(2)} mg/L` : '--', color: '#ef4444', icon: 'ammonia', status: getStatus('ammonia', latestReading?.ammonia || 0) },
-=======
     { title: 'TEMPERATURE', value: latestReading?.temperature != null ? `${latestReading.temperature?.toFixed(1)} °C` : '--', color: '#f59e0b', icon: 'temperature', status: getStatus('temp', latestReading?.temperature) },
     { title: 'pH LEVEL', value: latestReading?.ph != null ? latestReading.ph?.toFixed(1) : '--', color: '#3b82f6', icon: 'ph', status: getStatus('ph', latestReading?.ph) },
     { title: 'DISSOLVED OXYGEN', value: latestReading && latestReading.doMeasured !== false ? `${latestReading.do?.toFixed(1)} mg/L` : '--', color: '#22c55e', icon: 'do', status: latestReading?.doMeasured === false ? { label: 'Unmeasured', color: 'text-gray-600', bg: 'bg-gray-100' } : getStatus('do', latestReading?.do) },
     { title: 'TURBIDITY', value: latestReading?.turbidity != null ? `${latestReading.turbidity?.toFixed(0)} ${latestReading.turbidityUnit}` : '--', color: '#a855f7', icon: 'turbidity', status: latestReading?.turbidityUnit==='NTU'?getStatus('turbidity', latestReading?.turbidity):getStatus('turbidity', null) },
     { title: 'NH3 FRACTION OF TAN', value: latestReading?.speciation?.percent != null ? latestReading.speciation.percent.toFixed(2)+'%' : '--', color: '#ef4444', icon: 'ammonia', status: {label:'TAN required for concentration',color:'text-gray-600',bg:'bg-gray-100'} },
->>>>>>> Stashed changes
   ];
 
   const gaugeData = [
@@ -208,11 +200,7 @@ const DashboardOverviewPage: React.FC = () => {
                  </PieChart>
                </ResponsiveContainer>
                <div className="absolute flex flex-col items-center bottom-1">
-<<<<<<< Updated upstream
-                  <span className="text-2xl font-bold text-gray-900">{currentRiskScore.toFixed(0)}%</span>
-=======
                   <span className="text-2xl font-bold text-gray-900">{currentRiskScore?.toFixed(0) ?? '--'}%</span>
->>>>>>> Stashed changes
                   <span className="text-sm font-bold mt-0.5 uppercase" style={{ color: riskColor }}>{riskLevel}</span>
                </div>
              </div>

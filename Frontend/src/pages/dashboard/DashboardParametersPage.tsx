@@ -70,12 +70,9 @@ const DashboardParametersPage: React.FC = () => {
         <section className="lg:flex-1 lg:min-h-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2 gap-2.5">
           {parameterCards.map((item) => {
             const isRisk = item.key === 'riskScore';
-<<<<<<< Updated upstream
-=======
             if(item.key==='ammonia') return <AmmoniaSpeciationCard key={item.key} reading={latestReading} />;
             if(isRisk && currentRiskScore===null) return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Mortality risk: INSUFFICIENT VALID SENSOR DATA</div>;
             if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidity ?? '--'} raw ADC. NTU conversion requires formal calibration.</div>;
->>>>>>> Stashed changes
             if (item.key === 'do' && latestReading?.doMeasured === false) {
               return <div key={item.key} className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
                 <h3 className="font-semibold text-gray-900">Dissolved Oxygen</h3>

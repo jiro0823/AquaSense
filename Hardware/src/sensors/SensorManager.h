@@ -1,6 +1,7 @@
 #pragma once
 #include <DallasTemperature.h>
 #include <OneWire.h>
+#include <esp_adc_cal.h>
 #include "models/SensorReadings.h"
 
 class SensorManager {
@@ -27,4 +28,13 @@ private:
     uint32_t lastAdcSampleMs = 0;
     int adcSum = 0;
     uint8_t adcSamples = 0;
+    uint32_t voltageSumMv = 0;
+    AnalogDiagnostics burst;
+    esp_adc_cal_characteristics_t adcCharacteristics = {};
+    bool efuseCharacterized = false;
+    bool temperatureInitialized = false;
+    bool turbidityInitialized = false;
+    bool orpInitialized = false;
+    DeviceAddress temperatureAddress = {};
+    bool temperatureAddressValid = false;
 };

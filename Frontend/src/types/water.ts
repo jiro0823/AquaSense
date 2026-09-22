@@ -7,14 +7,6 @@ import type { HealthSummary, Speciation } from './sensorHealth';
 export interface WaterQualityReading {
   id: string;
   timestamp: Date;
-<<<<<<< Updated upstream
-  temperature: number;
-  ph: number;
-  do: number;
-  doMeasured?: boolean;
-  turbidity: number;
-  ammonia: number;
-=======
   createdAt?: Date;
   temperature: number | null;
   ph: number | null;
@@ -27,7 +19,6 @@ export interface WaterQualityReading {
   turbidityUnit?: string;
   turbidity: number | null;
   ammonia: number | null;
->>>>>>> Stashed changes
   location: string;
   status: 'normal' | 'warning' | 'critical';
 }

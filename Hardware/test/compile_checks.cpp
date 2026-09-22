@@ -18,7 +18,8 @@ static_assert(ControlSafety::elapsed(15, 0xfffffff0, 31) && !ControlSafety::elap
 constexpr bool near(float value, float expected, float tolerance = 0.01f) {
     return value > expected - tolerance && value < expected + tolerance;
 }
-static_assert(near(SensorConversions::smooth(0.0f, 25.0f), 7.5f), "Preserve zero-seeded smoothing");
+static_assert(near(SensorConversions::filter(0.0f, 25.0f, false), 25.0f), "First valid sample seeds filter directly");
+static_assert(near(SensorConversions::filter(7.5f, 25.0f, false), 25.0f), "Recovery discards stale filter state");
 static_assert(near(SensorConversions::smooth(25.0f, 25.0f), 25.0f), "Stable signal must stay stable");
 static_assert(near(SensorConversions::phFromAdc(3102), 7.0016f), "pH reference voltage regression");
 static_assert(near(SensorConversions::orpFromAdc(2048), -330.4029f), "ORP midpoint sign/units regression");

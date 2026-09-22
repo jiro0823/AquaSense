@@ -9,6 +9,9 @@ constexpr float smooth(float previous, float current) {
     return previous * CalibrationConfig::SMOOTH_PREVIOUS_WEIGHT +
            current * CalibrationConfig::SMOOTH_CURRENT_WEIGHT;
 }
+constexpr float filter(float previous, float current, bool initialized) {
+    return initialized ? smooth(previous, current) : current;
+}
 constexpr float phFromAdc(int raw) {
     return CalibrationConfig::PH_REFERENCE_VALUE +
            (CalibrationConfig::PH_REFERENCE_VOLTS -
@@ -21,7 +24,7 @@ constexpr float orpFromAdc(int raw) {
                75.0f + CalibrationConfig::ORP_OFFSET_MV;
 }
 constexpr bool adcUsable(int raw) {
-    return raw > 0 && raw < CalibrationConfig::ADC_MAX;
+    return raw > 8 && raw < CalibrationConfig::ADC_MAX - 8;
 }
 constexpr bool phPlausible(float ph) {
     return ph >= Thresholds::PH_MIN && ph <= Thresholds::PH_MAX;

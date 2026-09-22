@@ -90,7 +90,7 @@ test('ORP preserves negative/zero millivolts and never turns absent values into 
 
 test('integrated MQTT snapshot retains ORP and device identity through persistence and realtime delivery', async () => {
   mock.method(logger, 'info', () => {});
-  const save = mock.method(sensorReadingService, 'addSensorReading', async () => null);
+  const save = mock.method(sensorReadingService, 'ingest', async (deviceId:string, payload:Record<string,any>) => ({...payload, deviceId, do:null, doMeasured:false}));
   mock.method(sensorReadingService, 'getStatistics', async () => ({ orp: orpStatistics([{ orp: -330.4 }]) }));
   mock.method(waterAlertNotificationService, 'processReading', async () => undefined);
   const service = new MQTTService();
@@ -99,7 +99,7 @@ test('integrated MQTT snapshot retains ORP and device identity through persisten
   await (service as unknown as { handleSensorReading(payload: string): Promise<void> }).handleSensorReading(
     JSON.stringify({ deviceId: 'board', temperature: 26, ph: 7, turbidity: 500, turbidityUnit: 'raw_adc', orp: -330.4 }));
   const args = save.mock.calls[0].arguments;
-  assert.equal(args[0], 'board'); assert.equal(args[8], false); assert.equal(args[9], -330.4);
+  assert.equal(args[0], 'board'); assert.equal(args[1].do, undefined); assert.equal(args[1].orp, -330.4);
   assert.equal(realtime?.orp, -330.4);
 });
 

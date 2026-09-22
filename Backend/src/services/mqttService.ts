@@ -5,11 +5,7 @@
  */
 
 import mqtt, { MqttClient } from 'mqtt';
-<<<<<<< Updated upstream
-import { parseOrp } from './sensorValues';
-=======
 import { numeric } from './sensorHealth';
->>>>>>> Stashed changes
 import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
@@ -34,21 +30,12 @@ export class MQTTService {
   private isConnected = false;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private latestSensorPayload: {
-<<<<<<< Updated upstream
-    temperature?: number;
-    ph?: number;
-    turbidity?: number;
-    do?: number;
-    ammonia?: number;
-    orp?: number | null;
-=======
     temperature?: unknown;
     ph?: unknown;
     turbidity?: unknown;
     do?: unknown;
     ammonia?: unknown;
     orp?: unknown;
->>>>>>> Stashed changes
   } = {};
   private pendingBatchFlags = {
     temperature: false,
@@ -58,10 +45,7 @@ export class MQTTService {
   private onReadingReceived?: (reading: WaterQualityReading) => void;
   private onStatsUpdated?: (stats: WaterQualityStats) => void;
   private lastConnectionWarningAt = 0;
-<<<<<<< Updated upstream
-=======
   private sensorTimestamps: Record<string,string> = {};
->>>>>>> Stashed changes
   private latestDoReceivedAt = 0;
   private latestOrpReceivedAt = 0;
 
@@ -193,128 +177,14 @@ export class MQTTService {
   private async handleSensorReading(payload: string): Promise<void> {
     try {
       const data = JSON.parse(payload);
-<<<<<<< Updated upstream
-
-      // Accept both `do` and `dissolvedOxygen` key names.
-      const suppliedDo = data.do ?? data.dissolvedOxygen;
-      const doMeasured = suppliedDo !== undefined && suppliedDo !== null && String(suppliedDo).trim() !== '' && Number.isFinite(Number(suppliedDo));
-      // Keep the legacy numeric storage format, explicitly tagging placeholders.
-      const doValue = doMeasured ? suppliedDo : 0;
-
-      // Validate required fields
-      if (
-        data.temperature === undefined ||
-        data.ph === undefined ||
-        data.turbidity === undefined
-      ) {
-        logger.warn('Invalid sensor reading - missing required fields:', data);
-        return;
-      }
-
-      const temperature = parseFloat(data.temperature);
-      const ph = parseFloat(data.ph);
-      const dissolvedOxygen = parseFloat(doValue);
-      const turbidity = parseFloat(data.turbidity);
-      const ammonia = parseFloat(data.ammonia ?? 0);
-      const orp = parseOrp(data.orp);
-
-      const sanitized = this.sanitizeSensorValues({
-        temperature,
-        ph,
-        dissolvedOxygen,
-        turbidity,
-        ammonia,
-      });
-
-      if (
-        sanitized.temperature === null ||
-        sanitized.ph === null ||
-        sanitized.dissolvedOxygen === null ||
-        sanitized.turbidity === null
-      ) {
-        logger.warn('[MQTT] Dropping sensor reading: required sensor value is not numeric', {
-          temperature,
-          ph,
-          do: dissolvedOxygen,
-          turbidity,
-          ammonia,
-        });
-        return;
-      }
-
-      if (sanitized.warnings.length) {
-        logger.warn(`[MQTT] Sanitized sensor reading: ${sanitized.warnings.join(', ')}`);
-      }
-
-      const timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
-      const deviceId = typeof data.deviceId === 'string' && data.deviceId.trim() ? data.deviceId.trim() : 'mqtt-device';
-      const persisted = await sensorReadingService.addSensorReading(
-        deviceId,
-        sanitized.temperature,
-        sanitized.ph,
-        sanitized.dissolvedOxygen,
-        sanitized.turbidity,
-        sanitized.ammonia,
-        data.location || 'ESP32-Sensor',
-        timestamp,
-        doMeasured,
-        orp
-      );
-      const reading = {
-        id: persisted?.id || `mqtt-${Date.now()}`,
-        temperature: sanitized.temperature,
-        ph: sanitized.ph,
-        do: sanitized.dissolvedOxygen,
-        doMeasured,
-        orp,
-        turbidity: sanitized.turbidity,
-        ammonia: sanitized.ammonia,
-        location: data.location || 'ESP32-Sensor',
-        timestamp,
-        status: 'normal' as const,
-      };
-
-      await waterAlertNotificationService.processReading({
-        deviceId,
-        temperature: reading.temperature,
-        ph: reading.ph,
-        dissolvedOxygen: reading.do,
-        dissolvedOxygenMeasured: doMeasured,
-        turbidity: reading.turbidity,
-        ammonia: reading.ammonia,
-      });
-
-      this.onReadingReceived?.(reading);
-      const dbStats = await sensorReadingService.getStatistics(60);
-      this.onStatsUpdated?.({
-        timestamp: new Date(),
-        orp: dbStats.orp,
-        temperature: dbStats.temperature,
-        ph: dbStats.ph,
-        do: dbStats.do,
-        turbidity: dbStats.turbidity,
-        ammonia: dbStats.ammonia,
-        healthScore: 0,
-      });
-
-      // Do not overwrite in-progress numeric-topic aggregation after async DB work.
-
-      logger.info(
-        `[ESP32] Sensor reading received: Temp=${reading.temperature}Â°C, pH=${reading.ph}, DO=${reading.do}, Turbidity=${reading.turbidity}`
-      );
-    } catch (error) {
-      logger.error('Failed to process sensor reading:', error);
-    }
-=======
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
       const deviceId = typeof data.deviceId === 'string' ? data.deviceId : 'mqtt-device';
       const reading = await sensorReadingService.ingest(deviceId, data);
-      await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured});
       this.onReadingReceived?.(reading);
+      await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured}).catch(error=>logger.error('Post-ingestion notification failed', {deviceId, readingId:reading.id, error:String(error)}));
       const stats = await sensorReadingService.getStatistics(60);
       this.onStatsUpdated?.({...stats,timestamp:new Date()});
     } catch { logger.warn('Malformed sensor payload or ingestion failed'); }
->>>>>>> Stashed changes
   }
 
   setRealtimeHandlers(handlers: {
@@ -352,20 +222,12 @@ export class MQTTService {
         this.pendingBatchFlags.turbidity = true;
         break;
       case 'orp':
-<<<<<<< Updated upstream
-        this.latestSensorPayload.orp = parsed;
-=======
         this.latestSensorPayload.orp = value;
->>>>>>> Stashed changes
         this.latestOrpReceivedAt = Date.now();
         break;
       case 'do':
       case 'dissolved-oxygen':
-<<<<<<< Updated upstream
-        this.latestSensorPayload.do = parsed;
-=======
         this.latestSensorPayload.do = value;
->>>>>>> Stashed changes
         this.latestDoReceivedAt = Date.now();
         break;
       case 'ammonia':
@@ -390,14 +252,9 @@ export class MQTTService {
         ph: this.latestSensorPayload.ph,
         do: Date.now() - this.latestDoReceivedAt <= 15000 ? this.latestSensorPayload.do : undefined,
         turbidity: this.latestSensorPayload.turbidity,
-<<<<<<< Updated upstream
-        ammonia: this.latestSensorPayload.ammonia ?? 0,
-        orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
-=======
         turbidityUnit: 'raw_adc',
         orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
         sensorTimestamps: {...this.sensorTimestamps},
->>>>>>> Stashed changes
         location: 'ESP32-MQTT',
         timestamp: new Date().toISOString(),
       };

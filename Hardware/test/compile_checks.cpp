@@ -1,4 +1,5 @@
 #include "sensors/SensorConversions.h"
+#include "config/ActuatorConfig.h"
 #include "config/Pins.h"
 #include "config/DeviceConfig.h"
 #include <stdint.h>
@@ -13,6 +14,14 @@ static_assert(ControlSafety::pumpCombination(false, false) && ControlSafety::pum
 static_assert(!ControlSafety::durationAllowed(1000, 0) && !ControlSafety::durationAllowed(0, 5000), "Unset timing inhibits pumping");
 static_assert(ControlSafety::durationAllowed(4999, 5000) && !ControlSafety::durationAllowed(5000, 5000), "Normal completion precedes hard deadline");
 static_assert(!ControlSafety::durationAllowed(1000, 300001), "Hard limits cannot exceed five minutes");
+static_assert(ActuatorConfig::DRAIN_TARGET_RUNTIME_MS == 0 && ActuatorConfig::DRAIN_MAX_RUNTIME_MS == 0 &&
+              ActuatorConfig::FILL_TARGET_RUNTIME_MS == 0 && ActuatorConfig::FILL_MAX_RUNTIME_MS == 0 &&
+              ActuatorConfig::WATER_EXCHANGE_SETTLING_MS == 0 && ActuatorConfig::PUMP_COOLDOWN_MS == 0 &&
+              !ActuatorConfig::WATER_POLICY_CONFIGURED,
+              "Uncommissioned pump timings and water policy must remain disabled");
+static_assert(!ControlSafety::durationAllowed(ActuatorConfig::DRAIN_TARGET_RUNTIME_MS, ActuatorConfig::DRAIN_MAX_RUNTIME_MS) &&
+              !ControlSafety::durationAllowed(ActuatorConfig::FILL_TARGET_RUNTIME_MS, ActuatorConfig::FILL_MAX_RUNTIME_MS),
+              "Zero pump target/max configuration must inhibit both pumps");
 static_assert(ControlSafety::elapsed(15, 0xfffffff0, 31) && !ControlSafety::elapsed(15, 0xfffffff0, 32), "Controller deadlines survive millis rollover");
 
 constexpr bool near(float value, float expected, float tolerance = 0.01f) {
@@ -31,3 +40,13 @@ static_assert(uint32_t(uint32_t(15) - uint32_t(0xfffffff0)) == 31, "Elapsed timi
 static_assert(Pins::PH == 35 && Pins::TURBIDITY == 34 && Pins::ORP == 32 && Pins::TEMPERATURE == 4,
               "Supplied water-monitor wiring regression");
 static_assert(DeviceConfig::ADC_SAMPLE_COUNT == 10, "Preserve averaging sample count");
+static_assert(DeviceConfig::backendTransportConfigured("https://backend.example/api/v1", "trusted-ca", false),
+              "HTTPS requires a configured trusted CA");
+static_assert(!DeviceConfig::backendTransportConfigured("https://backend.example/api/v1", "", true),
+              "A development HTTP opt-in cannot bypass the HTTPS CA requirement");
+static_assert(!DeviceConfig::backendTransportConfigured("http://backend.example/api/v1", "", false),
+              "HTTP is disabled without the explicit development opt-in");
+static_assert(DeviceConfig::backendTransportConfigured("http://backend.example/api/v1", "", true),
+              "HTTP is permitted only when the caller supplies the development-only gate");
+static_assert(!DeviceConfig::backendTransportConfigured("https:///api/v1", "trusted-ca", false),
+              "HTTPS configuration requires an authority");

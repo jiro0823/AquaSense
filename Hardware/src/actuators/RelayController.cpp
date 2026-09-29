@@ -31,4 +31,8 @@ bool RelayController::setAerator(bool on) {
     if (!ready) return false;
     writeRelay(Pins::AERATOR_RELAY_GPIO, on); air = on; return true;
 }
-void RelayController::allOff() { setPumps(false, false); setAerator(false); }
+bool RelayController::allOff() {
+    const bool pumpsStopped = setPumps(false, false);
+    const bool aeratorStopped = setAerator(false);
+    return pumpsStopped && aeratorStopped;
+}

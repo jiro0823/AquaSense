@@ -5,8 +5,12 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { signup, login, logout, verifyToken } from '../controllers/authController';
+import { validateBody } from '../../../middleware/validate';
+import { z } from 'zod';
 
 const router = Router();
+const credentialsSchema = z.object({ email: z.string().trim().email().max(255), password: z.string().min(1).max(256) }).strict();
+const signupSchema = credentialsSchema.extend({ fullName: z.string().trim().min(1).max(255) }).strict();
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -25,10 +29,10 @@ const authLimiter = rateLimit({
  */
 
 // Signup route
-router.post('/signup', authLimiter, signup);
+router.post('/signup', authLimiter, validateBody(signupSchema), signup);
 
 // Login route
-router.post('/login', authLimiter, login);
+router.post('/login', authLimiter, validateBody(credentialsSchema), login);
 
 // Logout route
 router.post('/logout', logout);

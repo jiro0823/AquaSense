@@ -10,14 +10,32 @@ void SystemController::begin() {
 CommandReceipt SystemController::handle(const Command& command, uint32_t nowMs) {
     CommandReceipt receipt{}; strlcpy(receipt.id, command.id, sizeof(receipt.id)); receipt.feedingSource = command.feedingSource;
     const char* result;
+    const bool knownAction = [&]() {
+        switch (command.action) {
+            case CommandAction::Fill: case CommandAction::Drain: case CommandAction::WaterExchange:
+            case CommandAction::WaterStop: case CommandAction::AeratorOn: case CommandAction::AeratorOff:
+            case CommandAction::AeratorAuto: case CommandAction::AutomationOn: case CommandAction::AutomationOff:
+            case CommandAction::BuzzerOn: case CommandAction::BuzzerOff: case CommandAction::AllOff:
+            case CommandAction::ClearFault: case CommandAction::FeedTrigger: case CommandAction::FeedOn:
+            case CommandAction::FeedOff: return true;
+            default: return false;
+        }
+    }();
     const bool stopping = command.action == CommandAction::AllOff || command.action == CommandAction::WaterStop ||
         command.action == CommandAction::FeedOff || command.action == CommandAction::AeratorOff || command.action == CommandAction::BuzzerOff;
-    if (command.ttlMs == 0 || command.ttlMs > DeviceConfig::COMMAND_MAX_TTL_MS || uint32_t(nowMs - command.receivedAtMs) >= command.ttlMs) result = "expired";
+    if (!knownAction) result = "invalid_action";
+    else if (stopping) {
+        // Stop commands are safety actions: TTL expiry and duplicate suppression
+        // must never prevent them from reaching the local actuator controllers.
+        result = dispatch(command, nowMs);
+        strlcpy(lastId, command.id, sizeof(lastId));
+        if (storageReady) storage.putString("last-id", command.id);
+    }
+    else if (command.ttlMs == 0 || command.ttlMs > DeviceConfig::COMMAND_MAX_TTL_MS || uint32_t(nowMs - command.receivedAtMs) >= command.ttlMs) result = "expired";
     else if (!strcmp(lastId, command.id)) result = "duplicate_suppressed";
-    else if (!stopping && (!storageReady || storage.putString("last-id", command.id) == 0)) result = "persistence_unavailable";
+    else if (!storageReady || storage.putString("last-id", command.id) == 0) result = "persistence_unavailable";
     else {
         strlcpy(lastId, command.id, sizeof(lastId));
-        if (stopping && storageReady) storage.putString("last-id", command.id);
         result = dispatch(command, nowMs);
     }
     strlcpy(receipt.result, result, sizeof(receipt.result)); return receipt;
@@ -29,13 +47,17 @@ const char* SystemController::dispatch(const Command& command, uint32_t nowMs) {
         case CommandAction::AeratorOn: return aerator.setManual(true);
         case CommandAction::AeratorOff: return aerator.setManual(false);
         case CommandAction::AeratorAuto: return aerator.setAutomatic();
-        case CommandAction::AutomationOn: return water.setAutomatic(true);
-        case CommandAction::AutomationOff: return water.setAutomatic(false);
+        case CommandAction::AutomationOn: return water.setAutomatic(true, nowMs);
+        case CommandAction::AutomationOff: return water.setAutomatic(false, nowMs);
         case CommandAction::BuzzerOn: buzzer.setManual(true); return "accepted";
         case CommandAction::BuzzerOff: buzzer.setManual(false); return "accepted";
         case CommandAction::ClearFault: return water.clearFault();
         case CommandAction::AllOff:
-            water.setAutomatic(false); aerator.setManual(false); feeder.stop(); buzzer.setManual(false); relays.allOff(); return "accepted";
+            water.request(CommandAction::WaterStop, 0, nowMs);
+            aerator.setManual(false);
+            feeder.stop();
+            buzzer.setManual(false);
+            return relays.allOff() ? "accepted" : "outputs_not_configured";
         case CommandAction::FeedTrigger: case CommandAction::FeedOn: case CommandAction::FeedOff: return feeder.request(command.action, nowMs);
         default: return "invalid_action";
     }

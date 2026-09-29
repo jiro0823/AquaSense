@@ -9,6 +9,7 @@ import { hardwareCommandSchema, hardwareSyncSchema, type HardwareState } from '.
 import { hardwareService } from './hardwareService';
 import { HardwareCommand, HardwareDeviceState } from '../database/models/HardwareControl';
 import { FeedingCommand } from '../database/models/FeedingCommand';
+import * as database from '../database/connection';
 import { feedingService } from './feedingService';
 import { deviceService } from './device.service';
 import { auditLogService } from './auditLog.service';
@@ -24,6 +25,19 @@ import { csrfProtection } from '../middleware/csrfProtection';
 const originalKeys = config.device.keys;
 afterEach(() => { mock.restoreAll(); config.device.keys = originalKeys; });
 const id = '9f2f2cbb-5e87-4bb3-a95e-c45d05de97d1';
+const mockSerializedDatabase = () => {
+  let tail = Promise.resolve();
+  mock.method(database, 'getDatabase', () => ({
+    query: async () => [],
+    transaction: async (work: (transaction: object) => Promise<unknown>) => {
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try { return await work({}); } finally { release(); }
+    },
+  } as any));
+};
 const state: HardwareState = { fillPump: false, drainPump: false, aerator: false, feederBusy: false,
   buzzer: false, automation: false, waterPhase: 'IDLE', fault: '', relaysReady: false, timeValid: false,
   wifiConnected: true, mqttConnected: true, uptimeMs: 123 };
@@ -38,7 +52,15 @@ test('pump commands require bounded integer timing; non-pump commands reject tim
   assert.equal(hardwareSyncSchema.safeParse({ deviceId: 'board', state: { ...state, floatWet: true } }).success, false);
 });
 
+test('hardware state accepts the explicit nonblocking water exchange phases', () => {
+  for (const waterPhase of ['IDLE', 'DRAINING', 'SETTLING_AFTER_DRAIN', 'REFILLING', 'COOLDOWN', 'FAULT']) {
+    assert.equal(hardwareSyncSchema.safeParse({ deviceId: 'board', state: { ...state, waterPhase } }).success, true);
+  }
+});
+
 test('stop bypasses full queue and ALL_OFF cancels pending feeding starts', async () => {
+  mockSerializedDatabase();
+  mock.method(HardwareCommand, 'findOne', async () => null);
   const count = mock.method(HardwareCommand, 'count', async () => 20);
   const cancel = mock.method(HardwareCommand, 'update', async () => [20]);
   const cancelFeed = mock.method(FeedingCommand, 'update', async () => [1]);
@@ -51,7 +73,121 @@ test('stop bypasses full queue and ALL_OFF cancels pending feeding starts', asyn
   assert.deepEqual(cancel.mock.calls[0].arguments[1]?.where, { userId: 'owner', deviceId: 'board', status: 'PENDING' });
 });
 
+test('a stop cancels an earlier start, blocks concurrent starts until acknowledged, then permits a new start', async () => {
+  mockSerializedDatabase();
+  const rows: any[] = [];
+  let nextId = 0;
+  mock.method(HardwareCommand, 'create', async (values: any) => {
+    const row: any = { ...values, id: `command-${++nextId}`, status: 'PENDING', result: null, createdAt: new Date(),
+      async update(changes: any) { Object.assign(this, changes); } };
+    rows.push(row);
+    return row;
+  });
+  mock.method(HardwareCommand, 'count', async (options: any) => rows.filter((row) =>
+    row.userId === options.where.userId && row.deviceId === options.where.deviceId && row.status === options.where.status &&
+    row.expiresAt > options.where.expiresAt[Op.gt]).length);
+  mock.method(HardwareCommand, 'findOne', async (options: any) => {
+    const where = options?.where || {};
+    const found = rows.filter((row) => (!where.id || row.id === where.id) &&
+      (!where.userId || row.userId === where.userId) && (!where.deviceId || row.deviceId === where.deviceId) &&
+      (!where.status || row.status === where.status) &&
+      (!where.action?.[Op.in] || where.action[Op.in].includes(row.action)));
+    return found.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0] || null;
+  });
+  mock.method(HardwareCommand, 'update', async (changes: any, options: any) => {
+    let changed = 0;
+    for (const row of rows) {
+      const where = options.where;
+      if (row.userId !== where.userId || row.deviceId !== where.deviceId || row.status !== where.status) continue;
+      if (where.expiresAt?.[Op.lte] && row.expiresAt > where.expiresAt[Op.lte]) continue;
+      Object.assign(row, changes); changed++;
+    }
+    return [changed];
+  });
+  mock.method(FeedingCommand, 'update', async () => [0]);
+  mock.method(FeedingCommand, 'findOne', async () => null);
+  mock.method(HardwareDeviceState, 'upsert', async () => [state, true]);
+  mock.method(feedingService, 'listSchedules', async () => []);
+
+  await hardwareService.queue('owner', 'board', 'FILL', 1000);
+  const [stopResult, startResult] = await Promise.allSettled([
+    hardwareService.queue('owner', 'board', 'ALL_OFF'),
+    hardwareService.queue('owner', 'board', 'DRAIN', 1000),
+  ]);
+  assert.equal(stopResult.status, 'fulfilled');
+  assert.equal(startResult.status, 'rejected');
+  assert.match(String((startResult as PromiseRejectedResult).reason), /stop must be acknowledged or terminal/);
+  assert.equal(rows.filter((row) => row.action === 'FILL')[0].status, 'EXPIRED');
+  assert.equal(rows.filter((row) => row.status === 'PENDING').map((row) => row.action).join(','), 'ALL_OFF');
+
+  const stopSync = await hardwareService.sync('owner', 'board', state);
+  assert.equal(stopSync.command?.action, 'ALL_OFF');
+  const stopId = stopSync.command!.id;
+  const afterAck = await hardwareService.sync('owner', 'board', state, { id: stopId, source: 'hardware', result: 'accepted' });
+  assert.equal(afterAck.command, null);
+
+  await hardwareService.queue('owner', 'board', 'FILL', 1000);
+  const startSync = await hardwareService.sync('owner', 'board', state);
+  assert.equal(startSync.command?.action, 'FILL');
+});
+
+test('WATER_STOP blocks water starts only, while ALL_OFF blocks every actuator start', async () => {
+  mockSerializedDatabase();
+  const hardwareRows: any[] = [];
+  const feedRows: any[] = [];
+  let nextId = 0;
+  mock.method(HardwareCommand, 'create', async (values: any) => {
+    const row = { ...values, id: `command-${++nextId}`, status: 'PENDING' };
+    hardwareRows.push(row);
+    return row;
+  });
+  mock.method(HardwareCommand, 'findOne', async (options: any) => {
+    const { where } = options;
+    return hardwareRows.find((row) => row.userId === where.userId && row.deviceId === where.deviceId &&
+      row.status === where.status && (where.action?.[Op.in] ? where.action[Op.in].includes(row.action) :
+        !where.action || row.action === where.action)) || null;
+  });
+  mock.method(HardwareCommand, 'count', async () => 0);
+  mock.method(HardwareCommand, 'update', async (changes: any, options: any) => {
+    let updated = 0;
+    for (const row of hardwareRows) {
+      const where = options.where;
+      if (row.userId !== where.userId || row.deviceId !== where.deviceId || row.status !== where.status) continue;
+      if (where.action?.[Op.in] && !where.action[Op.in].includes(row.action)) continue;
+      Object.assign(row, changes);
+      updated++;
+    }
+    return [updated];
+  });
+  mock.method(FeedingCommand, 'update', async () => [0]);
+  mock.method(FeedingCommand, 'findOne', async (options: any) => {
+    const { where } = options;
+    return feedRows.find((row) => row.userId === where.userId && row.deviceId === where.deviceId &&
+      row.status === where.status) || null;
+  });
+  mock.method(FeedingCommand, 'create', async (values: any) => {
+    const row = { ...values, id: `feed-${++nextId}`, status: 'PENDING' };
+    feedRows.push(row);
+    return row;
+  });
+
+  await hardwareService.queue('owner', 'board', 'WATER_STOP');
+  await assert.rejects(hardwareService.queue('owner', 'board', 'FILL', 1000), /stop must be acknowledged or terminal/);
+  await assert.rejects(hardwareService.queue('owner', 'board', 'AUTOMATION_ON'), /stop must be acknowledged or terminal/);
+  await hardwareService.queue('owner', 'board', 'AERATOR_ON');
+  await hardwareService.queue('owner', 'board', 'BUZZER_ON');
+  assert.equal(hardwareRows.filter((row) => row.status === 'PENDING').map((row) => row.action).join(','),
+    'WATER_STOP,AERATOR_ON,BUZZER_ON');
+
+  await hardwareService.queue('owner', 'board', 'ALL_OFF');
+  for (const [action, duration] of [['FILL', 1000], ['AUTOMATION_ON'], ['AERATOR_ON'], ['BUZZER_ON']] as const) {
+    await assert.rejects(hardwareService.queue('owner', 'board', action, duration), /stop must be acknowledged or terminal/);
+  }
+  await assert.rejects(feedingService.queueManualCommand('owner', 'board', 'TRIGGER'), /stop must be acknowledged or terminal/);
+});
+
 test('receipts are owner/device scoped and duplicate acknowledgments do not execute again', async () => {
+  mockSerializedDatabase();
   let writes = 0;
   const command = { status: 'PENDING', async update(value: { status: string }) { this.status = value.status; writes++; } };
   const find = mock.method(HardwareCommand, 'findOne', async () => command);
@@ -65,11 +201,12 @@ test('receipts are owner/device scoped and duplicate acknowledgments do not exec
 });
 
 test('sync expires old work, bounds schedules, and prioritizes hardware over feeding', async () => {
+  mockSerializedDatabase();
   const expiry = mock.method(HardwareCommand, 'update', async () => [1]);
   const feedExpiry = mock.method(FeedingCommand, 'update', async () => [1]);
   mock.method(HardwareDeviceState, 'upsert', async () => [state, true]);
   mock.method(HardwareCommand, 'findOne', async () => ({ id, action: 'WATER_STOP', durationMs: null, expiresAt: new Date(Date.now() + 60000) }));
-  mock.method(feedingService, 'getLatestDeviceCommand', async () => ({ id: 'feed', action: 'TRIGGER', createdAt: new Date() }));
+  mock.method(FeedingCommand, 'findOne', async () => ({ id: 'feed', action: 'TRIGGER', createdAt: new Date() }));
   mock.method(feedingService, 'listSchedules', async () => Array.from({ length: 25 }, (_, i) => ({ id: String(i), enabled: i !== 0, time: '08:00', date: null })));
   const result = await hardwareService.sync('owner', 'board', state);
   assert.equal(result.command?.action, 'WATER_STOP');

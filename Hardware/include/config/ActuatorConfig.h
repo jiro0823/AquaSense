@@ -4,10 +4,14 @@
 namespace ActuatorConfig {
 // Commissioning gate: do not infer relay polarity from the module's 5 V supply.
 constexpr int RELAY_ACTIVE_LEVEL = -1; // Set to 0 (LOW) or 1 (HIGH) after testing.
-constexpr uint32_t PUMP_MAX_RUN_MS = 0; // Required measured safe hard limit per phase.
-constexpr uint32_t AUTO_DRAIN_MS = 0;   // Calibrate from tank volume and pump flow.
-constexpr uint32_t AUTO_FILL_MS = 0;
-constexpr uint32_t AUTO_COOLDOWN_MS = 0;
+// Commission each pump independently using measured flow at the installed head.
+// Zero values intentionally keep all water-pump operations disabled.
+constexpr uint32_t DRAIN_TARGET_RUNTIME_MS = 0;
+constexpr uint32_t DRAIN_MAX_RUNTIME_MS = 0;
+constexpr uint32_t FILL_TARGET_RUNTIME_MS = 0;
+constexpr uint32_t FILL_MAX_RUNTIME_MS = 0;
+constexpr uint32_t WATER_EXCHANGE_SETTLING_MS = 0;
+constexpr uint32_t PUMP_COOLDOWN_MS = 0;
 constexpr bool WATER_POLICY_CONFIGURED = false;
 constexpr bool AERATOR_POLICY_CONFIGURED = false;
 constexpr uint32_t SENSOR_SETTLE_SAMPLES = 10;

@@ -30,14 +30,14 @@ export const authenticateDevice = (req: DeviceAuthenticatedRequest, res: Respons
   const deviceKey = Array.isArray(deviceKeyHeader) ? deviceKeyHeader[0] : deviceKeyHeader;
   const deviceId = (req.body?.deviceId as string | undefined) || 'unknown-device';
 
-  if (Object.keys(config.device.keys).length === 0) {
+  if (Object.keys(config.device.keys).length === 0 && config.server.nodeEnv !== 'production' && config.device.allowUnauthenticatedDevelopment) {
     logger.warn('Device auth bypassed: DEVICE_KEYS not configured', { deviceId });
     req.deviceId = deviceId;
     next();
     return;
   }
 
-  if (!deviceKey && config.server.nodeEnv !== 'production') {
+  if (!deviceKey && config.server.nodeEnv !== 'production' && config.device.allowUnauthenticatedDevelopment) {
     logger.warn('Device auth bypassed in development: missing x-device-key', { deviceId });
     req.deviceId = deviceId;
     next();

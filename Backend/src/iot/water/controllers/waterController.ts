@@ -14,6 +14,8 @@ import { predictionLogService } from '../../../services/predictionLog.service';
 import { smsLogService } from '../../../services/smsLogService';
 import { alertService } from '../../../services/alert.service';
 import { waterAlertNotificationService } from '../../../services/waterAlertNotification.service';
+import type { AuthenticatedRequest } from '../../../middleware/authMiddleware';
+import { deviceService } from '../../../services/device.service';
 
 const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStats> => {
   const dbStats = await sensorReadingService.getStatistics(minutes);
@@ -144,11 +146,12 @@ export const getStatistics = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-export const getAlerts = (req: Request, res: Response): void => {
+export const getAlerts = (req: AuthenticatedRequest, res: Response): void => {
   void (async () => {
     try {
     const limit = parseInt(req.query.limit as string, 10) || 50;
-    const alerts = await alertService.getAlerts(limit);
+    const deviceIds = req.userRole === 'admin' ? undefined : (req.userId ? (await deviceService.listByUser(req.userId)).filter((device) => device.isActive).map((device) => device.deviceId) : []);
+    const alerts = await alertService.getAlerts(limit, undefined, deviceIds);
     sendSuccess(res, 200, 'Alerts retrieved', alerts);
     } catch (error) {
     sendError(res, 500, 'Failed to fetch alerts', error instanceof Error ? error.message : 'Unknown error');
@@ -165,9 +168,18 @@ export const getThresholds = (_req: Request, res: Response): void => {
   }
 };
 
-export const updateThresholds = (req: Request, res: Response): void => {
+export const updateThresholds = async (req: Request, res: Response): Promise<void> => {
   try {
-    waterQualityService.setThresholds(req.body);
+    const current = waterQualityService.getThresholds();
+    const next = {
+      ...current,
+      ...req.body,
+      temperature: { ...current.temperature, ...(req.body.temperature || {}) },
+      ph: { ...current.ph, ...(req.body.ph || {}), optimal: { ...current.ph.optimal, ...(req.body.ph?.optimal || {}) } },
+      do: { ...current.do, ...(req.body.do || {}) },
+      turbidity: { ...current.turbidity, ...(req.body.turbidity || {}) },
+    };
+    await waterQualityService.setThresholds(next);
     const thresholds = waterQualityService.getThresholds();
     sendSuccess(res, 200, 'Thresholds updated', thresholds);
   } catch (error) {
@@ -175,11 +187,12 @@ export const updateThresholds = (req: Request, res: Response): void => {
   }
 };
 
-export const getDashboardData = async (_req: Request, res: Response): Promise<void> => {
+export const getDashboardData = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const latest = await sensorReadingService.getLatestReading();
     const stats = await mapDbStatsToWaterStats(60);
-    const alerts = await alertService.getAlerts(10);
+    const deviceIds = req.userRole === 'admin' ? undefined : (req.userId ? (await deviceService.listByUser(req.userId)).filter((device) => device.isActive).map((device) => device.deviceId) : []);
+    const alerts = await alertService.getAlerts(10, undefined, deviceIds);
     const thresholds = waterQualityService.getThresholds();
     const predictive = await predictiveAnalyticsService.getWarningCard(60);
     const predictionHistory = await predictionLogService.getRecentLogs(30);

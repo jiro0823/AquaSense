@@ -11,6 +11,7 @@ import type {
   WaterQualityStats,
   HealthAlert,
 } from '../types';
+import { WaterQualitySetting } from '../../../database/models/WaterQualitySetting';
 
 /**
  * Default thresholds for water quality parameters
@@ -195,8 +196,18 @@ export class WaterQualityService {
   /**
    * Update thresholds
    */
-  setThresholds(thresholds: Partial<WaterQualityThresholds>): void {
-    this.thresholds = { ...this.thresholds, ...thresholds };
+  async loadThresholds(): Promise<void> {
+    const [setting] = await WaterQualitySetting.findOrCreate({
+      where: { id: 'global' },
+      defaults: { thresholds: this.thresholds },
+    });
+    this.thresholds = setting.thresholds;
+  }
+
+  async setThresholds(thresholds: WaterQualityThresholds): Promise<void> {
+    const persistedThresholds = JSON.parse(JSON.stringify(thresholds)) as WaterQualityThresholds;
+    await WaterQualitySetting.upsert({ id: 'global', thresholds: persistedThresholds });
+    this.thresholds = persistedThresholds;
     logger.info('Water quality thresholds updated', this.thresholds);
   }
 

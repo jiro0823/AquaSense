@@ -13,13 +13,21 @@ public MQTT actuator commands.
    DEVICE_KEYS=esp32-feeder-1:YOUR_RANDOM_DEVICE_KEY.
    Multiple entries are comma-separated deviceId:key pairs; keys cannot contain
    commas or colons. Match ignored Secrets::DEVICE_KEY.
-3. Set BACKEND_API_BASE_URL to the server's reachable LAN address and actual port,
-   ending /api/v1. The committed URL is a placeholder. ESP32 localhost is not the
-   backend computer. Confirm LAN binding and firewall access.
-4. Production Backend requires HTTPS. Use an https:// URL and put its trusted
+3. Set BACKEND_API_BASE_URL to the server's reachable HTTPS host and actual port,
+   ending /api/v1. The committed URL is an invalid placeholder and intentionally
+   cannot connect. ESP32 localhost is not the backend computer. Confirm LAN
+   binding, firewall access, and that the configured certificate covers this host.
+4. HTTPS with certificate verification is the default and requires the trusted
    PEM root certificate in DeviceConfig::BACKEND_ROOT_CA as a C++ raw string.
    Certificate verification is mandatory and needs valid system time. Plain HTTP
-   supports LAN development but does not encrypt the device key.
+   is disabled by default. For isolated local development only, HTTP requires a
+   non-release build explicitly compiled with both
+   `AQUASENSE_DEVELOPMENT_BUILD` and `AQUASENSE_ALLOW_INSECURE_HTTP`; it is also
+   disabled when `NDEBUG` or `AQUASENSE_PRODUCTION_BUILD` is defined. Defining
+   the production and insecure-HTTP flags together is a compile error. Do not
+   enable this development opt-in for deployment: HTTP exposes the device key.
+   If the URL, CA, or transport policy is invalid, backend control remains
+   disconnected.
 5. Match broker credentials/topic with Backend MQTT_TOPIC_READINGS. Integrated
    default is water/esp32/readings. The retained public plaintext broker is for
    development; deployment needs private authenticated transport and a separate
@@ -70,8 +78,8 @@ flow/electrical feedback. online becomes false after 20 seconds without a report
 
 | Action | Behavior |
 | --- | --- |
-| FILL, DRAIN | Timed single-pump run; durationMs required |
-| WATER_EXCHANGE | Drain then refill, each using requested durationMs |
+| FILL, DRAIN | Timed single-pump run; durationMs required and bounded by that pump's configured target and hard maximum |
+| WATER_EXCHANGE | Uses configured drain target, settling interval, then configured fill target; API durationMs remains required for contract compatibility but does not set either phase |
 | WATER_STOP | Stop water, disable its automation, cancel pending hardware work |
 | AERATOR_ON, AERATOR_OFF | Manual relay operation; exits aerator automatic mode |
 | AERATOR_AUTO | Enable commissioned temperature hysteresis |
@@ -80,9 +88,11 @@ flow/electrical feedback. online becomes false after 20 seconds without a report
 | ALL_OFF | Cancel waiting hardware/feeding work and stop active outputs on receipt |
 | CLEAR_FAULT | Clear stopped water fault; does not re-enable automation |
 
-API pump durations are positive integers up to 300,000 ms. Firmware additionally
-requires them strictly below its commissioned hard limit. Other actions reject
-durationMs. Stop commands bypass a full hardware queue. Remote stop depends on
+API pump durations are positive integers up to 300,000 ms. FILL and DRAIN also
+require a configured per-pump target and hard maximum; a requested duration may
+shorten the target but cannot exceed it. WATER_EXCHANGE requires durationMs at
+the API boundary for compatibility, while firmware uses independently
+configured drain and fill targets. Other actions reject durationMs. Stop commands bypass a full hardware queue. Remote stop depends on
 connectivity/poll latency and is not a physical emergency-stop circuit.
 ALL_OFF leaves a fault and its alarm latched; future scheduled feeds resume in
 later minutes unless backend schedules are disabled.
@@ -101,14 +111,66 @@ OFF voltage for an unknown module: keep loads unpowered and verify input bias,
 reset behavior and OFF state physically. Fourth channel is spare; separate
 5 V module supply shares ESP32 ground.
 
-There are no float switches. Set PUMP_MAX_RUN_MS from measured flow, tank capacity
-and safe operating time. Keep requested durations below it. Fill/drain cannot run
-together. Hard timeout stops both and latches a fault. Local timers continue
-during network loss; accepted timed exchanges complete locally. Fault recovery
-requires an explicit clear command.
+There are no float switches: this is **timed water exchange**, not measured or
+precise automatic water-level control. Configure these values only after flow
+testing on the installed pumps, tubing, head height and source conditions:
 
-Automatic water exchange also requires calibrated AUTO_DRAIN_MS, AUTO_FILL_MS,
-AUTO_COOLDOWN_MS, meaningful pH/raw-turbidity/ORP thresholds and
+- `DRAIN_TARGET_RUNTIME_MS` and `DRAIN_MAX_RUNTIME_MS`
+- `FILL_TARGET_RUNTIME_MS` and `FILL_MAX_RUNTIME_MS`
+- `WATER_EXCHANGE_SETTLING_MS` and `PUMP_COOLDOWN_MS`
+
+All are milliseconds. Target must be positive and strictly less than its pump's
+hard maximum; maximum is limited to five minutes. Defaults are zero, so pump
+requests fail closed until commissioning. Fill and drain cannot run together.
+Each pump has a local nonblocking hard timeout; timeout turns it off and latches
+a fault. Duplicate starts do not restart a running timer. A manual stop cancels
+the sequence immediately and starts cooldown. During exchange the reported
+phases are `DRAINING`, `SETTLING_AFTER_DRAIN`, `REFILLING`, then `COOLDOWN`.
+Local timers continue during network loss; no cloud connection is needed to
+enforce pump limits. Fault recovery requires an explicit clear command.
+
+### Fill and drain flow calibration
+
+Calibrate the fill and drain pumps separately using the actual installation;
+do not copy pump nameplate flow or use one pump's result for the other.
+
+1. Keep relay loads safely isolated while verifying wiring, then test each pump
+   with its installed hose length, vertical head, fittings, and actual water
+   source/reservoir conditions.
+2. Prepare a measured collection volume for the fill test and a measured source
+   volume for the drain test. Confirm the destination can safely accept the
+   transferred water.
+3. Run one pump for a measured interval, then measure the actual volume moved.
+   Repeat each pump test 3–5 times under the same installation conditions.
+4. For every trial calculate `flow rate = transferred volume / elapsed time`.
+   Use consistent units and select a representative rate only after reviewing
+   trial variation; investigate unstable results before commissioning.
+5. For the intended exchange volume calculate each pump independently:
+   `target runtime = intended volume / that pump's measured flow rate`.
+   Use the measured installed fill rate for fill and drain rate for drain.
+6. Determine the maximum safe run time from physical hazard limits (such as
+   source depletion, overflow, or loss of required water), then set each hard
+   maximum above its target but below that hazard duration. The firmware also
+   rejects maximum values over 300,000 ms. Never use the maximum as the normal
+   target.
+7. Record the installation, tested pump, hose/head/source conditions, units,
+   each trial's volume and elapsed time, calculated rates, chosen intended
+   volume, per-pump target and hard maximum, settling interval, cooldown, date,
+   and responsible operator.
+8. Enter the separately reviewed values in `DRAIN_TARGET_RUNTIME_MS`,
+   `DRAIN_MAX_RUNTIME_MS`, `FILL_TARGET_RUNTIME_MS`, and
+   `FILL_MAX_RUNTIME_MS`. Set settling and cooldown only after defining the
+   operating procedure. Keep all values at zero until physical calibration and
+   safety review are complete.
+
+These timers estimate transferred volume; they do not sense water level or
+guarantee an exact final volume. Recalibrate after changing pumps, tubing,
+vertical height, fittings, water source, or installation conditions. No
+production runtime values are supplied here.
+
+Automatic timed water exchange also requires the commissioned per-pump target
+and hard-maximum runtimes, settling and cooldown, meaningful
+pH/raw-turbidity/ORP thresholds and
 WATER_POLICY_CONFIGURED=true, followed by AUTOMATION_ON. It waits for ten samples
 and fresh valid pH/turbidity/ORP, then exchanges on out-of-range data. A valid
 manual run interrupts automatic operation and leaves it disabled.

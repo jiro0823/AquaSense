@@ -13,9 +13,11 @@ import apiRoutes from './api';
 import { ApiResponse } from './types';
 import { WaterQualityWebSocketServer } from './websocket/waterQualityWS';
 import { initializeDatabase, closeDatabase, syncDatabase } from './database/connection';
+import { runMigrations } from './database/migrations';
 import { initializeAllModels } from './database/models';
 import { mqttService } from './services/mqttService';
 import { smsLogService } from './services/smsLogService';
+import { waterQualityService } from './iot/water/services/waterQualityService';
 
 /**
  * Initialize Express application
@@ -95,7 +97,7 @@ const createApp = (): Express => {
       data: {
         description: 'Backend is in PREPARATION mode - ready to receive real sensor data from ESP32',
         howtostartPosting: {
-          endpoint: `POST ${baseUrl}/api/v1/water/readings`,
+          endpoint: `POST ${baseUrl}/api/v1/sensors/data`,
           headers: {
             'Content-Type': 'application/json',
           },
@@ -105,24 +107,26 @@ const createApp = (): Express => {
             do: 7.8,
             turbidity: 25.3,
             location: 'Sensor Location Name',
+            deviceId: 'registered-device-id',
             timestamp: '2026-04-12T05:31:28.462Z',
           },
-          example_curl: `curl -X POST ${baseUrl}/api/v1/water/readings -H "Content-Type: application/json" -d '{"temperature":25.5,"ph":7.4,"do":7.8,"turbidity":25.3,"location":"Main Tank","timestamp":"2026-04-12T05:31:28.462Z"}'`,
+          example_curl: `curl -X POST ${baseUrl}/api/v1/sensors/data -H "Content-Type: application/json" -H "X-Device-Key: <configured-device-key>" -d '{"deviceId":"registered-device-id","temperature":25.5,"ph":7.4,"do":7.8,"turbidity":25.3,"location":"Main Tank","timestamp":"2026-04-12T05:31:28.462Z"}'`,
           esp32_pseudocode: `
             // Every 5 seconds (adjust as needed):
-            POST /api/v1/water/readings with:
+            POST /api/v1/sensors/data with:
             {
               "temperature": read_temp_sensor(),
               "ph": read_ph_sensor(),
               "do": read_do_sensor(),
               "turbidity": read_turbidity_sensor(),
               "location": "Water Tank 1",
+              "deviceId": "registered-device-id",
               "timestamp": current_time()
             }
           `,
         },
         availableEndpoints: [
-          'POST /api/v1/water/readings - Add sensor reading',
+          'POST /api/v1/sensors/data - Add sensor reading',
           'GET /api/v1/water/readings/latest - Get latest reading',
           'GET /api/v1/water/readings?minutes=60 - Get readings by time range',
           'GET /api/v1/water/statistics?minutes=60 - Get statistics',
@@ -161,10 +165,13 @@ const startServer = async (): Promise<void> => {
     // Initialize database and models
     logger.info('Initializing database connection...');
     await initializeDatabase();
+    logger.info('Applying database migrations...');
+    await runMigrations();
     logger.info('Initializing database models...');
     await initializeAllModels();
     logger.info('Synchronizing database schema...');
     await syncDatabase();
+    await waterQualityService.loadThresholds();
     const refreshSmsStatus = (): void => {
       void smsLogService.reconcilePending().catch(() => logger.warn('Unable to refresh pending SMS status'));
     };
@@ -172,6 +179,9 @@ const startServer = async (): Promise<void> => {
     setInterval(refreshSmsStatus, 30000).unref();
 
     const app = createApp();
+    if (!config.sms.apiSecretKey || !config.sms.senderId) {
+      logger.warn('SMS integration unavailable: configure UNISMS_API_SECRET_KEY and UNISMS_SENDER_ID to enable SMS delivery');
+    }
     const PORT = config.server.port;
     const HOST = config.server.host;
 

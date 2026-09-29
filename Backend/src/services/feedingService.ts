@@ -1,6 +1,8 @@
 import { Op } from 'sequelize';
 import { FeedingSchedule } from '../database/models/FeedingSchedule';
 import { FeedingCommand, FeedingCommandAction } from '../database/models/FeedingCommand';
+import { HardwareCommand } from '../database/models/HardwareControl';
+import { DeviceStopPendingError, withHardwareDeviceLock } from './hardwareControlLock';
 
 interface CreateScheduleInput {
   userId: string;
@@ -90,13 +92,21 @@ export const feedingService = {
     action: FeedingCommandAction,
     metadata?: Record<string, unknown>
   ): Promise<FeedingCommand> {
-    return FeedingCommand.create({
-      userId,
-      deviceId,
-      action,
-      source: 'MANUAL',
-      status: 'PENDING',
-      metadata: metadata || null,
+    return withHardwareDeviceLock(userId, deviceId, async (transaction) => {
+      if (action !== 'OFF') {
+        const pendingStop = await HardwareCommand.findOne({
+          where: { userId, deviceId, action: 'ALL_OFF', status: 'PENDING' }, transaction,
+        });
+        if (pendingStop) throw new DeviceStopPendingError();
+      }
+      return FeedingCommand.create({
+        userId,
+        deviceId,
+        action,
+        source: 'MANUAL',
+        status: 'PENDING',
+        metadata: metadata || null,
+      }, { transaction });
     });
   },
 

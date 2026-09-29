@@ -25,7 +25,7 @@ class PredictionLogService {
 
   async getRecentLogs(limit: number = 60): Promise<PredictionLogRecord[]> {
     const records = await PredictionLogModel.findAll({
-      order: [['createdAt', 'ASC']],
+      order: [['createdAt', 'DESC']],
       limit,
     });
     return records.map((record) => this.mapRecord(record));

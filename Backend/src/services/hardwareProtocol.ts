@@ -20,7 +20,7 @@ export const hardwareCommandSchema = z.object({
 export const hardwareStateSchema = z.object({
   fillPump: z.boolean(), drainPump: z.boolean(), aerator: z.boolean(),
   feederBusy: z.boolean(), buzzer: z.boolean(), automation: z.boolean(),
-  waterPhase: z.enum(['IDLE', 'DRAINING', 'REFILLING', 'COMPLETE', 'FAULT']),
+  waterPhase: z.enum(['IDLE', 'DRAINING', 'SETTLING_AFTER_DRAIN', 'REFILLING', 'COOLDOWN', 'COMPLETE', 'FAULT']),
   fault: z.string().max(64), relaysReady: z.boolean(), timeValid: z.boolean(),
   wifiConnected: z.boolean(), mqttConnected: z.boolean(),
   uptimeMs: z.number().int().min(0).max(0xffffffff),

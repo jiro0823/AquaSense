@@ -21,10 +21,12 @@ export interface WaterQualityReading {
   ammonia: number | null;
   location: string;
   status: 'normal' | 'warning' | 'critical';
+  connectionState?: 'LIVE' | 'ERROR';
 }
 
 export interface WaterQualityStats {
   timestamp: Date;
+  stale?: boolean;
   temperature: {
     current: number | null;
     average: number | null;

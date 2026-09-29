@@ -75,11 +75,18 @@ void FeedingManager::update(uint32_t nowMs) {
         phase = Phase::Idle;
     } else if (phase == Phase::Hold && ControlSafety::elapsed(nowMs, phaseStartedMs, ActuatorConfig::FEEDER_MANUAL_HOLD_MAX_MS)) stop();
     const int64_t minute = timeManager.localMinute();
-    if (isBusy() || minute < 0 || minute == manualMinute) return;
+    if (minute < 0) return;
     char date[11], clock[6]; timeManager.localDateAndTime(date, clock);
     for (uint8_t i = 0; i < schedules.count; ++i) {
         const auto& schedule = schedules.items[i];
-        if (strcmp(schedule.time, clock) == 0 && (!schedule.date[0] || strcmp(schedule.date, date) == 0) &&
-            markSchedule(schedule.id, minute)) { start(nowMs); break; }
+        if (strcmp(schedule.time, clock) != 0 || (schedule.date[0] && strcmp(schedule.date, date) != 0)) continue;
+
+        // Persist the due occurrence even when a manual operation (or another
+        // feed cycle) is active. Otherwise it could fire immediately after the
+        // operation completes during the same scheduled minute.
+        if (!markSchedule(schedule.id, minute)) continue;
+        if (isBusy() || minute == manualMinute) continue;
+        start(nowMs);
+        break;
     }
 }

@@ -36,8 +36,15 @@ export const sendTestSms = async (req: Request, res: Response): Promise<void> =>
       return;
     }
     if (!result.accepted) {
+      let details: Record<string, unknown> = { raw: result.response };
+      try {
+        const parsed: unknown = JSON.parse(result.response);
+        if (parsed && typeof parsed === 'object') details = parsed as Record<string, unknown>;
+      } catch (parseError) {
+        logger.debug('SMS provider returned a non-JSON error response', { error: String(parseError) });
+      }
       sendError(res, result.status === 'rejected' ? 422 : 502, 'SMS was not confirmed sent', {
-        status: result.status, providerHttpStatus: result.httpStatus, details: JSON.parse(result.response),
+        status: result.status, providerHttpStatus: result.httpStatus, details,
       });
       return;
     }

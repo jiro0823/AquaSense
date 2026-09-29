@@ -10,6 +10,7 @@ import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
 import type { WaterQualityReading, WaterQualityStats } from '../iot/water/types';
+import { config as appConfig } from '../config/config';
 
 interface MQTTConfig {
   brokerUrl: string;
@@ -51,15 +52,15 @@ export class MQTTService {
 
   constructor(config?: Partial<MQTTConfig>) {
     this.config = {
-      brokerUrl: config?.brokerUrl || process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883',
-      username: config?.username || process.env.MQTT_USERNAME,
-      password: config?.password || process.env.MQTT_PASSWORD,
+      brokerUrl: config?.brokerUrl || appConfig.mqtt.brokerUrl,
+      username: config?.username || appConfig.mqtt.username,
+      password: config?.password || appConfig.mqtt.password,
       clientId: config?.clientId || `aquasense-backend-${Date.now()}`,
       topics: {
-        readings: config?.topics?.readings || process.env.MQTT_TOPIC_READINGS || 'water/esp32/readings',
-        sensorWildcard: config?.topics?.sensorWildcard || process.env.MQTT_TOPIC_SENSOR_WILDCARD || 'aquasense/+',
-        commands: config?.topics?.commands || 'water/commands/#',
-        status: config?.topics?.status || 'water/esp32/status',
+        readings: config?.topics?.readings || appConfig.mqtt.topics.readings,
+        sensorWildcard: config?.topics?.sensorWildcard || appConfig.mqtt.topics.sensorWildcard,
+        commands: config?.topics?.commands || appConfig.mqtt.topics.commands,
+        status: config?.topics?.status || appConfig.mqtt.topics.status,
         ...config?.topics,
       },
     };

@@ -14,8 +14,9 @@
 bool BackendDeviceClient::begin() {
     if (task) return true;
     if (!Secrets::DEVICE_KEY[0]) { Serial.println("Backend control disabled: configure private DEVICE_KEY and API address."); return false; }
-    if (!strncmp(DeviceConfig::BACKEND_API_BASE_URL, "https://", 8) && !DeviceConfig::BACKEND_ROOT_CA[0]) {
-        Serial.println("Backend HTTPS disabled: configure the server's trusted root CA."); return false;
+    if (!DeviceConfig::backendTransportConfigured(DeviceConfig::BACKEND_API_BASE_URL,
+            DeviceConfig::BACKEND_ROOT_CA, DeviceConfig::ALLOW_INSECURE_BACKEND_HTTP)) {
+        Serial.println("Backend control disabled: configure HTTPS with a trusted root CA; HTTP is development-build-only."); return false;
     }
     states = xQueueCreate(1, sizeof(SystemState)); commands = xQueueCreate(1, sizeof(Command));
     receipts = xQueueCreate(1, sizeof(CommandReceipt)); schedulesQueue = xQueueCreate(1, sizeof(FeedingSchedules));
@@ -40,6 +41,8 @@ void BackendDeviceClient::run() {
     }
 }
 bool BackendDeviceClient::sync(const SystemState& state, const CommandReceipt* receipt) {
+    if (!DeviceConfig::backendTransportConfigured(DeviceConfig::BACKEND_API_BASE_URL,
+            DeviceConfig::BACKEND_ROOT_CA, DeviceConfig::ALLOW_INSECURE_BACKEND_HTTP)) return false;
     document.clear();
     document["deviceId"] = DeviceConfig::DEVICE_ID;
     JsonObject report = document.createNestedObject("state");
@@ -54,7 +57,7 @@ bool BackendDeviceClient::sync(const SystemState& state, const CommandReceipt* r
     }
     String body; body.reserve(1024); serializeJson(document, body);
     WiFiClient plainTransport; WiFiClientSecure secureTransport; HTTPClient http;
-    const bool secure = !strncmp(DeviceConfig::BACKEND_API_BASE_URL, "https://", 8);
+    const bool secure = DeviceConfig::hasPrefix(DeviceConfig::BACKEND_API_BASE_URL, "https://");
     if (secure) secureTransport.setCACert(DeviceConfig::BACKEND_ROOT_CA);
     WiFiClient& transport = secure ? static_cast<WiFiClient&>(secureTransport) : plainTransport;
     http.useHTTP10(true); // Stream JSON without HTTP chunk framing.

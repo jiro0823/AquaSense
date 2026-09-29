@@ -7,18 +7,19 @@
 #include <freertos/task.h>
 #include "models/SensorReadings.h"
 
-class MqttManager {
+class MqttManager
+{
 public:
     MqttManager();
     bool begin();
-    void update(const SensorReadings& readings);
+    void update(const SensorReadings &readings);
     bool isConnected() const;
     bool isRunning() const;
 
 private:
-    static void runTask(void* context);
+    static void runTask(void *context);
     void run();
-    bool publishReadings(const SensorReadings& readings);
+    bool publishReadings(const SensorReadings &readings);
 
     // Only the worker touches these network objects after begin().
     WiFiClient transport;

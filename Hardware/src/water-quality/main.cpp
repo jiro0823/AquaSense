@@ -3,13 +3,12 @@
 
 /*
  * ESP32 Water Quality Sensor with MQTT
- * Reads 4 sensors and publishes data to MQTT broker
+ * Publishes only measurements supported by installed sensors.
  *
  * Sensors:
  * - Temperature (DS18B20)
  * - pH (Analog sensor)
- * - Dissolved Oxygen (DO) (Analog sensor)
- * - Turbidity (Analog sensor)
+ * - Turbidity (raw ADC diagnostic; no validated NTU conversion)
  *
  * MQTT: Publishes to configured MQTT_TOPIC_READINGS
  * Backend: Subscribes and displays on dashboard
@@ -32,6 +31,9 @@ PubSubClient mqttClient(espClient);
 // ========== Global Variables ==========
 unsigned long lastReadTime = 0;
 unsigned long lastMQTTCheck = 0;
+uint32_t readingSequence = 0;
+String bootId;
+String deviceId;
 
 // ========== Function Prototypes ==========
 void PublishStatus(const char* status);
@@ -43,13 +45,14 @@ void readSensors();
 void publishSensorData();
 void onMQTTMessage(char* topic, byte* payload, unsigned int length);
 float readTemperature();
-float readpH();
-float readDO();
 float readTurbidity();
 
 void setup() {
   Serial.begin(115200);
   delay(2000);
+  const uint64_t mac = ESP.getEfuseMac();
+  deviceId = String((uint32_t)(mac >> 32), HEX) + String((uint32_t)mac, HEX);
+  bootId = deviceId + String(esp_random(), HEX);
 
   Serial.println("\n\n");
   Serial.println("╔════════════════════════════════════════╗");
@@ -181,14 +184,10 @@ void readSensors() {
   Serial.println("\n─── Sensor Reading ───");
 
   float temp = readTemperature();
-  float ph = readpH();
-  float doLevel = readDO();
   float turbidity = readTurbidity();
 
   Serial.printf("  Temperature: %.2f°C\n", temp);
-  Serial.printf("  pH:          %.2f\n", ph);
-  Serial.printf("  DO:          %.2f mg/L\n", doLevel);
-  Serial.printf("  Turbidity:   %.2f NTU\n", turbidity);
+  Serial.printf("  Turbidity raw ADC: %.0f\n", turbidity);
 }
 
 // ========== Publish Sensor Data ==========
@@ -200,18 +199,23 @@ void publishSensorData() {
 
   // Read sensors
   float temp = readTemperature();
-  float ph = readpH();
-  float doLevel = readDO();
+  int phRaw = analogRead(PH_SENSOR_PIN);
   float turbidity = readTurbidity();
 
   // Create JSON payload
-  StaticJsonDocument<256> doc;
-  doc["temperature"] = temp;
-  doc["ph"] = ph;
-  doc["do"] = doLevel;
+  StaticJsonDocument<384> doc;
+  if (isfinite(temp)) doc["temperature"] = temp; else doc["temperature"] = nullptr;
+  doc["ph"] = nullptr;
+  doc["sensors"]["ph"]["rawAdc"] = phRaw;
+  doc["sensors"]["ph"]["conversion"] = "UNVERIFIED";
   doc["turbidity"] = turbidity;
+  doc["turbidityUnit"] = "raw_adc";
+  doc["sensors"]["turbidity"]["rawAdc"] = (int)turbidity;
+  doc["bootId"] = bootId;
+  doc["deviceId"] = deviceId;
+  doc["sequence"] = readingSequence++;
+  doc["sampleAgeMs"] = 0;
   doc["location"] = "Tank A";
-  doc["uptimeMs"] = millis(); // Uptime is not a Unix timestamp; backend stamps receipt time.
 
   // Serialize to string
   String payload;
@@ -233,101 +237,20 @@ float readTemperature() {
 
   if (temp == DEVICE_DISCONNECTED_C) {
     Serial.println("  ! Temperature sensor disconnected");
-    return 0.0;
+    return NAN;
   }
 
   return temp;
 }
 
-float readpH() {
-  // Read analog value
-  int raw = analogRead(PH_SENSOR_PIN);
-
-  // Detect disconnected probe (pin floating to GND or pulled to VCC)
-  if (raw <= 10 || raw >= 4090) {
-    Serial.println("  ! pH sensor disconnected or out of range");
-    return -1.0; // Error code
-  }
-
-  // Convert to voltage
-  float voltage = (raw / (float)ADC_MAX) * VOLTAGE_REF;
-
-  // Standard calibration for many analog pH sensors (e.g. DF-Robot)
-  // Voltage at pH 7 is usually 2.5V (if 5V powered) or ~1.65V (if 3.3V powered)
-  // Adjust these based on actual buffer solutions!
-  float ph = 3.5 * voltage - 2.0;  // Example calibration
-
-  // Apply offset and scale
-  ph = (ph * PH_SCALE) + PH_OFFSET;
-
-  // Clamp to valid range
-  if (ph < 0) ph = 0;
-  if (ph > 14) ph = 14;
-
-  return ph;
-}
-
-float readDO() {
-  // Read analog value
-  int raw = analogRead(DO_SENSOR_PIN);
-
-  if (raw <= 10 || raw >= 4090) {
-     return -1.0; // Error code for disconnected
-  }
-
-  // Convert to voltage
-  float voltage = (raw / (float)ADC_MAX) * VOLTAGE_REF;
-
-  // Convert voltage to DO (mg/L)
-  float doLevel = (voltage / VOLTAGE_REF) * 15.0;
-
-  // Apply offset and scale
-  doLevel = (doLevel * DO_SCALE) + DO_OFFSET;
-
-  // Clamp to valid range
-  if (doLevel < 0) doLevel = 0;
-  if (doLevel > 20) doLevel = 20;
-
-  return doLevel;
-}
-
 float readTurbidity() {
-  // Read multiple samples
-  int samples = 15;
+  const int samples = 15;
   int sum = 0;
-
   for (int i = 0; i < samples; i++) {
     sum += analogRead(TURBIDITY_SENSOR_PIN);
     delay(30);
   }
-
-  int raw = sum / samples;
-
-  if (raw <= 10) {
-    Serial.println("  ! Turbidity sensor disconnected (0V)");
-    return -1.0;
-  }
-
-  // Convert to voltage
-  float voltage = (raw / (float)ADC_MAX) * VOLTAGE_REF;
-
-  // Convert voltage to NTU ('\' Turbidity Units)
-  float turbidity = 0.0;
-  if (voltage > 2.5) {
-    turbidity = 0.0; // Clean water
-  } else {
-    // Map 2.5V -> 0 NTU, 0V -> 150 NTU
-    turbidity = (2.5 - voltage) * (150.0 / 2.5);
-  }
-
-  // Apply offset and scale
-  turbidity = (turbidity * TURBIDITY_SCALE) + TURBIDITY_OFFSET;
-
-  // Clamp to valid range
-  if (turbidity < 0) turbidity = 0;
-  if (turbidity > 150) turbidity = 150;
-
-  return turbidity;
+  return (float)(sum / samples);
 }
 
 // ========== MQTT Message Handler ==========

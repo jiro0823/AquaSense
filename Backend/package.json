@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "node scripts/dev.cjs",
+    "db:migrate": "node scripts/migrate.cjs",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "lint": "eslint src --ext .ts",

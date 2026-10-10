@@ -36,13 +36,9 @@ void BackendDeviceClient::run() {
         vTaskDelay(pdMS_TO_TICKS(DeviceConfig::BACKEND_SYNC_INTERVAL_MS));
     }
 }
-<<<<<<< HEAD
 bool BackendDeviceClient::sync(const SystemState& state) {
-=======
-bool BackendDeviceClient::sync(const SystemState& state, const CommandReceipt* receipt) {
     if (!DeviceConfig::backendTransportConfigured(DeviceConfig::BACKEND_API_BASE_URL,
             DeviceConfig::BACKEND_ROOT_CA, DeviceConfig::ALLOW_INSECURE_BACKEND_HTTP)) return false;
->>>>>>> origin/feature/major-improvements
     document.clear();
     document["deviceId"] = DeviceConfig::DEVICE_ID;
     JsonObject report = document.createNestedObject("state");

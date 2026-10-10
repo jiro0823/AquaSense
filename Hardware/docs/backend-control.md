@@ -9,25 +9,6 @@ commands.
 
 ## Connect
 
-<<<<<<< HEAD
-1. Register and activate the device through the existing device API. Match its
-   ID to `DeviceConfig::DEVICE_ID`; use a unique ID per board.
-2. Configure Backend's private `DEVICE_KEYS` entry and the same key in the
-   ignored firmware `include/secrets/Secrets.h`. Do not commit either secret.
-3. Configure a reachable `BACKEND_API_BASE_URL` ending in `/api/v1`. Production
-   requires HTTPS with a trusted root certificate in `DeviceConfig.h`; LAN
-   development may use HTTP, which does not encrypt the device key.
-4. Point firmware and Backend at the same broker. Sensor topics are retained
-   under `aquasense/`; actuator commands are non-retained. The current public
-   plaintext broker is for development only. HMAC authenticates protocol data,
-   but does not provide confidentiality or protect sensor telemetry in transit.
-5. Rebuild/restart Backend with the existing workflow. No live database
-   migration or device upload was performed in this task.
-6. Commission with relay loads disconnected from power. The diagram-backed pin
-   assignments are present, but the firmware keeps relay control disabled until
-   active polarity, reset bias, OFF state and safe pump runtime limits are
-   physically established. See `wiring-and-protocols.md`.
-=======
 1. Register the device to the intended farmer/admin through existing
    POST /api/v1/devices (deviceId, name). Confirm it is active. Match
    DeviceConfig::DEVICE_ID. Only one board may consume that ID.
@@ -60,7 +41,6 @@ commands.
    migration or server restart was performed in this task.
 7. Build/upload following [deployment](deployment.md). Verify telemetry/state with
    relay loads disconnected from power before commissioning.
->>>>>>> origin/feature/major-improvements
 
 ## API and MQTT contract
 
@@ -110,25 +90,6 @@ retained-command misconfiguration should still be prevented.
 
 | Action | Behavior |
 | --- | --- |
-<<<<<<< HEAD
-| `FILL`, `DRAIN` | Timed single-pump operation; positive `durationMs` required |
-| `WATER_EXCHANGE` | Drain, explicit all-off transition, then refill; each stage is bounded |
-| `WATER_STOP` | Stop exchange, disable its automation, cancel pending water starts |
-| `AERATOR_ON`, `AERATOR_OFF` | Manual aerator command; disables aerator automatic mode |
-| `AERATOR_AUTO` | Enable configured temperature hysteresis policy |
-| `AUTOMATION_ON`, `AUTOMATION_OFF` | Enable/disable the single firmware water automation controller |
-| `BUZZER_ON`, `BUZZER_OFF` | Manual buzzer control is disabled; buzzer is reserved for configured sensor alarms |
-| `TRIGGER`, `ON`, `OFF` | Existing manual feeder actions through the correlated MQTT command path |
-| `ALL_OFF` | Stop outputs and cancel queued commands on device receipt |
-| `CLEAR_FAULT` | Clear a stopped water fault; does not re-enable automation |
-
-Valid manual water command interrupts and disables water automation. A running
-manual exchange cannot be displaced by another start command; send STOP first.
-The firmware enforces mutual exclusion and an OFF update boundary before
-switching pumps. STOP is processed through the same authenticated MQTT path and
-depends on network/broker delivery; it is not a physical emergency stop. A
-local maximum-runtime timeout is independent of network availability.
-=======
 | FILL, DRAIN | Timed single-pump run; durationMs required and bounded by that pump's configured target and hard maximum |
 | WATER_EXCHANGE | Uses configured drain target, settling interval, then configured fill target; API durationMs remains required for contract compatibility but does not set either phase |
 | WATER_STOP | Stop water, disable its automation, cancel pending hardware work |
@@ -139,50 +100,31 @@ local maximum-runtime timeout is independent of network availability.
 | ALL_OFF | Cancel waiting hardware/feeding work and stop active outputs on receipt |
 | CLEAR_FAULT | Clear stopped water fault; does not re-enable automation |
 
-API pump durations are positive integers up to 300,000 ms. FILL and DRAIN also
-require a configured per-pump target and hard maximum; a requested duration may
-shorten the target but cannot exceed it. WATER_EXCHANGE requires durationMs at
-the API boundary for compatibility, while firmware uses independently
-configured drain and fill targets. Other actions reject durationMs. Stop commands bypass a full hardware queue. Remote stop depends on
-connectivity/poll latency and is not a physical emergency-stop circuit.
-ALL_OFF leaves a fault and its alarm latched; future scheduled feeds resume in
-later minutes unless backend schedules are disabled.
->>>>>>> origin/feature/major-improvements
+Pump command `durationMs` values are positive integers up to 60,000 ms at the
+API and dashboard boundary. FILL and DRAIN also require commissioned
+per-pump targets and hard limits; a manual request may shorten its target but
+cannot extend it. WATER_EXCHANGE requires `durationMs` for API compatibility,
+but firmware uses its independently commissioned drain and fill targets.
+Firmware rejects any configured hard maximum above 300,000 ms. These are
+software limits, not proof that a runtime is safe for a particular tank.
+Stops bypass a full hardware queue, but remote stops depend on network and MQTT
+delivery and are not physical emergency stops. ALL_OFF leaves faults latched.
 
-Pump `durationMs` is a positive integer up to 60,000 ms per phase. The API,
-dashboard and firmware enforce the same initial 60-second cap. The firmware
-stops each pump at its requested duration and has an independent local hard
-deadline; reaching the 60-second maximum turns that pump off. Change the named
-limits in `ActuatorConfig.h`, the API cap and dashboard validation together only
-after supervised flow-rate calibration. These are initial limits, not proof that
-60 seconds is safe for every tank. Relay operation remains disabled while its
-trigger polarity is unknown. Loss of Wi-Fi or MQTT stops relay-controlled loads;
-rejected commands also force those outputs off. The MCU cannot control relay
-inputs while held in reset, so verify the module's hardware OFF bias before
-connecting pump power.
+Relay operation remains disabled while trigger polarity is unknown. The MCU
+cannot control relay inputs while held in reset, so verify the module's hardware
+OFF bias before connecting pump power. Loss of Wi-Fi or MQTT stops
+relay-controlled loads; rejected commands also force those outputs off.
 
-Automatic water exchange is disabled until `AUTO_DRAIN_MS`, `AUTO_FILL_MS`,
-`AUTO_COOLDOWN_MS`, thresholds and `WATER_POLICY_CONFIGURED` are set. It requires
-fresh, valid settled pH, turbidity and ORP sensor data. ORP is not dissolved
-oxygen. Aerator automation is separately configured; it uses temperature only
-and must not be interpreted as oxygen measurement.
+Automatic water exchange is disabled by default. Set
+`DRAIN_TARGET_RUNTIME_MS`, `DRAIN_MAX_RUNTIME_MS`, `FILL_TARGET_RUNTIME_MS`,
+`FILL_MAX_RUNTIME_MS`, `WATER_EXCHANGE_SETTLING_MS`, `PUMP_COOLDOWN_MS`,
+reviewed thresholds, and `WATER_POLICY_CONFIGURED` only after commissioning.
+It requires fresh, valid settled pH, turbidity, and ORP data. ORP is not
+dissolved oxygen. Aerator automation is separately configured and uses
+temperature only; it must not be interpreted as oxygen measurement.
 
 ## Feeding and RTC
 
-<<<<<<< HEAD
-The existing user-wide feeding schedule API is preserved. Schedules and
-last-fired minute records are persisted in NVS, and a previously synchronized
-DS3231 can schedule feeds while Internet/MQTT are unavailable. RTC is not reset
-to build time. `lostPower`, validity metadata or invalid time inhibit scheduled
-feeding until valid network time synchronizes the RTC. Missed minutes are
-skipped; one schedule occurrence can trigger only once, including across reset
-or a backward clock adjustment. Manual feeding is correlated through MQTT and
-is never replayed from a retained command.
-
-Schedules are currently user-wide, not device-scoped. Multiple feeders for one
-user therefore share them; per-device schedule ownership would require a
-separate data model change.
-=======
 There are no float switches: this is **timed water exchange**, not measured or
 precise automatic water-level control. Configure these values only after flow
 testing on the installed pumps, tubing, head height and source conditions:
@@ -254,7 +196,8 @@ does not need that policy, but does require confirmed relay configuration.
 
 ## Feeding and time
 
-Existing feeding API commands TRIGGER, ON, OFF arrive through combined sync.
+Existing feeding API commands TRIGGER, ON, and OFF are delivered through signed
+MQTT; authenticated HTTPS sync supplies schedules and heartbeat state.
 GPIO19 servo starts closed at25 degrees, opens to140, and preserves the original
 800/1000/800 ms cycle. ON closes after ten seconds. OFF/ALL_OFF suppress scheduled
 feeding for the current minute.
@@ -269,7 +212,6 @@ NTP/system time and DS3231 use UTC; dates and HH:mm use Asia/Manila UTC+8.
 RTC lost power or unmarked legacy clock contents inhibit schedules until NTP
 succeeds. Missed minutes are skipped; stored last-fired records prevent repeats
 after resets/backward clock shifts.
->>>>>>> origin/feature/major-improvements
 
 ## Telemetry scope
 

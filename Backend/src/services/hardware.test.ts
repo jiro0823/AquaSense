@@ -2,6 +2,7 @@ import test, { afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
+import { Op } from 'sequelize';
 import type { AddressInfo } from 'node:net';
 import hardwareRoutes from '../api/v1/routes/hardware';
 import { ackCanonical, commandCanonical, hardwareCommandSchema, hardwareStateSchema, hardwareSyncSchema, parseSignedAck, parseSignedCommand, signCanonical, verifyCanonical, type HardwareState } from './hardwareProtocol';
@@ -49,7 +50,7 @@ test('pump commands require bounded integer timing; non-pump commands reject tim
   assert.equal(hardwareCommandSchema.safeParse({ deviceId: 'board', action: 'ALL_OFF', durationMs: 1000 }).success, false);
   assert.equal(hardwareCommandSchema.safeParse({ deviceId: 'board', action: 'RAW_GPIO', pin: 25 }).success, false);
   assert.equal(hardwareSyncSchema.safeParse({ deviceId: 'board', state: { ...state, floatWet: true } }).success, false);
-  assert.equal(hardwareStateSchema.safeParse({ ...state, waterPhase: 'TRANSITION' }).success, true);
+  assert.equal(hardwareStateSchema.safeParse({ ...state, waterPhase: 'TRANSITION' }).success, false);
 });
 
 test('hardware state accepts the explicit nonblocking water exchange phases', () => {
@@ -121,14 +122,15 @@ test('a stop cancels an earlier start, blocks concurrent starts until acknowledg
   assert.equal(rows.filter((row) => row.status === 'PENDING').map((row) => row.action).join(','), 'ALL_OFF');
 
   const stopSync = await hardwareService.sync('owner', 'board', state);
-  assert.equal(stopSync.command?.action, 'ALL_OFF');
-  const stopId = stopSync.command!.id;
-  const afterAck = await hardwareService.sync('owner', 'board', state, { id: stopId, source: 'hardware', result: 'accepted' });
+  assert.equal(stopSync.command, null);
+  const stopId = rows.find((row) => row.action === 'ALL_OFF')!.id;
+  assert.equal(await hardwareService.acknowledge('owner', 'board', { id: stopId, source: 'hardware', result: 'accepted' }), true);
+  const afterAck = await hardwareService.sync('owner', 'board', state);
   assert.equal(afterAck.command, null);
 
   await hardwareService.queue('owner', 'board', 'FILL', 1000);
   const startSync = await hardwareService.sync('owner', 'board', state);
-  assert.equal(startSync.command?.action, 'FILL');
+  assert.equal(startSync.command, null);
 });
 
 test('WATER_STOP blocks water starts only, while ALL_OFF blocks every actuator start', async () => {
@@ -200,20 +202,13 @@ test('receipts are owner/device scoped and duplicate acknowledgments do not exec
   assert.equal(await hardwareService.acknowledge('other-owner', 'board', receipt), false);
 });
 
-<<<<<<< HEAD
-test('legacy authenticated HTTP sync refreshes device state but never delivers or acknowledges commands', async () => {
-  const expiry = mock.method(HardwareCommand, 'update', async () => [1]);
-  const feedExpiry = mock.method(FeedingCommand, 'update', async () => [1]);
-  const stateWrite = mock.method(HardwareDeviceState, 'upsert', async () => [state, true]);
-=======
-test('sync expires old work, bounds schedules, and prioritizes hardware over feeding', async () => {
+test('authenticated HTTPS sync updates heartbeat and schedules without delivering or expiring commands', async () => {
   mockSerializedDatabase();
   const expiry = mock.method(HardwareCommand, 'update', async () => [1]);
   const feedExpiry = mock.method(FeedingCommand, 'update', async () => [1]);
-  mock.method(HardwareDeviceState, 'upsert', async () => [state, true]);
+  const stateWrite = mock.method(HardwareDeviceState, 'upsert', async () => [state, true]);
   mock.method(HardwareCommand, 'findOne', async () => ({ id, action: 'WATER_STOP', durationMs: null, expiresAt: new Date(Date.now() + 60000) }));
   mock.method(FeedingCommand, 'findOne', async () => ({ id: 'feed', action: 'TRIGGER', createdAt: new Date() }));
->>>>>>> origin/feature/major-improvements
   mock.method(feedingService, 'listSchedules', async () => Array.from({ length: 25 }, (_, i) => ({ id: String(i), enabled: i !== 0, time: '08:00', date: null })));
   const result = await hardwareService.sync('owner', 'board', state);
   assert.equal(result.command, null);

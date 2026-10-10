@@ -8,11 +8,8 @@ import type { AuthenticatedRequest } from '../../../middleware/authMiddleware';
 import { deviceService } from '../../../services/device.service';
 import type { DeviceAuthenticatedRequest } from '../../../middleware/deviceAuthMiddleware';
 import { auditLogService } from '../../../services/auditLog.service';
-<<<<<<< HEAD
 import { mqttService } from '../../../services/mqttService';
-=======
 import { config } from '../../../config/config';
->>>>>>> origin/feature/major-improvements
 
 const DEFAULT_DEVICE_ID = config.feeding.deviceId;
 const FEEDING_TIMEZONE = config.feeding.timezone;

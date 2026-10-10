@@ -1,5 +1,5 @@
 import { SensorHealthPanel, AmmoniaSpeciationCard } from '../../components/WaterQuality/SensorHealthPanel';
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
 import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
@@ -22,36 +22,19 @@ type CardConfig = {
 const parameterCards: CardConfig[] = [
   { key: 'temperature', label: 'Temperature', unit: 'C', color: '#f59e0b', normal: (value) => value >= 24 && value <= 32, normalLabel: 'Normal', warnLabel: 'Needs attention' },
   { key: 'ph', label: 'pH Level', unit: '', color: '#3b82f6', normal: (value) => value >= 6.5 && value <= 8.5, normalLabel: 'Normal', warnLabel: 'Needs attention' },
-  { key: 'do', label: 'Dissolved Oxygen', unit: 'mg/L', color: '#22c55e', normal: (value) => value >= 5, normalLabel: 'Normal', warnLabel: 'Needs attention' },
+  { key: 'do', label: 'Dissolved Oxygen (not measured)', unit: 'mg/L', color: '#22c55e', normal: (value) => value >= 5, normalLabel: 'Normal', warnLabel: 'Needs attention' },
   { key: 'turbidity', label: 'Turbidity', unit: 'NTU', color: '#a855f7', normal: (value) => value < 25, normalLabel: 'Normal', warnLabel: 'Needs attention' },
   { key: 'ammonia', label: 'NH3 fraction of TAN', unit: '%', color: '#ef4444', normal: () => false, normalLabel: 'Preliminary', warnLabel: 'TAN required' },
-  { key: 'riskScore', label: 'Mortality Risk Score', unit: '%', color: '#ef4444', normal: (value) => value <= 25, normalLabel: 'Low Risk', warnLabel: 'Elevated' },
+  { key: 'riskScore', label: 'Preliminary Water Quality Risk Score', unit: '', color: '#ef4444', normal: (value) => value < 25, normalLabel: 'LOW', warnLabel: 'MODERATE or higher' },
 ];
 
 const formatValue = (value: number|null, unit: string) => value === null ? '--' : `${value.toFixed(unit === '' ? 2 : 1)}${unit ? ` ${unit}` : ''}`;
 
 const DashboardParametersPage: React.FC = () => {
-  const { statistics, chartData, predictiveWarning, latestReading } = useDashboardData();
+  const { statistics, chartData, predictiveWarning, latestReading, error } = useDashboardData();
 
   const currentRiskScore = predictiveWarning?.riskScore ?? null;
-
-  const riskChartData = useMemo(() => {
-    return chartData.slice(-20).map((point) => ({
-      ...point,
-      riskScore: null,
-    }));
-  }, [chartData, currentRiskScore]);
-
-  const riskStats: CardStats = useMemo(() => {
-    const values: number[] = []; // No historical predictions were supplied; do not fabricate a trend.
-    if (!values.length) return { current: currentRiskScore, average: currentRiskScore, min: currentRiskScore, max: currentRiskScore };
-    return {
-      current: currentRiskScore,
-      average: values.reduce((sum, value) => sum + value, 0) / values.length,
-      min: Math.min(...values),
-      max: Math.max(...values),
-    };
-  }, [riskChartData, currentRiskScore]);
+  const currentRiskLevel = predictiveWarning?.warningCard?.riskLevel ?? null;
 
   return (
     <div className="flex flex-col gap-3 lg:h-full lg:min-h-0">
@@ -61,30 +44,47 @@ const DashboardParametersPage: React.FC = () => {
         </div>
         <div>
           <h1 className="text-base lg:text-lg font-bold tracking-tight text-gray-900">Parameters</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Detailed sensor evidence from the latest monitoring window</p>
+          <p className="text-xs text-gray-500 mt-0.5">Detailed sensor evidence from the latest monitoring window{statistics?.stale ? ' · Live statistics stale while disconnected' : ''}</p>
         </div>
       </header>
 
+      {error && <div className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Connection state: {error}</div>}
       <SensorHealthPanel reading={latestReading} />
       {statistics ? (
         <section className="lg:flex-1 lg:min-h-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2 gap-2.5">
           {parameterCards.map((item) => {
             const isRisk = item.key === 'riskScore';
-<<<<<<< Updated upstream
-=======
             if(item.key==='ammonia') return <AmmoniaSpeciationCard key={item.key} reading={latestReading} />;
-            if(isRisk && currentRiskScore===null) return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Mortality risk: INSUFFICIENT VALID SENSOR DATA</div>;
-            if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidity ?? '--'} raw ADC. NTU conversion requires formal calibration.</div>;
->>>>>>> Stashed changes
-            if (item.key === 'do' && latestReading?.doMeasured === false) {
+            if (isRisk) {
+              return (
+                <div key={item.key} className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">{item.label}</h3>
+                  <span className="text-xl font-bold text-gray-900">{currentRiskScore === null ? '--' : `${currentRiskScore.toFixed(2)} / 100`}</span>
+                  <p className="text-xs text-gray-500">
+                    {currentRiskScore === null
+                      ? 'Insufficient valid sensor data'
+                      : `Preliminary classification: ${currentRiskLevel ?? 'Unavailable'}. Calibration required.`}
+                  </p>
+                </div>
+              );
+            }
+            if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidityUnit==='raw_adc' ? `${latestReading.turbidity ?? '--'} raw ADC. NTU conversion requires formal calibration.` : 'Unit unavailable; turbidity value is not interpreted or charted.'}</div>;
+            if (item.key === 'do') {
               return <div key={item.key} className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
-                <h3 className="font-semibold text-gray-900">Dissolved Oxygen</h3>
-                <p className="mt-2">Not measured. Connect a calibrated oxygen sensor to enable oxygen alerts.</p>
+                <h3 className="font-semibold text-gray-900">Dissolved Oxygen (not measured)</h3>
+                <p className="mt-2">AquaSense has no physical dissolved-oxygen probe. ORP is a separate redox measurement and is not converted to dissolved oxygen.</p>
               </div>;
             }
-            const stats: CardStats = isRisk ? riskStats : (statistics[item.key as ParameterKey] as WaterQualityStats[ParameterKey]);
+            const stats: CardStats = statistics[item.key as ParameterKey] as WaterQualityStats[ParameterKey];
+            const sensorName = item.key === 'temperature' || item.key === 'ph' ? item.key : null;
+            const health = sensorName ? latestReading?.sensorHealth?.[sensorName] : null;
             const isNormal = stats.current!==null && item.normal(stats.current);
-            const chart = isRisk ? riskChartData : chartData.slice(-20);
+            const statusLabel = statistics.stale ? 'STALE' : !latestReading ? 'UNAVAILABLE' : !health ? 'UNKNOWN' :
+              !health.valid || health.measurementValid===false ? (health.health==='STALE' ? 'STALE' : 'UNAVAILABLE') :
+              health.health==='UNSTABLE' || health.stability==='UNSTABLE' ? 'UNSTABLE' :
+              health.calibration!=='CALIBRATED' ? 'CALIBRATION REQUIRED' : isNormal ? item.normalLabel : item.warnLabel;
+            const statusQualified = !['STALE','UNAVAILABLE','UNKNOWN','UNSTABLE','CALIBRATION REQUIRED'].includes(statusLabel);
+            const chart = chartData.filter(point=>item.key!=='turbidity' || point.turbidityUnit===latestReading?.turbidityUnit).slice(-20);
 
             return (
               <div key={item.key} className="rounded-xl border border-gray-200 bg-white shadow-sm p-2 flex flex-col min-h-[180px] lg:min-h-0">
@@ -100,9 +100,9 @@ const DashboardParametersPage: React.FC = () => {
                   <p className="text-[9px] text-gray-400 truncate">
                     Avg {formatValue(stats.average, item.unit)} · Min {formatValue(stats.min, item.unit)} · Max {formatValue(stats.max, item.unit)}
                   </p>
-                  <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${isNormal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                    <span className={`h-1 w-1 rounded-full ${isNormal ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                    {isNormal ? item.normalLabel : item.warnLabel}
+                  <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${statusQualified && isNormal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    <span className={`h-1 w-1 rounded-full ${statusQualified && isNormal ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    {statusLabel}
                   </span>
                 </div>
 

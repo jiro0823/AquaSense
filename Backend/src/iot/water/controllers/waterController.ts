@@ -3,7 +3,6 @@
  * API endpoints for water quality monitoring
  */
 import { Request, Response } from 'express';
-import { parseOrp } from '../../../services/sensorValues';
 import { waterQualityService } from '../services/waterQualityService';
 import type { WaterQualityStats } from '../types';
 import { sendSuccess, sendError } from '../../../utils/response';
@@ -15,6 +14,8 @@ import { predictionLogService } from '../../../services/predictionLog.service';
 import { smsLogService } from '../../../services/smsLogService';
 import { alertService } from '../../../services/alert.service';
 import { waterAlertNotificationService } from '../../../services/waterAlertNotification.service';
+import type { AuthenticatedRequest } from '../../../middleware/authMiddleware';
+import { deviceService } from '../../../services/device.service';
 
 const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStats> => {
   const dbStats = await sensorReadingService.getStatistics(minutes);
@@ -74,57 +75,8 @@ const ingestMeta: IngestMeta = {
  */
 export const addReading = async (req: Request, res: Response): Promise<void> => {
   try {
-<<<<<<< Updated upstream
-    const { deviceId, temperature, ph, do: dissolvedOxygen, turbidity, location, ammonia } = req.body;
-
-    if (temperature === undefined || ph === undefined || dissolvedOxygen === undefined || turbidity === undefined) {
-      sendError(res, 400, 'Missing required parameters: temperature, ph, do, turbidity');
-      return;
-    }
-
-    const tempValue = parseFloat(temperature);
-    const phValue = parseFloat(ph);
-    const doValue = parseFloat(dissolvedOxygen);
-    const turbidityValue = parseFloat(turbidity);
-    const ammoniaValue = ammonia !== undefined ? parseFloat(ammonia) : 0;
-
-    if (
-      !Number.isFinite(tempValue) ||
-      !Number.isFinite(phValue) ||
-      !Number.isFinite(doValue) ||
-      !Number.isFinite(turbidityValue) ||
-      !Number.isFinite(ammoniaValue)
-    ) {
-      sendError(res, 400, 'Invalid sensor values');
-      return;
-    }
-
-    const stored = await sensorReadingService.addSensorReading(
-      deviceId || 'unknown-device',
-      tempValue,
-      phValue,
-      doValue,
-      turbidityValue,
-      ammoniaValue,
-      location || 'Unknown',
-      new Date(),
-      true,
-      parseOrp(req.body.orp)
-    );
-    const reading = stored || {
-      temperature: tempValue,
-      ph: phValue,
-      do: doValue,
-      turbidity: turbidityValue,
-      ammonia: ammoniaValue,
-      location: location || 'Unknown',
-      timestamp: new Date(),
-    };
-
-=======
     const deviceId = req.body.deviceId || 'unknown-device';
     const reading = await sensorReadingService.ingest(deviceId, req.body);
->>>>>>> Stashed changes
     ingestMeta.lastReceivedAt = new Date(reading.timestamp).toISOString();
     ingestMeta.lastSourceIp = req.ip || null;
     ingestMeta.lastLocation = reading.location || null;
@@ -139,7 +91,7 @@ export const addReading = async (req: Request, res: Response): Promise<void> => 
       location: ingestMeta.lastLocation,
     });
 
-    await waterAlertNotificationService.processReading({ ...reading, dissolvedOxygen: reading.do, dissolvedOxygenMeasured: reading.doMeasured });
+    await waterAlertNotificationService.processReading({ ...reading, dissolvedOxygen: reading.do, dissolvedOxygenMeasured: reading.doMeasured }).catch(error=>logger.error('Post-ingestion notification failed', {deviceId, readingId:reading.id, error:String(error)}));
 
     sendSuccess(res, 201, 'Reading added successfully', reading);
   } catch (error) {
@@ -194,11 +146,12 @@ export const getStatistics = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-export const getAlerts = (req: Request, res: Response): void => {
+export const getAlerts = (req: AuthenticatedRequest, res: Response): void => {
   void (async () => {
     try {
     const limit = parseInt(req.query.limit as string, 10) || 50;
-    const alerts = await alertService.getAlerts(limit);
+    const deviceIds = req.userRole === 'admin' ? undefined : (req.userId ? (await deviceService.listByUser(req.userId)).filter((device) => device.isActive).map((device) => device.deviceId) : []);
+    const alerts = await alertService.getAlerts(limit, undefined, deviceIds);
     sendSuccess(res, 200, 'Alerts retrieved', alerts);
     } catch (error) {
     sendError(res, 500, 'Failed to fetch alerts', error instanceof Error ? error.message : 'Unknown error');
@@ -215,9 +168,18 @@ export const getThresholds = (_req: Request, res: Response): void => {
   }
 };
 
-export const updateThresholds = (req: Request, res: Response): void => {
+export const updateThresholds = async (req: Request, res: Response): Promise<void> => {
   try {
-    waterQualityService.setThresholds(req.body);
+    const current = waterQualityService.getThresholds();
+    const next = {
+      ...current,
+      ...req.body,
+      temperature: { ...current.temperature, ...(req.body.temperature || {}) },
+      ph: { ...current.ph, ...(req.body.ph || {}), optimal: { ...current.ph.optimal, ...(req.body.ph?.optimal || {}) } },
+      do: { ...current.do, ...(req.body.do || {}) },
+      turbidity: { ...current.turbidity, ...(req.body.turbidity || {}) },
+    };
+    await waterQualityService.setThresholds(next);
     const thresholds = waterQualityService.getThresholds();
     sendSuccess(res, 200, 'Thresholds updated', thresholds);
   } catch (error) {
@@ -225,11 +187,12 @@ export const updateThresholds = (req: Request, res: Response): void => {
   }
 };
 
-export const getDashboardData = async (_req: Request, res: Response): Promise<void> => {
+export const getDashboardData = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const latest = await sensorReadingService.getLatestReading();
     const stats = await mapDbStatsToWaterStats(60);
-    const alerts = await alertService.getAlerts(10);
+    const deviceIds = req.userRole === 'admin' ? undefined : (req.userId ? (await deviceService.listByUser(req.userId)).filter((device) => device.isActive).map((device) => device.deviceId) : []);
+    const alerts = await alertService.getAlerts(10, undefined, deviceIds);
     const thresholds = waterQualityService.getThresholds();
     const predictive = await predictiveAnalyticsService.getWarningCard(60);
     const predictionHistory = await predictionLogService.getRecentLogs(30);

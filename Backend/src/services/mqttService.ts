@@ -5,15 +5,21 @@
  */
 
 import mqtt, { MqttClient } from 'mqtt';
-<<<<<<< Updated upstream
-import { parseOrp } from './sensorValues';
-=======
 import { numeric } from './sensorHealth';
->>>>>>> Stashed changes
 import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
 import type { WaterQualityReading, WaterQualityStats } from '../iot/water/types';
+<<<<<<< HEAD
+import { config } from '../config/config';
+import { HardwareCommand } from '../database/models/HardwareControl';
+import { FeedingCommand } from '../database/models/FeedingCommand';
+import { deviceService } from './device.service';
+import { ackCanonical, commandCanonical, parseSignedAck, signCanonical, verifyCanonical } from './hardwareProtocol';
+import { hardwareService } from './hardwareService';
+=======
+import { config as appConfig } from '../config/config';
+>>>>>>> origin/feature/major-improvements
 
 interface MQTTConfig {
   brokerUrl: string;
@@ -34,22 +40,15 @@ export class MQTTService {
   private isConnected = false;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private latestSensorPayload: {
-<<<<<<< Updated upstream
-    temperature?: number;
-    ph?: number;
-    turbidity?: number;
-    do?: number;
-    ammonia?: number;
-    orp?: number | null;
-=======
     temperature?: unknown;
     ph?: unknown;
     turbidity?: unknown;
     do?: unknown;
     ammonia?: unknown;
     orp?: unknown;
->>>>>>> Stashed changes
   } = {};
+  private latestTurbidityUnit: 'raw_adc' | 'NTU' = 'raw_adc';
+  private latestDeviceId = 'mqtt-device';
   private pendingBatchFlags = {
     temperature: false,
     ph: false,
@@ -58,24 +57,22 @@ export class MQTTService {
   private onReadingReceived?: (reading: WaterQualityReading) => void;
   private onStatsUpdated?: (stats: WaterQualityStats) => void;
   private lastConnectionWarningAt = 0;
-<<<<<<< Updated upstream
-=======
   private sensorTimestamps: Record<string,string> = {};
->>>>>>> Stashed changes
   private latestDoReceivedAt = 0;
   private latestOrpReceivedAt = 0;
+  private actuatorRedeliveryInterval: NodeJS.Timeout | null = null;
 
   constructor(config?: Partial<MQTTConfig>) {
     this.config = {
-      brokerUrl: config?.brokerUrl || process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883',
-      username: config?.username || process.env.MQTT_USERNAME,
-      password: config?.password || process.env.MQTT_PASSWORD,
+      brokerUrl: config?.brokerUrl || appConfig.mqtt.brokerUrl,
+      username: config?.username || appConfig.mqtt.username,
+      password: config?.password || appConfig.mqtt.password,
       clientId: config?.clientId || `aquasense-backend-${Date.now()}`,
       topics: {
-        readings: config?.topics?.readings || process.env.MQTT_TOPIC_READINGS || 'water/esp32/readings',
-        sensorWildcard: config?.topics?.sensorWildcard || process.env.MQTT_TOPIC_SENSOR_WILDCARD || 'aquasense/+',
-        commands: config?.topics?.commands || 'water/commands/#',
-        status: config?.topics?.status || 'water/esp32/status',
+        readings: config?.topics?.readings || appConfig.mqtt.topics.readings,
+        sensorWildcard: config?.topics?.sensorWildcard || appConfig.mqtt.topics.sensorWildcard,
+        commands: config?.topics?.commands || appConfig.mqtt.topics.commands,
+        status: config?.topics?.status || appConfig.mqtt.topics.status,
         ...config?.topics,
       },
     };
@@ -102,6 +99,10 @@ export class MQTTService {
         this.isConnected = true;
         logger.info('âœ“ MQTT Connected successfully');
         this.subscribe();
+        void this.redeliverPendingActuatorCommands();
+        if (!this.actuatorRedeliveryInterval) this.actuatorRedeliveryInterval = setInterval(() => {
+          void this.redeliverPendingActuatorCommands();
+        }, 5000);
         this.publishStatus('online');
 
         // Clear any existing reconnect interval
@@ -152,7 +153,7 @@ export class MQTTService {
     if (!this.client) return;
 
     try {
-      this.client.subscribe([this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands], (err) => {
+      this.client.subscribe([this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'], (err) => {
         if (err) {
           logger.error('MQTT subscription error:', err.message);
         } else {
@@ -176,6 +177,8 @@ export class MQTTService {
 
       if (topic === this.config.topics.readings) {
         this.handleSensorReading(message);
+      } else if (/^aquasense\/[^/]+\/state$/.test(topic)) {
+        void this.handleActuatorAck(topic, message);
       } else if (this.isAquasenseSensorTopic(topic)) {
         this.handleAquasenseTopicValue(topic, message);
       } else if (topic.startsWith('water/commands/')) {
@@ -186,6 +189,62 @@ export class MQTTService {
     }
   }
 
+  /** Publish one non-retained, signed actuator command. Publishing means queued, never confirmed. */
+  async dispatchHardwareCommand(input: { id: string; deviceId: string; source: 'hardware' | 'feeding'; action: string; durationMs?: number; expiresAt: Date }): Promise<boolean> {
+    if (!this.client || !this.isConnected) return false;
+    const key = config.device.keys[input.deviceId];
+    if (!key) return false;
+    const unsigned = { v: 1 as const, deviceId: input.deviceId, id: input.id, source: input.source,
+      action: input.action, durationMs: input.durationMs ?? 0, expiresAt: input.expiresAt.getTime() };
+    const payload = JSON.stringify({ ...unsigned, signature: signCanonical(commandCanonical(unsigned), key) });
+    return new Promise((resolve) => this.client!.publish(`aquasense/${input.deviceId}/command`, payload,
+      { qos: 1, retain: false }, error => {
+        if (error) { logger.warn('Actuator MQTT publish failed', { deviceId: input.deviceId, commandId: input.id, error: error.message }); resolve(false); }
+        else resolve(true);
+      }));
+  }
+
+  private async redeliverPendingActuatorCommands(): Promise<void> {
+    if (!this.client || !this.isConnected) return;
+    try {
+      const [hardware, feeding] = await Promise.all([
+        HardwareCommand.findAll({ where: { status: 'PENDING' }, order: [['createdAt', 'ASC']], limit: 100 }),
+        FeedingCommand.findAll({ where: { status: 'PENDING', source: 'MANUAL' }, order: [['createdAt', 'ASC']], limit: 100 }),
+      ]);
+      const now = Date.now();
+      for (const command of hardware) {
+        if (command.expiresAt.getTime() <= now) continue;
+        if (!(await deviceService.verifyOwnership(command.userId, command.deviceId))) continue;
+        await this.dispatchHardwareCommand({ id: command.id, deviceId: command.deviceId, source: 'hardware', action: command.action,
+          durationMs: command.durationMs ?? undefined, expiresAt: command.expiresAt });
+      }
+      for (const command of feeding) {
+        const expiresAt = command.createdAt.getTime() + 120_000;
+        if (expiresAt <= now || !(await deviceService.verifyOwnership(command.userId, command.deviceId))) continue;
+        await this.dispatchHardwareCommand({ id: command.id, deviceId: command.deviceId, source: 'feeding', action: command.action,
+          expiresAt: new Date(expiresAt) });
+      }
+      // Expired commands are not redelivered after a reconnect/outage.
+      await hardwareService.expirePendingCommands();
+    } catch (error) { logger.error('Actuator command redelivery failed', error); }
+  }
+
+  private async handleActuatorAck(topic: string, payload: string): Promise<void> {
+    const ack = parseSignedAck(payload);
+    const topicDeviceId = topic.split('/')[1];
+    if (!ack || ack.deviceId !== topicDeviceId) { logger.warn('Rejected malformed actuator state/ack', { topic }); return; }
+    const key = config.device.keys[ack.deviceId];
+    if (!key || !verifyCanonical(ackCanonical(ack), ack.signature, key)) {
+      logger.warn('Rejected actuator state/ack with invalid signature', { deviceId: ack.deviceId, commandId: ack.id }); return;
+    }
+    try {
+      const device = await deviceService.getActiveDevice(ack.deviceId);
+      if (!device) return;
+      const accepted = await hardwareService.acceptMqttAck(device.userId, ack);
+      if (!accepted) logger.warn('Rejected out-of-scope actuator state/ack', { deviceId: ack.deviceId, commandId: ack.id });
+    } catch (error) { logger.error('Failed to persist actuator state/ack', error); }
+  }
+
   /**
    * Process sensor reading from ESP32
    * Expected format: {temperature, ph, do, turbidity, location?, timestamp?}
@@ -193,128 +252,14 @@ export class MQTTService {
   private async handleSensorReading(payload: string): Promise<void> {
     try {
       const data = JSON.parse(payload);
-<<<<<<< Updated upstream
-
-      // Accept both `do` and `dissolvedOxygen` key names.
-      const suppliedDo = data.do ?? data.dissolvedOxygen;
-      const doMeasured = suppliedDo !== undefined && suppliedDo !== null && String(suppliedDo).trim() !== '' && Number.isFinite(Number(suppliedDo));
-      // Keep the legacy numeric storage format, explicitly tagging placeholders.
-      const doValue = doMeasured ? suppliedDo : 0;
-
-      // Validate required fields
-      if (
-        data.temperature === undefined ||
-        data.ph === undefined ||
-        data.turbidity === undefined
-      ) {
-        logger.warn('Invalid sensor reading - missing required fields:', data);
-        return;
-      }
-
-      const temperature = parseFloat(data.temperature);
-      const ph = parseFloat(data.ph);
-      const dissolvedOxygen = parseFloat(doValue);
-      const turbidity = parseFloat(data.turbidity);
-      const ammonia = parseFloat(data.ammonia ?? 0);
-      const orp = parseOrp(data.orp);
-
-      const sanitized = this.sanitizeSensorValues({
-        temperature,
-        ph,
-        dissolvedOxygen,
-        turbidity,
-        ammonia,
-      });
-
-      if (
-        sanitized.temperature === null ||
-        sanitized.ph === null ||
-        sanitized.dissolvedOxygen === null ||
-        sanitized.turbidity === null
-      ) {
-        logger.warn('[MQTT] Dropping sensor reading: required sensor value is not numeric', {
-          temperature,
-          ph,
-          do: dissolvedOxygen,
-          turbidity,
-          ammonia,
-        });
-        return;
-      }
-
-      if (sanitized.warnings.length) {
-        logger.warn(`[MQTT] Sanitized sensor reading: ${sanitized.warnings.join(', ')}`);
-      }
-
-      const timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
-      const deviceId = typeof data.deviceId === 'string' && data.deviceId.trim() ? data.deviceId.trim() : 'mqtt-device';
-      const persisted = await sensorReadingService.addSensorReading(
-        deviceId,
-        sanitized.temperature,
-        sanitized.ph,
-        sanitized.dissolvedOxygen,
-        sanitized.turbidity,
-        sanitized.ammonia,
-        data.location || 'ESP32-Sensor',
-        timestamp,
-        doMeasured,
-        orp
-      );
-      const reading = {
-        id: persisted?.id || `mqtt-${Date.now()}`,
-        temperature: sanitized.temperature,
-        ph: sanitized.ph,
-        do: sanitized.dissolvedOxygen,
-        doMeasured,
-        orp,
-        turbidity: sanitized.turbidity,
-        ammonia: sanitized.ammonia,
-        location: data.location || 'ESP32-Sensor',
-        timestamp,
-        status: 'normal' as const,
-      };
-
-      await waterAlertNotificationService.processReading({
-        deviceId,
-        temperature: reading.temperature,
-        ph: reading.ph,
-        dissolvedOxygen: reading.do,
-        dissolvedOxygenMeasured: doMeasured,
-        turbidity: reading.turbidity,
-        ammonia: reading.ammonia,
-      });
-
-      this.onReadingReceived?.(reading);
-      const dbStats = await sensorReadingService.getStatistics(60);
-      this.onStatsUpdated?.({
-        timestamp: new Date(),
-        orp: dbStats.orp,
-        temperature: dbStats.temperature,
-        ph: dbStats.ph,
-        do: dbStats.do,
-        turbidity: dbStats.turbidity,
-        ammonia: dbStats.ammonia,
-        healthScore: 0,
-      });
-
-      // Do not overwrite in-progress numeric-topic aggregation after async DB work.
-
-      logger.info(
-        `[ESP32] Sensor reading received: Temp=${reading.temperature}Â°C, pH=${reading.ph}, DO=${reading.do}, Turbidity=${reading.turbidity}`
-      );
-    } catch (error) {
-      logger.error('Failed to process sensor reading:', error);
-    }
-=======
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
       const deviceId = typeof data.deviceId === 'string' ? data.deviceId : 'mqtt-device';
       const reading = await sensorReadingService.ingest(deviceId, data);
-      await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured});
       this.onReadingReceived?.(reading);
+      await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured}).catch(error=>logger.error('Post-ingestion notification failed', {deviceId, readingId:reading.id, error:String(error)}));
       const stats = await sensorReadingService.getStatistics(60);
       this.onStatsUpdated?.({...stats,timestamp:new Date()});
     } catch { logger.warn('Malformed sensor payload or ingestion failed'); }
->>>>>>> Stashed changes
   }
 
   setRealtimeHandlers(handlers: {
@@ -339,6 +284,9 @@ export class MQTTService {
 
     if(topicSuffix) this.sensorTimestamps[topicSuffix]=new Date().toISOString();
     switch (topicSuffix) {
+      case 'device-id':
+        if (payload.trim()) this.latestDeviceId = payload.trim();
+        return;
       case 'temperature':
         this.latestSensorPayload.temperature = value;
         this.pendingBatchFlags.temperature = true;
@@ -349,23 +297,21 @@ export class MQTTService {
         break;
       case 'turbidity':
         this.latestSensorPayload.turbidity = value;
+        this.latestTurbidityUnit = 'raw_adc';
+        this.pendingBatchFlags.turbidity = true;
+        break;
+      case 'turbidity-ntu':
+        this.latestSensorPayload.turbidity = value;
+        this.latestTurbidityUnit = 'NTU';
         this.pendingBatchFlags.turbidity = true;
         break;
       case 'orp':
-<<<<<<< Updated upstream
-        this.latestSensorPayload.orp = parsed;
-=======
         this.latestSensorPayload.orp = value;
->>>>>>> Stashed changes
         this.latestOrpReceivedAt = Date.now();
         break;
       case 'do':
       case 'dissolved-oxygen':
-<<<<<<< Updated upstream
-        this.latestSensorPayload.do = parsed;
-=======
         this.latestSensorPayload.do = value;
->>>>>>> Stashed changes
         this.latestDoReceivedAt = Date.now();
         break;
       case 'ammonia':
@@ -386,18 +332,14 @@ export class MQTTService {
       this.latestSensorPayload.turbidity !== undefined))
     ) {
       const normalizedPayload = {
+        deviceId: this.latestDeviceId,
         temperature: this.latestSensorPayload.temperature,
         ph: this.latestSensorPayload.ph,
         do: Date.now() - this.latestDoReceivedAt <= 15000 ? this.latestSensorPayload.do : undefined,
         turbidity: this.latestSensorPayload.turbidity,
-<<<<<<< Updated upstream
-        ammonia: this.latestSensorPayload.ammonia ?? 0,
-        orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
-=======
-        turbidityUnit: 'raw_adc',
+        turbidityUnit: this.latestTurbidityUnit,
         orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
         sensorTimestamps: {...this.sensorTimestamps},
->>>>>>> Stashed changes
         location: 'ESP32-MQTT',
         timestamp: new Date().toISOString(),
       };
@@ -468,6 +410,7 @@ export class MQTTService {
    * Disconnect from MQTT broker
    */
   async disconnect(): Promise<void> {
+    if (this.actuatorRedeliveryInterval) { clearInterval(this.actuatorRedeliveryInterval); this.actuatorRedeliveryInterval = null; }
     return new Promise((resolve) => {
       if (!this.client) {
         resolve();

@@ -1,9 +1,10 @@
 # AquaSense hardware
 
 ESP32 Arduino firmware built with PlatformIO in VS Code. The integrated
-`water-monitor` handles sensors, LCD, DS3231, servo feeder, buzzer and three
-relay-controlled loads. Relay polarity and load mapping remain unconfirmed:
-relay GPIOs are uninitialized by default.
+`water-monitor` handles sensors, LCD, DS3231, servo feeder, buzzer and relay
+control. The supplied wiring diagram maps relay IN1/IN2/IN3 to GPIO25/26/27 for
+fill, drain and aerator; GPIO33 connects to unused IN4. Relay control remains
+disabled until trigger polarity and safe OFF behavior are physically verified.
 
 ## Layout
 
@@ -32,9 +33,11 @@ Hardware/
   docs/                       Wiring, migration, backend contract and deployment
 ```
 
-`BackendDeviceClient` combines hardware and existing feeding sync in one worker.
-Hardware owns local interlocks/deadlines; Backend owns authenticated command
-queuing and reported state. Bounded queues pass snapshots between workers and main.
+`BackendDeviceClient` provides authenticated schedule sync and state heartbeat.
+Backend authorizes commands and publishes signed, non-retained MQTT messages;
+`MqttManager` validates them and publishes correlated state acknowledgements.
+Hardware owns local interlocks/deadlines. Bounded queues pass snapshots between
+workers and main.
 
 ## Targets and build
 
@@ -54,7 +57,7 @@ pio device list
 ```
 
 Upload one target per board. Do not run standalone and integrated feeders with
-the same backend device ID. Integrated servo uses GPIO19; standalone retains13.
+the same backend device ID. Integrated and standalone servo signal use GPIO13.
 Board baseline is classic `esp32dev` with 4 MB flash; confirm the actual module.
 
 Existing credentials remain in ignored `include/secrets/Secrets.h`. Fresh clone:
@@ -66,8 +69,8 @@ if (-not (Test-Path Hardware/include/secrets/Secrets.h)) {
 ```
 
 - Secrets.h: WiFi/MQTT credentials and backend DEVICE_KEY.
-- DeviceConfig.h: device ID, API URL, HTTPS root CA, unique MQTT client ID, broker/topic and timing.
-- Pins.h: GPIOs; relay load assignments remain -1.
+- DeviceConfig.h: device ID, API URL, HTTPS root CA, device-ID-derived MQTT client ID, broker and timing.
+- Pins.h: diagram-backed relay signal assignments and sensor GPIOs.
 - ActuatorConfig.h: tested polarity, measured pump limits, servo/buzzer behavior and automation gates.
 - CalibrationConfig.h: pH/ORP conversions and smoothing.
 - Thresholds.h: plausibility limits and inactive automation placeholders.
@@ -77,12 +80,22 @@ ready for operating hardware. Follow [backend commissioning](docs/backend-contro
 
 ## Behavior
 
-Sensors retain the Arduino equations and zero-seeded 0.7/0.3 smoothing. Turbidity
-is **raw ADC**, ORP is signed **mV**, and ORP does not replace dissolved oxygen.
-MQTT sends one JSON acquisition on `water/esp32/readings`; Backend now includes
-nullable ORP in storage, readings, statistics and WebSocket data.
+The integrated water-monitor uses the supplied per-sensor ADC connection
+windows and calibrations. It reports pH, temperature, calibrated turbidity in
+**NTU**, and signed **ORP mV**; ORP does not replace dissolved oxygen. It sends
+retained per-sensor MQTT values and connection states under `aquasense/`, with
+turbidity on `aquasense/turbidity-ntu` so the backend keeps NTU separate from
+legacy raw ADC. Validate the supplied coefficients against reference solutions
+and the actual analog front ends before relying on readings.
 
-Pump runs are timed, mutually exclusive and bounded by a local hard deadline.
+Its LCD flow shows a block-progress welcome screen, Wi-Fi and MQTT connection
+progress, then continuously displays four sensor readings on a 20x4 module at
+0x27. It does not rotate to an actuator/network status page. An earlier wiring
+diagram labels a 16x2 module, so verify the installed display dimensions.
+
+Pump runs are timed, mutually exclusive and capped at an initial 60 seconds per
+phase by a local hard deadline. Relay outputs stop on Wi-Fi/MQTT loss or rejected
+commands; physical reset/OFF bias must be verified on the relay module.
 There are **no float switches or inferred level measurements**. Automatic water
 exchange and temperature-based aeration require policy setup and runtime enable
 commands; both start disabled after reboot.
@@ -91,12 +104,14 @@ Feeding supports existing manual commands and up to 20 enabled user schedules.
 The servo closes at startup, manual ON is limited to ten seconds, and NVS stores
 schedules and duplicate-prevention records. Scheduling requires valid NTP or a
 previously synchronized battery-backed RTC. Missed minutes are not caught up.
-LCD welcomes the user with "Welcome! / AquaSense" for three seconds at startup,
-then shows readings, alternating active output state, and latched water faults;
-the buzzer also indicates latched water faults.
+LCD shows a block-progress welcome screen, connection progress, then sensor
+readings only. The buzzer is held OFF at startup and only alarms on fresh,
+valid readings outside configured sensor alarm bounds. Its alarm thresholds
+are uncommissioned and disabled by default.
 
-Frontend was not changed. Its existing simulated water-change controls do not
-automatically call the new hardware API. Use the documented API for commissioning.
+Existing water-change, aerator and feeding controls use authenticated Backend
+APIs and display backend/device state. A queued command remains pending until a
+device acknowledgement arrives; logical state is not electrical or flow feedback.
 
 ## Dependencies
 

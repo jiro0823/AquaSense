@@ -3,9 +3,10 @@
 ## Integrated water-monitor
 
 Follow [backend/device setup](backend-control.md) first. The configuration still
-contains an example API address, empty device key, unassigned relay loads,
-unknown relay polarity and unset pump limits. These are commissioning gates,
-not completed deployment settings.
+contains an example API address, empty device key, diagram-backed relay load
+assignments and unknown relay polarity. The initial per-pump hard caps are 60
+seconds, but their suitability still needs supervised flow-rate calibration.
+Unknown polarity keeps relay control disabled.
 
 From the repository root in a PlatformIO terminal:
 
@@ -18,8 +19,9 @@ pio device monitor -d Hardware -e water-monitor --port COM5 --baud 115200
 
 Replace COM5 with the verified port. Close an existing serial monitor before
 upload. Confirm the board matches classic esp32dev with 4 MB flash. Keep relay
-loads unpowered until polarity, mapping and reset/OFF state are measured.
-The integrated servo initializes to its closed angle on GPIO19.
+loads unpowered until polarity and reset/OFF state are measured and the initial
+60-second cap is confirmed suitable for the tank and pump flow.
+The integrated servo initializes to its configured HOME position on GPIO13.
 
 Private credentials belong in include/secrets/Secrets.h, which replaces the whole
 example header. Keep firmware binaries private too: credentials are compiled in.
@@ -40,8 +42,8 @@ their own src directories as device_config.local.h.
 pio run -d Hardware -e water-quality-legacy -t upload --upload-port COM5
 ```
 
-Standalone feeder retains GPIO13, blocking behavior, RAM-only scheduling and its
-original command handling. It is not the integrated GPIO19 feeder. Never run both
+Standalone feeder also uses GPIO13, with blocking behavior, RAM-only scheduling and its
+original command handling. It is a separate firmware target from the integrated feeder. Never run both
 with the same backend device ID. Four-sensor DO and integrated ORP installations
 have different analog pins and telemetry semantics: see [wiring](wiring-and-protocols.md).
 

@@ -1,5 +1,5 @@
 import type { HealthSummary, AmmoniaSpeciation } from '../../services/sensorHealth';
-import { DataTypes, Model } from 'sequelize';
+import { DataTypes, Model, Op } from 'sequelize';
 import { getDatabase } from '../connection';
 
 /**
@@ -8,26 +8,18 @@ import { getDatabase } from '../connection';
 export class SensorReading extends Model {
   declare id: string;
   declare deviceId: string;
-<<<<<<< Updated upstream
-  declare temperature: number;
-  declare ph: number;
-  declare do: number; // Dissolved Oxygen
-  declare doMeasured: boolean;
-  declare turbidity: number;
-  declare orp: number | null; // Millivolts; never substituted for dissolved oxygen.
-  declare ammonia: number;
-=======
   declare temperature: number | null;
   declare ph: number | null;
   declare do: number | null; // Dissolved Oxygen
   declare doMeasured: boolean;
+  declare bootId: string | null;
+  declare sequenceId: number | null;
   declare turbidity: number | null;
   declare orp: number | null; // Millivolts; never substituted for dissolved oxygen.
   declare ammonia: number | null;
   declare sensorHealth: HealthSummary | null;
   declare speciation: AmmoniaSpeciation | null;
   declare turbidityUnit: string;
->>>>>>> Stashed changes
   declare location: string;
   declare timestamp: Date;
   declare createdAt: Date;
@@ -58,54 +50,10 @@ export const initializeSensorReadingModel = (): void => {
       doMeasured: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
-<<<<<<< Updated upstream
-        validate: {
-          min: -200,
-          max: 150,
-        },
-      },
-      ph: {
-        type: DataTypes.FLOAT,
-        allowNull: false,
-        validate: {
-          min: 0,
-          max: 50,
-        },
-      },
-      do: {
-        type: DataTypes.FLOAT,
-        allowNull: false,
-        validate: {
-          min: 0,
-          max: 20,
-        },
-      },
-      doMeasured: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
         defaultValue: false,
       },
-      turbidity: {
-        type: DataTypes.FLOAT,
-        allowNull: false,
-        validate: {
-          min: 0,
-          max: 5000,
-        },
-      },
-      orp: { type: DataTypes.DOUBLE, allowNull: true, defaultValue: null },
-      ammonia: {
-        type: DataTypes.FLOAT,
-        allowNull: false,
-        defaultValue: 0,
-        validate: {
-          min: 0,
-          max: 10,
-        },
-=======
-        defaultValue: false,
->>>>>>> Stashed changes
-      },
+      bootId: { type: DataTypes.STRING(64), allowNull: true },
+      sequenceId: { type: DataTypes.BIGINT, allowNull: true },
       turbidity: { type: DataTypes.FLOAT, allowNull: true, defaultValue: null },
       orp: { type: DataTypes.DOUBLE, allowNull: true, defaultValue: null },
       ammonia: { type: DataTypes.FLOAT, allowNull: true, defaultValue: null },
@@ -138,6 +86,7 @@ export const initializeSensorReadingModel = (): void => {
         {
           fields: ['location'],
         },
+        { name: 'sensor_readings_device_frame_identity_uq', unique: true, fields: ['device_id', 'boot_id', 'sequence_id'], where: { boot_id: { [Op.ne]: null }, sequence_id: { [Op.ne]: null } } },
       ],
     }
   );

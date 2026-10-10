@@ -1,5 +1,6 @@
 import { Sequelize } from 'sequelize';
 import { logger } from '../utils/logger';
+import { config } from '../config/config';
 
 /**
  * Sequelize database instance
@@ -11,12 +12,12 @@ let sequelize: Sequelize;
  */
 export const initializeDatabase = async (): Promise<Sequelize> => {
   try {
-    const dbHost = process.env.DB_HOST || 'localhost';
-    const dbPort = parseInt(process.env.DB_PORT || '5432', 10);
-    const dbName = process.env.DB_NAME || 'AquaSense';
-    const dbUser = process.env.DB_USER || 'postgres';
-    const dbPassword = process.env.DB_PASSWORD || 'postgres';
-    const dbDialect = (process.env.DB_DIALECT as 'postgres') || 'postgres';
+    const dbHost = config.database.host;
+    const dbPort = config.database.port;
+    const dbName = config.database.name;
+    const dbUser = config.database.user;
+    const dbPassword = config.database.password;
+    const dbDialect = config.database.dialect;
 
     sequelize = new Sequelize(dbName, dbUser, dbPassword, {
       host: dbHost,

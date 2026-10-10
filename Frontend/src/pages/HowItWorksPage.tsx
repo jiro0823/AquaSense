@@ -7,17 +7,17 @@ const HowItWorksPage: React.FC = () => {
     {
       icon: '📡',
       title: 'Sensors Check Your Pond',
-      text: 'Temperature, pH, dissolved oxygen, and turbidity are tracked continuously in the water.',
+      text: 'The hardware has temperature, pH, turbidity, and ORP inputs. There is no physical dissolved-oxygen probe; ORP is separate and is not converted to DO. Engineering calibration is uncommissioned.',
     },
     {
       icon: '🧠',
       title: 'AquaSense Analyzes Conditions',
-      text: 'The system compares your readings with healthy ranges and detects issues early.',
+      text: 'The system can classify only readings that pass its data-quality and commissioning checks; unavailable or uncalibrated values should not be treated as confirmed.',
     },
     {
       icon: '⚙️',
       title: 'Automation Responds Fast',
-      text: 'Aeration and feeding can trigger automatically based on actual pond conditions.',
+      text: 'Feeding schedules are supported. Aerator policy remains uncommissioned; no DO-triggered control is available.',
     },
     {
       icon: '📊',
@@ -33,15 +33,15 @@ const HowItWorksPage: React.FC = () => {
     },
     {
       time: 'Midday',
-      detail: 'System manages feeding schedules and keeps water parameters within target levels.',
+      detail: 'Feeding schedules can run; sensor classifications and automatic water-quality actions require commissioning.',
     },
     {
       time: 'Afternoon',
-      detail: 'Alerts notify you if any metric starts drifting so you can act before risk grows.',
+      detail: 'Alerts depend on valid, sufficiently fresh inputs and configured thresholds; verify conditions with appropriate instruments when calibration is incomplete.',
     },
     {
       time: 'Night',
-      detail: 'Solar + battery setup keeps monitoring active while automation protects the pond.',
+      detail: 'Monitoring availability depends on the installed power setup. Aerator policy remains uncommissioned, and AquaSense does not provide physical DO protection.',
     },
   ];
 
@@ -53,7 +53,7 @@ const HowItWorksPage: React.FC = () => {
     },
     {
       title: 'Faster Response',
-      text: 'Catch oxygen and pH issues early with real-time alerts and auto-actions.',
+      text: 'Review validated readings and alerts. AquaSense does not measure DO, and pH interpretation requires commissioned calibration.',
       icon: '⚡',
     },
     {
@@ -105,7 +105,7 @@ const HowItWorksPage: React.FC = () => {
               <li className="flex gap-3"><span className="font-bold text-primary">•</span> Live parameter values with easy-to-read status colors.</li>
               <li className="flex gap-3"><span className="font-bold text-primary">•</span> Alerts when water conditions move outside healthy limits.</li>
               <li className="flex gap-3"><span className="font-bold text-primary">•</span> Quick access to trends so you can plan confidently.</li>
-              <li className="flex gap-3"><span className="font-bold text-primary">•</span> Automatic actions for better consistency even when you are away.</li>
+              <li className="flex gap-3"><span className="font-bold text-primary">•</span> Commissioned automatic actions only; timed water exchange requires independent pump-flow calibration.</li>
             </ul>
           </div>
           <div className="p-8 text-white border rounded-2xl bg-primary border-primary/30">

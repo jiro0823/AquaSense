@@ -15,4 +15,15 @@ constexpr float WATER_ORP_LOW_MV = 0.0f;
 constexpr float WATER_ORP_HIGH_MV = 0.0f;
 constexpr float AERATOR_TEMPERATURE_ON_C = 0.0f;
 constexpr float AERATOR_TEMPERATURE_OFF_C = 0.0f;
+
+// Configure all sensor alarm bounds and set this true only after calibration.
+// The buzzer remains silent while this commissioning gate is false.
+constexpr bool SENSOR_ALARM_CONFIGURED = false;
+constexpr float SENSOR_ALARM_PH_LOW = 0.0f;
+constexpr float SENSOR_ALARM_PH_HIGH = 0.0f;
+constexpr float SENSOR_ALARM_TEMPERATURE_LOW_C = 0.0f;
+constexpr float SENSOR_ALARM_TEMPERATURE_HIGH_C = 0.0f;
+constexpr float SENSOR_ALARM_TURBIDITY_HIGH_NTU = 0.0f;
+constexpr float SENSOR_ALARM_ORP_LOW_MV = 0.0f;
+constexpr float SENSOR_ALARM_ORP_HIGH_MV = 0.0f;
 }

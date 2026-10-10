@@ -3,16 +3,25 @@ import path from 'path';
 import { z } from 'zod';
 
 const envPath = path.resolve(__dirname, '..', '..', '.env');
-const fileEnv = dotenv.config({ path: envPath, override: true }).parsed || {};
+// Tests never load deployment secrets or override their isolated environment.
+const fileEnv = process.env.NODE_ENV === 'test' ? {} : dotenv.config({ path: envPath, override: false }).parsed || {};
 
 const getEnv = (key: string, fallback?: string): string | undefined => {
-  if (fileEnv[key] !== undefined) {
-    return fileEnv[key];
-  }
   if (process.env[key] !== undefined) {
     return process.env[key];
   }
+  if (fileEnv[key] !== undefined) {
+    return fileEnv[key];
+  }
   return fallback;
+};
+
+const getOptionalCredential = (key: string): string | undefined => {
+  const value = getEnv(key)?.trim();
+  if (!value || /^<[^>]+>$|replace-with|changeme|your[-_]/i.test(value)) {
+    return undefined;
+  }
+  return value;
 };
 
 const parseDeviceKeys = (raw?: string): Record<string, string> => {
@@ -54,14 +63,14 @@ export const config = {
     origin: getEnv('CORS_ORIGIN')?.split(',') || ['http://localhost:3000', 'http://localhost:3001'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'X-Device-Key', 'X-CSRF-Token'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-Key', 'X-CSRF-Token'],
   },
   database: {
     host: getEnv('DB_HOST', 'localhost') || 'localhost',
     port: parseInt(getEnv('DB_PORT', '5432') || '5432', 10),
     name: getEnv('DB_NAME', 'AquaSense') || 'AquaSense',
     user: getEnv('DB_USER', 'postgres') || 'postgres',
-    password: getEnv('DB_PASSWORD', 'postgres') || 'postgres',
+    password: getEnv('DB_PASSWORD') || '',
     dialect: (getEnv('DB_DIALECT', 'postgres') as 'postgres') || 'postgres',
   },
   jwt: {
@@ -79,14 +88,30 @@ export const config = {
   },
   device: {
     keys: parseDeviceKeys(getEnv('DEVICE_KEYS')),
+    allowUnauthenticatedDevelopment: getEnv('ALLOW_UNAUTHENTICATED_DEVICES', 'false') === 'true',
   },
   sms: {
     provider: 'unisms',
-    apiSecretKey: getEnv('UNISMS_API_SECRET_KEY'),
-    senderId: getEnv('UNISMS_SENDER_ID'),
+    apiSecretKey: getOptionalCredential('UNISMS_API_SECRET_KEY'),
+    senderId: getOptionalCredential('UNISMS_SENDER_ID'),
     maxMessageLength: parseInt(getEnv('SMS_MAX_MESSAGE_LENGTH', '160') || '160', 10),
     failureThreshold: parseInt(getEnv('SMS_FAILURE_THRESHOLD', '5') || '5', 10),
     circuitCooldownMs: parseInt(getEnv('SMS_CIRCUIT_COOLDOWN_MS', '60000') || '60000', 10),
+  },
+  mqtt: {
+    brokerUrl: getEnv('MQTT_BROKER_URL', 'mqtt://localhost:1883') || 'mqtt://localhost:1883',
+    username: getOptionalCredential('MQTT_USERNAME'),
+    password: getOptionalCredential('MQTT_PASSWORD'),
+    topics: {
+      readings: getEnv('MQTT_TOPIC_READINGS', 'water/esp32/readings') || 'water/esp32/readings',
+      sensorWildcard: getEnv('MQTT_TOPIC_SENSOR_WILDCARD', 'aquasense/+') || 'aquasense/+',
+      commands: getEnv('MQTT_TOPIC_COMMANDS', 'water/commands/#') || 'water/commands/#',
+      status: getEnv('MQTT_TOPIC_STATUS', 'water/esp32/status') || 'water/esp32/status',
+    },
+  },
+  feeding: {
+    deviceId: getEnv('FEEDER_DEVICE_ID', 'esp32-feeder-1') || 'esp32-feeder-1',
+    timezone: getEnv('FEEDING_TIMEZONE', 'Asia/Manila') || 'Asia/Manila',
   },
   farm: {
     farmerName: getEnv('FARMER_NAME', 'Farmer') || 'Farmer',
@@ -97,6 +122,14 @@ export const config = {
 };
 
 const configSchema = z.object({
+  database: z.object({
+    host: z.string().min(1, 'DB_HOST is required'),
+    port: z.number().int().min(1).max(65535),
+    name: z.string().min(1, 'DB_NAME is required'),
+    user: z.string().min(1, 'DB_USER is required'),
+    password: z.string().min(1, 'DB_PASSWORD is required'),
+    dialect: z.literal('postgres'),
+  }),
   jwt: z.object({
     secret: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   }),
@@ -107,27 +140,64 @@ const configSchema = z.object({
   }),
   sms: z.object({
     provider: z.literal('unisms'),
-    apiSecretKey: z.string({ required_error: 'UNISMS_API_SECRET_KEY is required' }).min(1, 'UNISMS_API_SECRET_KEY is required'),
+    apiSecretKey: z.string().min(1).optional(),
+    senderId: z.string().min(1).optional(),
     maxMessageLength: z.number().int().min(1).max(160),
     failureThreshold: z.number().int().min(1).max(20),
     circuitCooldownMs: z.number().int().min(1000).max(3600000),
   }),
+  mqtt: z.object({
+    brokerUrl: z.string().url('MQTT_BROKER_URL must be a valid URL'),
+    username: z.string().min(1).optional(),
+    password: z.string().min(1).optional(),
+    topics: z.object({
+      readings: z.string().min(1),
+      sensorWildcard: z.string().min(1),
+      commands: z.string().min(1),
+      status: z.string().min(1),
+    }),
+  }),
+  feeding: z.object({
+    deviceId: z.string().min(1),
+    timezone: z.string().min(1),
+  }),
 });
 
-const validated = configSchema.safeParse(config);
-if (!validated.success) {
-  const issues = validated.error.issues.map((issue) => issue.message).join(', ');
-  throw new Error(`Invalid application configuration: ${issues}`);
-}
+export const validateConfiguration = (candidate: unknown, environment: string = config.server.nodeEnv): string[] => {
+  const issues: string[] = [];
+  const validated = configSchema.safeParse(candidate);
+  if (!validated.success) issues.push(...validated.error.issues.map((issue) => issue.message));
 
-if (config.server.nodeEnv === 'production') {
-  if (!config.jwt.secret || /change_in_production|replace-with|changeme|your_jwt_secret/i.test(config.jwt.secret)) {
-    throw new Error('Invalid production configuration: JWT_SECRET must be a strong secret');
+  const candidateConfig = candidate as typeof config;
+  if (candidateConfig.jwt?.secret && /<[^>]+>|replace-with|changeme|your_jwt_secret/i.test(candidateConfig.jwt.secret)) {
+    issues.push('JWT_SECRET must not use a placeholder value');
   }
-  if (!config.device.keys || Object.keys(config.device.keys).length === 0) {
-    throw new Error('Invalid production configuration: DEVICE_KEYS must include registered ESP32 device keys');
+  if (candidateConfig.database?.password && /<[^>]+>|replace-with|changeme|your_database_password|your-local-database-password/i.test(candidateConfig.database.password)) {
+    issues.push('DB_PASSWORD must use the actual local database password');
   }
-  if (config.cors.origin.some((origin) => origin.includes('localhost'))) {
-    throw new Error('Invalid production configuration: CORS_ORIGIN must not use localhost');
+
+  if (environment === 'production') {
+    const productionConfig = candidateConfig;
+    if (!productionConfig.jwt?.secret || /change_in_production|replace-with|changeme|your_jwt_secret/i.test(productionConfig.jwt.secret)) {
+      issues.push('JWT_SECRET must be a strong non-placeholder secret in production');
+    }
+    if (!productionConfig.device?.keys || Object.keys(productionConfig.device.keys).length === 0) {
+      issues.push('DEVICE_KEYS must include registered ESP32 device keys in production');
+    }
+    if (productionConfig.device?.keys && Object.values(productionConfig.device.keys).some((key) => /replace-with|changeme|your[-_]?device[-_]?key/i.test(key))) {
+      issues.push('DEVICE_KEYS must not contain placeholder values in production');
+    }
+    if (productionConfig.authCookie?.secure !== true || productionConfig.authCookie?.sameSite !== 'none') {
+      issues.push('AUTH_COOKIE_SECURE=true and AUTH_COOKIE_SAMESITE=none are required in production');
+    }
+    if (productionConfig.cors && Array.isArray(productionConfig.cors.origin) && productionConfig.cors.origin.some((origin) => origin.includes('localhost'))) {
+      issues.push('CORS_ORIGIN must not use localhost in production');
+    }
   }
+  return issues;
+};
+
+const configurationIssues = validateConfiguration(config);
+if (configurationIssues.length > 0) {
+  throw new Error(`Invalid application configuration:\n- ${configurationIssues.join('\n- ')}`);
 }

@@ -74,7 +74,7 @@ const LandingPage: React.FC = () => {
             <span className="block mt-2 text-primary">for Crayfish Farming</span>
           </h1>
           <p className="max-w-3xl mx-auto mb-10 text-base leading-relaxed text-slate-700 sm:text-lg md:text-xl">
-            Real-time IoT dashboard with advanced sensors for temperature, pH, dissolved oxygen, and turbidity. Get instant alerts, automated controls, and comprehensive analytics to optimize your aquaculture operations.
+            AquaSense reads temperature, pH, turbidity, and ORP inputs. It has no physical dissolved-oxygen probe; ORP is a separate redox measurement and is not converted to DO. Sensor engineering calibration and aerator automation remain uncommissioned.
           </p>
 
           <div className="flex flex-wrap justify-center gap-4 mb-12">
@@ -126,10 +126,10 @@ const LandingPage: React.FC = () => {
             {/* Problem 1 */}
             <div className="p-8 transition bg-white rounded-lg shadow-md hover:shadow-lg">
               <div className="mb-4 text-5xl">⚠️</div>
-              <h3 className="mb-3 text-xl font-bold text-gray-900">Low Oxygen Levels</h3>
+              <h3 className="mb-3 text-xl font-bold text-gray-900">Dissolved Oxygen Not Measured</h3>
               <p className="font-semibold text-gray-700">↓ sudden losses</p>
               <p className="mt-3 text-sm text-gray-600">
-                Without real-time monitoring, you might not notice oxygen drops until it's too late, costing you your entire stock.
+                AquaSense has no physical DO probe and cannot detect a dissolved-oxygen drop. Use an independently calibrated DO instrument when DO measurement is needed.
               </p>
             </div>
 
@@ -194,8 +194,8 @@ const LandingPage: React.FC = () => {
                     <div className="flex items-center h-12 px-3 bg-white rounded-lg bg-opacity-20">
                       <span className="text-2xl">💨</span>
                       <div className="flex-1 ml-3">
-                        <div className="text-xs text-opacity-60">Dissolved O₂</div>
-                        <div className="text-lg font-bold">7.1 mg/L</div>
+                        <div className="text-xs text-opacity-60">ORP / Redox (not DO)</div>
+                        <div className="text-lg font-bold">Unavailable</div>
                       </div>
                     </div>
                   </div>
@@ -207,7 +207,7 @@ const LandingPage: React.FC = () => {
             <div>
               <h2 className="mb-5 text-3xl font-bold text-cyan-500 md:text-5xl">A Smarter Way to  <br /> Manage Your Pond</h2>
               <p className="mb-8 text-lg leading-relaxed text-gray-600">
-                AquaSense transforms how you care for your crayfish. Stop guessing. Start knowing. Our intelligent system handles everything automatically while you focus on growing your farm.
+                AquaSense transforms how you care for your crayfish. Stop guessing. Start knowing. AquaSense provides sensor reporting and scheduled feeding features. Aerator policy remains uncommissioned, and water exchange is time-based after pump-flow calibration.
               </p>
 
               <ul className="space-y-4">
@@ -217,7 +217,7 @@ const LandingPage: React.FC = () => {
                   </div>
                   <div>
                     <h4 className="font-bold text-gray-900">Real-time Monitoring</h4>
-                    <p className="mt-1 text-sm text-gray-600">24/7 sensor data streaming to your dashboard. Never miss a critical change.</p>
+                    <p className="mt-1 text-sm text-gray-600">Sensor reporting is shown with calibration and data-quality limitations.</p>
                   </div>
                 </li>
 
@@ -226,8 +226,8 @@ const LandingPage: React.FC = () => {
                     <span className="font-bold text-accent">✓</span>
                   </div>
                   <div>
-                    <h4 className="font-bold text-gray-900">Automated Aeration</h4>
-                    <p className="mt-1 text-sm text-gray-600">Smart controls adjust oxygen levels automatically based on real-time data.</p>
+                    <h4 className="font-bold text-gray-900">Aerator Policy (Not Commissioned)</h4>
+                    <p className="mt-1 text-sm text-gray-600">AquaSense has no physical DO probe. ORP is not converted to DO, and the aerator policy is not commissioned.</p>
                   </div>
                 </li>
 
@@ -277,7 +277,7 @@ const LandingPage: React.FC = () => {
               <div className="mb-4 text-5xl">🛡️</div>
               <h3 className="mb-3 text-lg font-bold text-gray-900">Reduce Losses</h3>
               <p className="text-sm text-gray-600">
-                Catch problems before they become catastrophes. Prevent oxygen crashes and disease outbreaks.
+                Review validated water-quality data and use an independent DO instrument when dissolved-oxygen measurement is needed.
               </p>
             </div>
 
@@ -347,8 +347,8 @@ const LandingPage: React.FC = () => {
               <div className="relative p-8 md:p-12">
                 {/* Dashboard Header */}
                 <div className="pb-6 mb-8 border-b border-slate-700">
-                  <h3 className="text-2xl font-bold text-white">Farm Monitor Dashboard</h3>
-                  <p className="mt-2 text-sm text-slate-400">Real-time water quality analysis for Pond 01</p>
+                  <h3 className="text-2xl font-bold text-white">Farm Monitor Dashboard (Illustrative)</h3>
+                  <p className="mt-2 text-sm text-slate-400">Static mockup with sample values; not live device data</p>
                 </div>
 
                 {/* Main Content Grid - Sensor Cards */}
@@ -375,15 +375,15 @@ const LandingPage: React.FC = () => {
                     <p className="mt-2 text-xs text-slate-500">Optimal range</p>
                   </div>
 
-                  {/* Sensor Card 3 - Dissolved Oxygen */}
-                  <div className="p-6 transition-all duration-300 border shadow-lg bg-gradient-to-br from-green-500/10 to-green-600/10 border-green-500/20 rounded-xl hover:border-green-500/50 hover:shadow-green-500/20">
+                                    {/* ORP / Redox: not a dissolved-oxygen measurement */}
+                  <div className="p-6 transition-all duration-300 border shadow-lg bg-gradient-to-br from-green-500/10 to-green-600/10 border-green-500/20 rounded-xl">
                     <div className="flex items-center justify-between mb-4">
-                      <span className="text-3xl">💨</span>
-                      <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                      <span className="text-3xl">ORP</span>
+                      <div className="w-3 h-3 bg-amber-400 rounded-full"></div>
                     </div>
-                    <p className="text-sm text-slate-400">Dissolved O₂</p>
-                    <div className="mt-2 text-3xl font-bold text-white">7.1 mg/L</div>
-                    <p className="mt-2 text-xs text-slate-500">Healthy levels</p>
+                    <p className="text-sm text-slate-400">ORP / Redox</p>
+                    <div className="mt-2 text-xl font-bold text-white">Unavailable</div>
+                    <p className="mt-2 text-xs text-slate-500">Calibration required; not DO</p>
                   </div>
 
                   {/* Sensor Card 4 - Turbidity */}
@@ -432,8 +432,8 @@ const LandingPage: React.FC = () => {
                     </h4>
                     <div className="mt-4 space-y-3">
                       <div className="flex items-center justify-between p-3 rounded-lg bg-slate-700/50">
-                        <span className="text-sm text-white">Aeration System</span>
-                        <div className="w-10 h-6 bg-green-500 rounded-full"></div>
+                        <span className="text-sm text-white">Aerator Policy</span>
+                        <span className="text-xs text-amber-300">Not commissioned</span>
                       </div>
                       <div className="flex items-center justify-between p-3 rounded-lg bg-slate-700/50">
                         <span className="text-sm text-white">Feeding Timer</span>
@@ -480,7 +480,7 @@ const LandingPage: React.FC = () => {
                 </div>
                 <h3 className="mb-3 text-2xl font-bold text-gray-900">Sensors Collect Data</h3>
                 <p className="text-gray-600">
-                  Smart sensors in your pond continuously measure temperature, oxygen levels, pH, and water clarity - 24/7.
+                  AquaSense hardware has temperature, pH, turbidity, and ORP inputs. It does not measure dissolved oxygen; engineering calibration is not yet commissioned.
                 </p>
               </div>
               {/* Arrow for larger screens */}
@@ -518,7 +518,7 @@ const LandingPage: React.FC = () => {
                 </div>
                 <h3 className="mb-3 text-2xl font-bold text-gray-900">Action & Alerts</h3>
                 <p className="text-gray-600">
-                  If anything needs attention, your systems automatically respond and you get an instant alert on your phone.
+                  Available alerts depend on validated inputs and configured policies; the aerator policy is not commissioned.
                 </p>
               </div>
             </div>

@@ -1,28 +1,61 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
+<<<<<<< HEAD
+import { apiClient, getApiErrorMessage } from '../../services/apiClient';
+=======
 import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
-import { apiClient } from '../../services/apiClient';
+>>>>>>> origin/feature/major-improvements
 
-type PumpState = 'ON' | 'OFF';
-type WaterChangeMode = 'manual' | 'automatic';
-type CyclePhase = 'idle' | 'draining' | 'filling';
-type Tone = 'emerald' | 'amber' | 'cyan' | 'rose' | 'violet' | 'gray';
-
-interface WaterChangeEvent {
-  id: string;
-  at: string;
-  trigger: 'manual' | 'automatic';
-  reason: string;
+interface Device { deviceId: string; name?: string; isActive: boolean }
+interface HardwareState {
+  deviceId: string;
+  online: boolean;
+  receivedAt: string | null;
+  state: null | { fillPump: boolean; drainPump: boolean; waterPhase: 'IDLE' | 'DRAINING' | 'TRANSITION' | 'REFILLING' | 'COMPLETE' | 'FAULT'; fault: string; automation: boolean };
 }
+interface ApiCommand { id: string; action: string; status: 'PENDING' | 'ACKED' | 'EXPIRED'; result?: string | null; expiresAt?: string }
+type TrackedCommand = Omit<ApiCommand, 'status'> & { status: ApiCommand['status'] | 'TIMEOUT' };
 
-interface WaterChangeState {
-  mode: WaterChangeMode;
-  drain: PumpState;
-  fill: PumpState;
-  lastChangedAt: string | null;
-  history: WaterChangeEvent[];
-}
+const WaterChangePage: React.FC = () => {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [deviceId, setDeviceId] = useState('');
+  const [hardware, setHardware] = useState<HardwareState | null>(null);
+  const [trackedCommand, setTrackedCommand] = useState<TrackedCommand | null>(null);
+  const [durationSeconds, setDurationSeconds] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
 
+<<<<<<< HEAD
+  const refresh = useCallback(async (selectedId = deviceId) => {
+    if (!selectedId) return;
+    try {
+      const response = await apiClient.get<HardwareState & { commands?: ApiCommand[] }>(`/hardware/state?deviceId=${encodeURIComponent(selectedId)}`);
+      setHardware(response.data);
+      setTrackedCommand((current) => {
+        if (!current || current.status !== 'PENDING') return current;
+        const updated = response.data.commands?.find((item) => item.id === current.id);
+        if (updated && updated.status !== 'PENDING') return { ...current, ...updated };
+        if (current.expiresAt && Date.now() >= new Date(current.expiresAt).getTime()) return { ...current, status: 'TIMEOUT' };
+        return updated ? { ...current, ...updated } : current;
+      });
+      setLoadedAt(Date.now());
+      setError(null);
+    } catch (cause) {
+      setError(getApiErrorMessage(cause, 'Unable to read device state.'));
+    }
+  }, [deviceId]);
+
+  useEffect(() => {
+    let active = true;
+    void apiClient.get<Device[]>('/devices').then((response) => {
+      if (!active) return;
+      const available = (response.data || []).filter((device) => device.isActive);
+      setDevices(available);
+      setDeviceId((current) => current || available[0]?.deviceId || '');
+    }).catch((cause) => { if (active) setError(getApiErrorMessage(cause, 'Unable to load registered devices.')); });
+    return () => { active = false; };
+=======
 const STORAGE_KEY = 'waterChangeState';
 const DRAIN_DURATION_MS = 2500;
 const FILL_DURATION_MS = 2500;
@@ -72,14 +105,6 @@ const loadWaterChangeState = (): WaterChangeState => {
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-const notifyFarmer = async (message: string) => {
-  try {
-    await apiClient.post('/sms/test', { message });
-  } catch {
-    // best-effort notification; the water change is still logged locally
-  }
-};
-
 const makeEvent = (trigger: 'manual' | 'automatic', reason: string): WaterChangeEvent => ({
   id: `wc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
   at: new Date().toISOString(),
@@ -100,19 +125,21 @@ const DashboardWaterChangePage: React.FC = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const riskLevel = predictiveWarning?.warningCard?.riskLevel || 'LOW';
-  const riskCause = predictiveWarning?.warningCard?.cause || 'No active risk factors detected';
+  const riskLevel = predictiveWarning?.warningCard?.riskLevel;
+  const riskCause = predictiveWarning?.warningCard?.cause || 'Risk information is unavailable; review current sensor readings.';
 
   const riskStatus = useMemo(() => {
     switch (riskLevel) {
       case 'CRITICAL':
-        return { label: 'Critical', tone: 'rose' as const, detail: 'Not advisable for crayfish. Immediate water change required.' };
+        return { label: 'Critical', tone: 'rose' as const, detail: 'Risk is classified as critical. Check the tank and follow your farm procedure; this page cannot operate physical pumps.' };
       case 'HIGH':
-        return { label: 'Warning', tone: 'amber' as const, detail: 'Not advisable — action needed soon. Farmer notified by SMS.' };
+        return { label: 'Warning', tone: 'amber' as const, detail: 'Risk warning only. Review the readings; no physical water-change command is sent from this page.' };
       case 'MODERATE':
         return { label: 'Monitor', tone: 'cyan' as const, detail: 'Conditions are drifting from ideal ranges.' };
-      default:
+      case 'LOW':
         return { label: 'Stable', tone: 'emerald' as const, detail: 'Water quality is within safe ranges for crayfish.' };
+      default:
+        return { label: 'Unavailable', tone: 'gray' as const, detail: 'Risk level is unavailable or unrecognized. Review current sensor data; water safety cannot be determined here.' };
     }
   }, [riskLevel]);
 
@@ -141,20 +168,93 @@ const DashboardWaterChangePage: React.FC = () => {
     setCyclePhase('idle');
     setCycleRunning(false);
     runningRef.current = false;
-    setNotice(`${trigger === 'automatic' ? 'Automatic' : 'Manual'} water change completed.`);
+    setNotice(`${trigger === 'automatic' ? 'Automatic' : 'Manual'} water-change simulation completed. No physical pump operation was confirmed.`);
 
-    if (trigger === 'automatic') {
-      void notifyFarmer(
-        'AquaSense critical risk warning. Please check the tank now. The dashboard water-change simulation has finished; a physical water change is not confirmed.'
-      );
-    }
+>>>>>>> origin/feature/major-improvements
   }, []);
 
   useEffect(() => {
-    if (riskLevel !== 'CRITICAL') {
-      autoHandledRef.current = false;
+    if (!deviceId) return;
+    void refresh(deviceId);
+    const timer = window.setInterval(() => void refresh(deviceId), 5000);
+    return () => window.clearInterval(timer);
+  }, [deviceId, refresh]);
+
+  const command = async (action: 'DRAIN' | 'FILL' | 'WATER_EXCHANGE' | 'WATER_STOP') => {
+    if (!deviceId || pending) return;
+    const durationMs = action === 'WATER_STOP' ? undefined : Number(durationSeconds) * 1000;
+    const seconds = Number(durationSeconds);
+    if (action !== 'WATER_STOP' && (!Number.isInteger(seconds) || seconds < 1 || seconds > 60)) {
+      setError('Enter a pump duration from 1 to 60 seconds.');
       return;
     }
+<<<<<<< HEAD
+    setPending(true);
+    setError(null);
+    try {
+      const response = await apiClient.post<ApiCommand>('/hardware/commands', { deviceId, action, ...(durationMs ? { durationMs } : {}) });
+      setTrackedCommand(response.data);
+      await refresh(deviceId);
+    } catch (cause) {
+      setError(getApiErrorMessage(cause, 'Command could not be queued.'));
+    } finally {
+      setPending(false);
+      window.setTimeout(() => void refresh(deviceId), 1200);
+    }
+  };
+
+  const state = hardware?.state;
+  const fresh = hardware?.online === true && loadedAt !== null && Date.now() - loadedAt < 20000;
+  const stateText = !hardware || !fresh ? 'OFFLINE / STALE' : state?.waterPhase || 'UNKNOWN';
+  const commandStatus = !trackedCommand ? 'No command sent in this session'
+    : trackedCommand.status === 'PENDING' ? 'QUEUED — awaiting device acknowledgement'
+      : trackedCommand.status === 'TIMEOUT' ? 'TIMEOUT — device acknowledgement was not received before command expiry'
+        : trackedCommand.status === 'EXPIRED' ? 'EXPIRED — device did not execute this command'
+          : trackedCommand.result === 'accepted' ? 'DEVICE ACKNOWLEDGED — command accepted'
+            : `DEVICE REJECTED — ${trackedCommand.result || 'execution was not accepted'}`;
+
+  return <div className="flex flex-col gap-3">
+    <header className="flex items-center gap-3 p-3 bg-white border border-gray-200 shadow-sm rounded-2xl">
+      <span className="p-2 rounded-lg bg-violet-50 text-violet-600"><DashboardIcon name="tank" /></span>
+      <div><h1 className="text-lg font-bold text-gray-900">Water Change</h1><p className="text-xs text-gray-500">Timed pump commands through the authenticated device API. Reported output state is logical state, not physical feedback.</p></div>
+    </header>
+
+    <section className="grid gap-3 sm:grid-cols-2">
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <label className="block text-xs font-semibold text-gray-600" htmlFor="water-device">Device</label>
+        <select id="water-device" value={deviceId} onChange={(event) => { setDeviceId(event.target.value); setHardware(null); setTrackedCommand(null); }} className="mt-1 w-full rounded border p-2 text-sm">
+          {devices.length === 0 && <option value="">No active registered device</option>}
+          {devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} ({device.deviceId})</option>)}
+        </select>
+        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+          <div><span className="text-gray-500">Device</span><p className="font-semibold">{fresh ? 'ONLINE' : 'OFFLINE / STALE'}</p></div>
+          <div><span className="text-gray-500">Water phase</span><p className="font-semibold">{stateText}</p></div>
+          <div><span className="text-gray-500">Drain output (logical)</span><p className="font-semibold">{fresh && state ? (state.drainPump ? 'ON' : 'OFF') : 'UNKNOWN'}</p></div>
+          <div><span className="text-gray-500">Fill output (logical)</span><p className="font-semibold">{fresh && state ? (state.fillPump ? 'ON' : 'OFF') : 'UNKNOWN'}</p></div>
+        </div>
+        <p className="mt-3 text-[11px] text-gray-500">State reported {hardware?.receivedAt ? new Date(hardware.receivedAt).toLocaleString() : 'not yet reported'}{state?.fault ? ` · Fault: ${state.fault}` : ''}</p>
+        <p className="mt-1 text-[11px] text-gray-500">Automation {state?.automation ? 'enabled on device' : 'disabled on device'}. The device firmware owns automatic water-change decisions; predictive risk on this page does not start pumps.</p>
+      </div>
+
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-gray-800">Manual water control</h2>
+        <label className="mt-3 block text-xs font-semibold text-gray-600" htmlFor="pump-duration">Duration (seconds, required for each pump phase)</label>
+        <input id="pump-duration" type="number" min="1" max="60" step="1" value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)} placeholder="Enter duration (max 60 seconds)" className="mt-1 w-full rounded border p-2 text-sm" />
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button disabled={!deviceId || pending} onClick={() => void command('DRAIN')} className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Drain for duration</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('FILL')} className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Fill for duration</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('WATER_EXCHANGE')} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Exchange (same duration per phase)</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('WATER_STOP')} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Stop</button>
+        </div>
+        <p className="mt-2 text-[11px] text-gray-500">Each pump phase has a 60-second initial hard cap. Water Exchange applies the entered duration separately to drain and refill.</p>
+        <p className="mt-3 text-xs" aria-live="polite">{pending ? 'Submitting command…' : commandStatus}</p>
+        {trackedCommand && <p className="mt-1 text-[10px] text-gray-500">Command {trackedCommand.id} · {trackedCommand.action}</p>}
+        {loadedAt && <p className="mt-1 text-[10px] text-gray-400">Last state poll: {new Date(loadedAt).toLocaleTimeString()}</p>}
+        {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
+      </div>
+    </section>
+  </div>;
+=======
     if (state.mode !== 'automatic' || autoHandledRef.current) return;
     autoHandledRef.current = true;
     void runWaterChangeCycle('automatic', riskCause);
@@ -162,24 +262,24 @@ const DashboardWaterChangePage: React.FC = () => {
 
   const setMode = (mode: WaterChangeMode) => {
     setState((s) => ({ ...s, mode }));
-    logEvent('manual', `Switched to ${mode === 'automatic' ? 'Automatic' : 'Manual'} mode`);
+    logEvent('manual', `Switched local simulation to ${mode === 'automatic' ? 'automatic demo' : 'manual demo'} mode`);
   };
 
   const setDrain = (drain: PumpState) => {
     if (cycleRunning) return;
-    setState((s) => ({ ...s, mode: 'manual', drain }));
-    logEvent('manual', `Drain pump turned ${drain}`);
+    setState((s) => ({ ...s, mode: 'manual', drain, ...(drain === 'ON' ? { fill: 'OFF' as const } : {}) }));
+    logEvent('manual', `Simulated drain state set to ${drain}`);
   };
 
   const setFill = (fill: PumpState) => {
     if (cycleRunning) return;
-    setState((s) => ({ ...s, mode: 'manual', fill }));
-    logEvent('manual', `Fill pump turned ${fill}`);
+    setState((s) => ({ ...s, mode: 'manual', fill, ...(fill === 'ON' ? { drain: 'OFF' as const } : {}) }));
+    logEvent('manual', `Simulated fill state set to ${fill}`);
   };
 
-  const runManualCycle = () => void runWaterChangeCycle('manual', 'Farmer requested manual water change');
+  const runManualCycle = () => void runWaterChangeCycle('manual', 'User requested a local water-change simulation');
 
-  const cycleLabel = cyclePhase === 'draining' ? 'Draining…' : cyclePhase === 'filling' ? 'Filling…' : null;
+  const cycleLabel = cyclePhase === 'draining' ? 'Simulating drain…' : cyclePhase === 'filling' ? 'Simulating refill…' : null;
 
   return (
     <div className="flex flex-col gap-2.5 lg:h-full lg:min-h-0">
@@ -188,10 +288,14 @@ const DashboardWaterChangePage: React.FC = () => {
           <span className="text-violet-600"><DashboardIcon name="tank" /></span>
         </div>
         <div>
-          <h1 className="text-base font-bold tracking-tight text-gray-900 lg:text-lg">Water Change</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Drain & fill pump control, automated by live water quality risk</p>
+          <h1 className="text-base font-bold tracking-tight text-gray-900 lg:text-lg">Water Exchange Simulation</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Local dashboard demonstration; it does not control or confirm physical pumps.</p>
         </div>
       </header>
+
+      <div role="status" className="shrink-0 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
+        <strong>Simulation only.</strong> Pump states, cycles, and history on this page are stored locally in this browser. No hardware API command is sent, and this system has no water-level sensor.
+      </div>
 
       {(riskLevel === 'HIGH' || riskLevel === 'CRITICAL') && (
         <div className={`shrink-0 rounded-xl border p-2.5 text-xs flex items-start gap-2 ${riskLevel === 'CRITICAL' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
@@ -203,18 +307,18 @@ const DashboardWaterChangePage: React.FC = () => {
       <section className="shrink-0 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         <MetricTile label="Water Quality Risk" value={riskStatus.label} detail={riskStatus.detail} tone={riskStatus.tone} icon={<DashboardIcon name="alert" />} />
         <MetricTile
-          label="Mode"
-          value={state.mode === 'automatic' ? 'Automatic' : 'Manual'}
-          detail={cycleLabel || (state.lastChangedAt ? `Changed ${new Date(state.lastChangedAt).toLocaleString()}` : 'Default mode')}
+          label="Simulation Mode"
+          value={state.mode === 'automatic' ? 'Auto demo' : 'Manual demo'}
+          detail={cycleLabel || (state.lastChangedAt ? `Demo state changed ${new Date(state.lastChangedAt).toLocaleString()}` : 'Local demo only')}
           tone={state.mode === 'automatic' ? 'cyan' : 'amber'}
           icon={<DashboardIcon name="settings" />}
         />
-        <MetricTile label="Drain Pump" value={state.drain} detail={state.drain === 'ON' ? 'Currently draining' : 'Idle'} tone={state.drain === 'ON' ? 'emerald' : 'gray'} icon={<DashboardIcon name="drain" />} />
-        <MetricTile label="Fill Pump" value={state.fill} detail={state.fill === 'ON' ? 'Currently filling' : 'Idle'} tone={state.fill === 'ON' ? 'emerald' : 'gray'} icon={<DashboardIcon name="fill" />} />
+        <MetricTile label="Simulated Drain" value={`Demo ${state.drain}`} detail="Local state; not hardware feedback" tone={state.drain === 'ON' ? 'emerald' : 'gray'} icon={<DashboardIcon name="drain" />} />
+        <MetricTile label="Simulated Fill" value={`Demo ${state.fill}`} detail="Local state; not hardware feedback" tone={state.fill === 'ON' ? 'emerald' : 'gray'} icon={<DashboardIcon name="fill" />} />
         <MetricTile
-          label="Last Water Change"
+          label="Last Simulated Cycle"
           value={state.lastChangedAt ? new Date(state.lastChangedAt).toLocaleDateString() : 'Never'}
-          detail={state.history.length ? `${state.history.length} recorded change(s)` : 'No history yet'}
+          detail={state.history.length ? `${state.history.length} simulated cycle(s)` : 'No simulation history yet'}
           tone="violet"
           icon={<DashboardIcon name="clock" />}
         />
@@ -225,51 +329,51 @@ const DashboardWaterChangePage: React.FC = () => {
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Manual Pump Control
+              Pump Control Demo
             </h3>
-            <Pill label={cycleRunning ? cycleLabel || 'Running' : 'Ready'} tone={cycleRunning ? 'amber' : 'emerald'} />
+            <Pill label={cycleRunning ? cycleLabel || 'Simulation running' : 'Demo ready'} tone={cycleRunning ? 'amber' : 'emerald'} />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500"><DashboardIcon name="drain" /> Drain Pump</p>
               <div className="grid grid-cols-2 gap-2">
-                <button disabled={cycleRunning} onClick={() => setDrain('ON')} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-emerald-700 transition-colors">ON</button>
-                <button disabled={cycleRunning} onClick={() => setDrain('OFF')} className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-rose-700 transition-colors">OFF</button>
+                <button disabled={cycleRunning} onClick={() => setDrain('ON')} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-emerald-700 transition-colors">Simulate ON</button>
+                <button disabled={cycleRunning} onClick={() => setDrain('OFF')} className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-rose-700 transition-colors">Simulate OFF</button>
               </div>
             </div>
             <div>
               <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500"><DashboardIcon name="fill" /> Fill Pump</p>
               <div className="grid grid-cols-2 gap-2">
-                <button disabled={cycleRunning} onClick={() => setFill('ON')} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-emerald-700 transition-colors">ON</button>
-                <button disabled={cycleRunning} onClick={() => setFill('OFF')} className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-rose-700 transition-colors">OFF</button>
+                <button disabled={cycleRunning} onClick={() => setFill('ON')} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-emerald-700 transition-colors">Simulate ON</button>
+                <button disabled={cycleRunning} onClick={() => setFill('OFF')} className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 hover:bg-rose-700 transition-colors">Simulate OFF</button>
               </div>
             </div>
           </div>
           <button disabled={cycleRunning} onClick={runManualCycle} className="w-full px-4 py-2 mt-3 text-xs font-semibold text-white transition-colors rounded-lg bg-violet-600 disabled:opacity-40 hover:bg-violet-700">
-            {cycleRunning ? cycleLabel || 'Running…' : 'Run Full Water Change Now'}
+            {cycleRunning ? cycleLabel || 'Simulating cycle…' : 'Run Water-Change Simulation'}
           </button>
-          <p className="mt-2 text-[10px] text-gray-400">Drains the tank first, then refills automatically. Manual commands switch the mode to Manual.</p>
+          <p className="mt-2 text-[10px] text-gray-500">Demonstrates a drain-then-refill sequence in the UI only. Timed water exchange estimates transferred volume after separate pump calibration; it does not measure water level.</p>
         </div>
 
         <div className="p-3 bg-white border border-gray-200 shadow-sm rounded-xl">
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
               <span className="h-1.5 w-1.5 rounded-full bg-cyan-500" />
-              Automatic Mode
+              Automatic Simulation
             </h3>
-            <Pill label={state.mode === 'automatic' ? 'Enabled' : 'Disabled'} tone={state.mode === 'automatic' ? 'emerald' : 'gray'} />
+            <Pill label={state.mode === 'automatic' ? 'Demo enabled' : 'Demo disabled'} tone={state.mode === 'automatic' ? 'emerald' : 'gray'} />
           </div>
           <div className="grid grid-cols-2 gap-2.5">
-            <button onClick={() => setMode('automatic')} className="px-4 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-cyan-600 hover:bg-cyan-700">Auto ON</button>
-            <button onClick={() => setMode('manual')} className="px-4 py-2 text-xs font-semibold text-white transition-colors bg-gray-500 rounded-lg hover:bg-gray-600">Auto OFF</button>
+            <button onClick={() => setMode('automatic')} className="px-4 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-cyan-600 hover:bg-cyan-700">Enable Auto Demo</button>
+            <button onClick={() => setMode('manual')} className="px-4 py-2 text-xs font-semibold text-white transition-colors bg-gray-500 rounded-lg hover:bg-gray-600">Disable Auto Demo</button>
           </div>
           <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-gray-900">Automation rule</p>
+              <p className="text-xs font-semibold text-gray-900">Simulation rule</p>
               <Pill label={riskStatus.label} tone={riskStatus.tone} />
             </div>
             <p className="mt-1.5 text-[10px] text-gray-500 leading-relaxed">
-              Runs a full drain-and-fill cycle automatically when predictive risk reaches <span className="font-semibold text-rose-600">Critical</span>. At <span className="font-semibold text-amber-600">Warning</span> level the system sends an SMS asking for immediate action without changing the water automatically.
+              Runs a local drain-and-fill animation when the displayed risk reaches <span className="font-semibold text-rose-600">Critical</span>. It does not start real pumps. At warning level, review the sensor readings and farm conditions.
             </p>
           </div>
           {notice && <p className="mt-2.5 text-[10px] font-semibold text-emerald-600">{notice}</p>}
@@ -281,12 +385,12 @@ const DashboardWaterChangePage: React.FC = () => {
           <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
             <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
             <DashboardIcon name="clock" />
-            <span>Water Change History</span>
+            <span>Simulation History</span>
           </h3>
           <Pill label={`${state.history.length} logged`} tone="violet" />
         </div>
         {state.history.length === 0 ? (
-          <div className="flex flex-1 min-h-[10rem] items-center justify-center text-center text-xs text-gray-400">No water changes recorded yet.</div>
+          <div className="flex flex-1 min-h-[10rem] items-center justify-center text-center text-xs text-gray-400">No water-change simulations recorded yet.</div>
         ) : (
           <div className="flex-1 min-h-[10rem] lg:min-h-0 space-y-1.5 overflow-y-auto pr-1">
             {state.history.map((event) => (
@@ -295,7 +399,7 @@ const DashboardWaterChangePage: React.FC = () => {
                   <p className="text-xs font-semibold text-gray-900">{new Date(event.at).toLocaleString()}</p>
                   <p className="text-[10px] text-gray-500">{event.reason}</p>
                 </div>
-                <Pill label={event.trigger === 'automatic' ? 'Automatic' : 'Manual'} tone={event.trigger === 'automatic' ? 'rose' : 'cyan'} />
+                <Pill label={event.trigger === 'automatic' ? 'Simulated automatic' : 'Simulated manual'} tone={event.trigger === 'automatic' ? 'rose' : 'cyan'} />
               </div>
             ))}
           </div>
@@ -303,6 +407,7 @@ const DashboardWaterChangePage: React.FC = () => {
       </section>
     </div>
   );
+>>>>>>> origin/feature/major-improvements
 };
 
-export default DashboardWaterChangePage;
+export default WaterChangePage;

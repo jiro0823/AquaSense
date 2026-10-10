@@ -10,7 +10,7 @@ void RelayController::writeRelay(int pin, bool on) {
 void RelayController::begin() {
     ready = ControlSafety::relayConfiguration(Pins::FILL_RELAY_GPIO,
         Pins::DRAIN_RELAY_GPIO, Pins::AERATOR_RELAY_GPIO, ActuatorConfig::RELAY_ACTIVE_LEVEL);
-    if (!ready) { Serial.println("Relays disabled: verify load mapping and active level."); return; }
+    if (!ready) { Serial.println("Relays disabled: verify active level and safe OFF behavior."); return; }
     for (int pin : {Pins::FILL_RELAY_GPIO, Pins::DRAIN_RELAY_GPIO, Pins::AERATOR_RELAY_GPIO}) {
         writeRelay(pin, false); // Set output latch to OFF before switching direction.
         pinMode(pin, OUTPUT);
@@ -31,4 +31,8 @@ bool RelayController::setAerator(bool on) {
     if (!ready) return false;
     writeRelay(Pins::AERATOR_RELAY_GPIO, on); air = on; return true;
 }
-void RelayController::allOff() { setPumps(false, false); setAerator(false); }
+bool RelayController::allOff() {
+    const bool pumpsStopped = setPumps(false, false);
+    const bool aeratorStopped = setAerator(false);
+    return pumpsStopped && aeratorStopped;
+}

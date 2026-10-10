@@ -9,6 +9,7 @@ export function SensorHealthPanel({reading}:{reading:WaterQualityReading|null}) 
         return <div key={name}>
           <strong>{name === 'ph' ? 'pH' : name.toUpperCase()}</strong>
           <p>{s?.valid && s.value!==null ? `${s.value.toFixed(2)} ${s.unit}`:'--'} · {s?.health || 'MISSING'}</p>
+          {s?.rawAvailable && !s.measurementValid && <p className="text-amber-800">Signal available; engineering measurement unavailable</p>}
           <p>Water quality: {reading?.waterQuality?.[name] || 'UNAVAILABLE'}</p>
           <p>Stability: {s?.stability || 'COLLECTING'} · Calibration required</p>
           {s?.reason && <p className="text-amber-800">{s.reason}</p>}

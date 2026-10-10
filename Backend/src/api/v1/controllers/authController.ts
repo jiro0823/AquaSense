@@ -228,6 +228,11 @@ export const verifyToken = (req: Request, res: Response): void => {
  * POST /api/v1/auth/logout
  */
 export const logout = (_req: Request, res: Response): void => {
+  const authHeader = _req.headers.authorization;
+  const bearerToken = authHeader && authHeader.split(' ')[1];
+  const cookieToken = getCookieValue(_req, config.authCookie.name);
+  if (cookieToken) tokenService.revokeToken(cookieToken);
+  if (bearerToken) tokenService.revokeToken(bearerToken);
   clearAuthCookie(res);
   clearCsrfCookie(res);
   sendSuccess(res, 200, 'Logout successful');

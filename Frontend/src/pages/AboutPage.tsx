@@ -46,7 +46,7 @@ const AboutPage: React.FC = () => {
         <section className="mb-20">
           <h2 className="mb-8 text-3xl font-bold text-primary sm:text-4xl">Our Integrated System</h2>
           <p className="mb-6 text-lg leading-relaxed text-gray-700">
-           AquaSense is a comprehensive IoT-powered water quality monitoring and management solution designed to support sustainable crayfish farming. It integrates real-time sensor monitoring, intelligent automation, automated feeding, water exchange, aeration, and alert notifications to maintain safe and stable water conditions. The system also uses mortality risk assessment and predictive analytics to identify potential threats early, helping farmers take preventive action, reduce crayfish losses, improve productivity, and make better data-driven farm management decisions.
+           AquaSense is a comprehensive IoT-powered water quality monitoring and management solution designed to support sustainable crayfish farming. It integrates sensor reporting, feeding features, time-based water exchange, and alert notifications. AquaSense has no physical dissolved-oxygen probe; ORP is a separate redox measurement and is never converted to DO. Aerator control remains uncommissioned. Risk-oriented software analytics are intended to support farm decisions when qualified inputs are available; they do not replace calibrated measurements or physical DO testing.
           </p>
         </section>
 
@@ -74,7 +74,7 @@ const AboutPage: React.FC = () => {
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-accent">✓</span>
-                <span>Dissolved Oxygen Management</span>
+                <span>ORP / Redox Input (not DO)</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-accent">✓</span>
@@ -105,11 +105,11 @@ const AboutPage: React.FC = () => {
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-warning">✓</span>
-                <span>Automated Feeding & Aeration</span>
+                <span>Feeding Schedules / Aerator Policy Uncommissioned</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-warning">✓</span>
-                <span>Automated Water Exchange</span>
+                <span>Timed Water Exchange (flow calibration required)</span>
               </li>
             </ul>
           </div>
@@ -170,7 +170,7 @@ const AboutPage: React.FC = () => {
               <div className="flex-shrink-0 text-3xl">💰</div>
               <div>
                 <h4 className="mb-2 text-lg font-bold text-primary">Cost Effective</h4>
-                <p className="text-slate-900">Automated feeding, aeration, and water exchange reduce manual labor and operational expenses significantly.</p>
+                <p className="text-slate-900">Feeding features support routine operation. Aerator and timed water-exchange control remain gated pending commissioning and physical pump-flow calibration.</p>
               </div>
             </div>
             <div className="flex gap-4">
@@ -184,7 +184,7 @@ const AboutPage: React.FC = () => {
               <div className="flex-shrink-0 text-3xl">🌱</div>
               <div>
                 <h4 className="mb-2 text-lg font-bold text-primary">Sustainable</h4>
-                <p className="text-slate-900">Automated water management and predictive analytics minimize waste and support environmentally responsible aquaculture.</p>
+                <p className="text-slate-900">Timed water exchange is intended to support water management after pump-flow calibration; it does not measure water level or guarantee transferred volume.</p>
               </div>
             </div>
             <div className="flex gap-4">

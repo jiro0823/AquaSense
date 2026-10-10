@@ -4,6 +4,7 @@ export interface SensorHealth {
   name: SensorName; value: number | null; rawAdc: number | null; voltage: number | null;
   adcMinimum:number|null; adcMaximum:number|null; adcLast:number|null; clippedSamples:number|null;
   unit: string; timestamp: string | null; health: HealthState; valid: boolean;
+  rawAvailable?: boolean; measurementValid?: boolean;
   stability: 'COLLECTING' | 'STABLE' | 'UNSTABLE'; calibration: 'REQUIRED' | 'CALIBRATED';
   reason: string; readyForCalibration: boolean; communication: boolean;
   adcRange: 'PASS' | 'WARNING' | 'UNKNOWN'; stuckDurationMs: number;

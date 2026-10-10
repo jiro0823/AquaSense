@@ -1,4 +1,4 @@
-import { SensorValidator, refreshHealth, type HealthSummary } from './sensorHealth';
+import { SensorValidator, refreshHealth, decisionEligible, type HealthSummary } from './sensorHealth';
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL' | 'EMERGENCY';
 export type AlertCategory = 'TEMP_HIGH' | 'TEMP_LOW' | 'PH_LOW' | 'PH_HIGH' | 'DO_LOW' | 'TURBIDITY_HIGH' | 'AMMONIA_HIGH';
 export type AlertAction =
@@ -19,14 +19,6 @@ export interface RuleAlertResult {
 }
 
 export interface RuleEngineInput {
-<<<<<<< Updated upstream
-  temperature: number;
-  ph: number;
-  dissolvedOxygen: number;
-  dissolvedOxygenMeasured?: boolean;
-  turbidity: number;
-  ammonia?: number;
-=======
   temperature: number | null;
   ph: number | null;
   dissolvedOxygen: number | null;
@@ -35,7 +27,6 @@ export interface RuleEngineInput {
   ammonia?: number | null;
   sensorHealth?: HealthSummary;
   turbidityUnit?: string;
->>>>>>> Stashed changes
 }
 
 export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
@@ -209,5 +200,5 @@ export const ruleEngine = (input: RuleEngineInput): RuleAlertResult[] => {
   }
   // No ammonia toxicity thresholds until a policy with explicit NH3-N units is commissioned.
   // Speciation percentage alone must never create a toxicity alert.
-  return alerts.map(alert => ({...alert, message: alert.message + ' (preliminary; calibration required)'}));
+  return alerts.map(alert => decisionEligible(input.sensorHealth) ? alert : ({...alert, action: 'DASHBOARD_ONLY', message: alert.message + ' (preliminary; calibration required)'}));
 };

@@ -12,6 +12,7 @@ export interface TokenPayload {
 }
 
 class TokenService {
+  private readonly revokedTokens = new Set<string>();
   /**
    * Generate JWT token
    */
@@ -34,12 +35,18 @@ class TokenService {
    */
   verifyToken(token: string): TokenPayload | null {
     try {
+      if (this.revokedTokens.has(token)) return null;
       const payload = jwt.verify(token, config.jwt.secret) as TokenPayload;
+      if (this.revokedTokens.size > 10000) this.revokedTokens.clear();
       return payload;
     } catch (error) {
       logger.debug('Token verification failed', error instanceof Error ? error.message : error);
       return null;
     }
+  }
+
+  revokeToken(token: string): void {
+    this.revokedTokens.add(token);
   }
 
   /**

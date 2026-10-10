@@ -1,12 +1,8 @@
 import { refreshDisplayReading } from './sensorDisplay';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWaterQualityWebSocket } from '../../hooks/useWaterQualityWebSocket';
 import { apiClient } from '../../services/apiClient';
-<<<<<<< Updated upstream
-import type { HealthAlert, PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
-=======
 import type { WaterQualityReading, HealthAlert, PredictiveAnalyticsResult, PredictionLog } from '../../types/water';
->>>>>>> Stashed changes
 import type { SmsLogEntry } from '../../types/sms';
 
 interface ChartDataPoint {
@@ -15,6 +11,7 @@ interface ChartDataPoint {
   ph?: number|null;
   do?: number|null;
   turbidity?: number|null;
+  turbidityUnit?: string;
   ammonia?: number|null;
 }
 
@@ -31,6 +28,8 @@ export const useDashboardData = () => {
   const { isConnected, latestReading, historyReadings, requestStatistics, requestLatestReading, requestHistory } = ws;
 
   const [polledReading, setPolledReading] = useState<WaterQualityReading|null>(null);
+  const [restError, setRestError] = useState<string|null>(null);
+  const dashboardRequestSequence = useRef(0);
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(timer); },[]);
   const newest = polledReading && (!latestReading || new Date(polledReading.createdAt || polledReading.timestamp)>=new Date(latestReading.createdAt || latestReading.timestamp)) ? polledReading : latestReading;
@@ -64,6 +63,7 @@ export const useDashboardData = () => {
         ph: reading.ph,
         do: reading.doMeasured === false ? undefined : reading.do,
         turbidity: reading.turbidity,
+        turbidityUnit: reading.turbidityUnit,
         ammonia: reading.speciation?.percent ?? null,
       }));
     setChartData(sorted);
@@ -82,6 +82,7 @@ export const useDashboardData = () => {
           ph: latestReading.ph,
           do: latestReading.doMeasured === false ? undefined : latestReading.do,
           turbidity: latestReading.turbidity,
+          turbidityUnit: latestReading.turbidityUnit,
           ammonia: latestReading.speciation?.percent ?? null,
         },
       ];
@@ -104,19 +105,36 @@ export const useDashboardData = () => {
 
   useEffect(() => {
     const loadPredictiveBundle = async () => {
+      const requestSequence=++dashboardRequestSequence.current;
       try {
         const response = await apiClient.get<{ latest:WaterQualityReading|null; predictiveWarning: PredictiveAnalyticsResult; predictionHistory: PredictionLog[]; smsLogs: SmsLogEntry[] }>('/water/dashboard');
-        setPolledReading(response.data.latest);
+        if (requestSequence!==dashboardRequestSequence.current) return;
+        const incoming=response.data.latest;
+        const incomingAt=incoming ? new Date(incoming.timestamp).getTime() : NaN;
+        if (incoming && !Number.isFinite(incomingAt)) {
+          setRestError('REST response has no valid acquisition timestamp; retaining last known reading');
+          setPolledReading((current)=>current?{...current,connectionState:'ERROR'}:current);
+          return;
+        }
+        if (incoming) setPolledReading((current)=> {
+          const currentAt=current ? new Date(current.timestamp).getTime() : NaN;
+          if (current && Number.isFinite(currentAt) && incomingAt<currentAt) return current;
+          if (current && incomingAt===currentAt) return {...current,connectionState:'LIVE'};
+          return {...incoming,connectionState:'LIVE'};
+        });
         setPredictiveWarning(response.data.predictiveWarning);
         setSmsLogs(response.data.smsLogs || []);
+        setRestError(null);
       } catch {
-        // no-op
+        if (requestSequence!==dashboardRequestSequence.current) return;
+        setRestError('REST refresh failed; showing last known data with original acquisition time');
+        setPolledReading((current) => current ? { ...current, connectionState: 'ERROR' } : current);
       }
     };
 
     void loadPredictiveBundle();
     const interval = setInterval(() => void loadPredictiveBundle(), 5000);
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); dashboardRequestSequence.current++; };
   }, []);
 
   useEffect(() => {
@@ -144,8 +162,8 @@ export const useDashboardData = () => {
     return () => clearInterval(batteryInterval);
   }, []);
 
-  const triggerManual = async (action: 'ON' | 'OFF' | 'TRIGGER') => {
-    await apiClient.post('/feeding/manual', { action });
+  const triggerManual = async (action: 'ON' | 'OFF' | 'TRIGGER', deviceId?: string) => {
+    await apiClient.post('/feeding/manual', { action, ...(deviceId ? { deviceId } : {}) });
     await loadFeedingSchedules();
   };
 
@@ -182,6 +200,7 @@ export const useDashboardData = () => {
 
   return {
     ...ws,
+    error: ws.error || restError,
     latestReading: displayReading,
     alerts: activeAlerts.length > 0 ? activeAlerts : ws.alerts,
     activeAlerts,

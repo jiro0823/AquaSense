@@ -25,8 +25,9 @@ and a combined backend client instead of separate hardware/feeding HTTP workers.
 | Passive buzzer pattern | BuzzerManager |
 | Command expiry, deduplication and dispatch | SystemController |
 | WiFi retry | WifiManager |
-| JSON telemetry worker | MqttManager |
-| Authenticated hardware/feeding sync worker | BackendDeviceClient |
+| Retained per-sensor MQTT worker | MqttManager |
+| Authenticated schedule/state heartbeat worker | BackendDeviceClient |
+| Signed MQTT actuator command and acknowledgement worker | MqttManager |
 | Display only | LcdManager |
 | NTP, DS3231 UTC storage and UTC+8 presentation | TimeManager |
 | Composition/update scheduling | src/main.cpp |
@@ -40,38 +41,56 @@ and a combined backend client instead of separate hardware/feeding HTTP workers.
 | ORP analog | 32 |
 | DS18B20 data | 4 |
 | I2C SDA / SCL | 21 / 22 |
-| LCD | 0x27, 16x2 |
+| LCD | 0x27, 20x4 (current monitor code; earlier diagram labels 16x2) |
 | RTC | DS3231 |
-| Servo | 19; standalone feeder remains 13 |
+| Servo | 13; older integrated configuration said 19 |
 | Buzzer | 18 |
-| Three relay input signals | 25, 26, 27 |
+| Relay IN1 / pump 1 fill | GPIO25 |
+| Relay IN2 / pump 2 drain | GPIO26 |
+| Relay IN3 / aerator | GPIO27 |
+| Relay IN4 | GPIO33 (unused) |
 
 Loads connect to relay output terminals; ESP32 signals control module inputs only.
-The module has a separate 5 V supply and common ground. Channel four is spare.
-Load mapping and active LOW/HIGH cannot be established from supply voltage.
-Both remain unconfigured. The user removed float switches; no float logic exists.
+The module has a separate 5 V supply and common ground. The diagram provides the
+relay signal order and load assignment. Relay polarity is not shown, so
+`RELAY_ACTIVE_LEVEL` remains unknown and the relay controller keeps all channels
+disabled until trigger level and OFF behavior are measured. The user removed
+float switches; no float logic exists.
 
 ## Behavior changes
 
-- Sensor, servo and control updates use elapsed time. Synchronous MQTT and HTTP(S)
-  execute in separate workers. Bounded queues pass copies; main owns outputs/I2C.
-- Ten-sample ADC averaging, acquisition order, five-second post-acquisition pause,
-  conversions and zero-seeded 0.7/0.3 smoothing are retained.
-- MQTT now publishes one coherent JSON snapshot with device identity and ORP.
-  Invalid required temperature/pH/turbidity suppresses the whole publish;
-  invalid ORP alone is null. Earlier scalar-topic targets remain unchanged.
+- Sensor, servo and control updates use elapsed time. MQTT and HTTP(S) execute
+  in separate workers. Bounded queues pass copies; main owns outputs/I2C.
+- Twelve-sample ADC windows use per-sensor connection bounds and a peak-to-peak
+  stability limit. Each sensor has an independent connection/disconnection
+  debounce counter; a missing DS18B20 can be detected after it is reattached.
+- pH uses the supplied voltage slope/offset, ORP uses the supplied mV slope/offset,
+  and turbidity uses the supplied clear/dirty ADC points to produce NTU. Invalid
+  or disconnected readings are sent as `DISCONNECTED`; connection status is also
+  retained on each sensor's `/status` topic.
+- MQTT publishes retained parameter topics under `aquasense/`, including the
+  configured `device-id` so Backend associates readings with the registered
+  board. Converted turbidity uses `aquasense/turbidity-ntu` to keep it distinct
+  from legacy raw ADC on `aquasense/turbidity`. ORP remains signed mV; no DO
+  value is produced.
 - Backend persists signed nullable ORP and returns it in readings/statistics and
   realtime data. Missing/historical ORP never becomes a fabricated zero.
 - NTP writes verified UTC to DS3231. Only RTC contents marked with this convention
   and without lost-power status can seed time after reboot. No build-date clock.
 - Servo retains 25/140 degrees and 800/1000/800 ms cycling. Indefinite ON is capped
   at ten seconds. NVS records commands/scheduled feeds before actuator movement.
-- LCD alternates active outputs with sensor values; a water fault takes priority.
-  Manual buzzer OFF does not silence a latched water fault.
+- LCD shows startup/connection progress followed by sensor readings only; there
+  is no rotating output-status page.
+- Buzzer output is forced OFF during initialization and responds only to fresh,
+  valid readings outside configured alarm bounds. Alarm thresholds are disabled
+  until commissioned.
 
-Turbidity is raw ADC, not NTU. The existing backend/dashboard turbidity alert
-thresholds and labels do not convert these units. Confirm calibration and alert
-interpretation before unattended use. ORP is not a dissolved-oxygen measurement.
+The supplied calibration values have not been physically verified on hardware.
+Compare each channel against reference solutions and the installed voltage
+dividers/front ends before unattended use. ORP is not a dissolved-oxygen
+measurement. Relay pin mapping follows the wiring diagram. Unknown polarity
+keeps relay starts disabled; initial pump limits are 60 seconds per phase.
+Water automation gates remain unchanged.
 
 ## Runtime limits
 

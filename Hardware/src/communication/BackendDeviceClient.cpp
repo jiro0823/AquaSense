@@ -36,7 +36,7 @@ void BackendDeviceClient::run() {
         vTaskDelay(pdMS_TO_TICKS(DeviceConfig::BACKEND_SYNC_INTERVAL_MS));
     }
 }
-bool BackendDeviceClient::sync(const SystemState& state, const CommandReceipt* receipt) {
+bool BackendDeviceClient::sync(const SystemState& state) {
     if (!DeviceConfig::backendTransportConfigured(DeviceConfig::BACKEND_API_BASE_URL,
             DeviceConfig::BACKEND_ROOT_CA, DeviceConfig::ALLOW_INSECURE_BACKEND_HTTP)) return false;
     document.clear();

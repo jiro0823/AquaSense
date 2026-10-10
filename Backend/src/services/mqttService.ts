@@ -10,16 +10,12 @@ import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
 import type { WaterQualityReading, WaterQualityStats } from '../iot/water/types';
-<<<<<<< HEAD
-import { config } from '../config/config';
+import { config as appConfig } from '../config/config';
 import { HardwareCommand } from '../database/models/HardwareControl';
 import { FeedingCommand } from '../database/models/FeedingCommand';
 import { deviceService } from './device.service';
 import { ackCanonical, commandCanonical, parseSignedAck, signCanonical, verifyCanonical } from './hardwareProtocol';
 import { hardwareService } from './hardwareService';
-=======
-import { config as appConfig } from '../config/config';
->>>>>>> origin/feature/major-improvements
 
 interface MQTTConfig {
   brokerUrl: string;
@@ -192,7 +188,7 @@ export class MQTTService {
   /** Publish one non-retained, signed actuator command. Publishing means queued, never confirmed. */
   async dispatchHardwareCommand(input: { id: string; deviceId: string; source: 'hardware' | 'feeding'; action: string; durationMs?: number; expiresAt: Date }): Promise<boolean> {
     if (!this.client || !this.isConnected) return false;
-    const key = config.device.keys[input.deviceId];
+    const key = appConfig.device.keys[input.deviceId];
     if (!key) return false;
     const unsigned = { v: 1 as const, deviceId: input.deviceId, id: input.id, source: input.source,
       action: input.action, durationMs: input.durationMs ?? 0, expiresAt: input.expiresAt.getTime() };
@@ -233,7 +229,7 @@ export class MQTTService {
     const ack = parseSignedAck(payload);
     const topicDeviceId = topic.split('/')[1];
     if (!ack || ack.deviceId !== topicDeviceId) { logger.warn('Rejected malformed actuator state/ack', { topic }); return; }
-    const key = config.device.keys[ack.deviceId];
+    const key = appConfig.device.keys[ack.deviceId];
     if (!key || !verifyCanonical(ackCanonical(ack), ack.signature, key)) {
       logger.warn('Rejected actuator state/ack with invalid signature', { deviceId: ack.deviceId, commandId: ack.id }); return;
     }

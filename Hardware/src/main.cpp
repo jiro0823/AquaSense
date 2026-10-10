@@ -52,7 +52,7 @@ void loop() {
     wifi.update(nowMs);
     timeManager.update(nowMs, wifi.isConnected());
     mqtt.update(readings);
-    if (!wifi.isConnected() || !mqtt.isConnected()) control.stopRelayActuators();
+    if (!wifi.isConnected() || !mqtt.isConnected()) control.stopRelayActuators(millis());
     control.update(readings, nowMs);
     state.wifiConnected = wifi.isConnected(); state.mqttConnected = mqtt.isConnected();
     state.mqttWorkerRunning = mqtt.isRunning(); state.rtcAvailable = timeManager.isAvailable();

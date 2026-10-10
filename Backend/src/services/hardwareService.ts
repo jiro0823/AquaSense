@@ -2,10 +2,7 @@ import { Op } from 'sequelize';
 import { HardwareCommand, HardwareDeviceState } from '../database/models/HardwareControl';
 import { FeedingCommand } from '../database/models/FeedingCommand';
 import { feedingService } from './feedingService';
-<<<<<<< HEAD
 import { COMMAND_TTL_MS, DEVICE_ONLINE_MS, type HardwareAction, type HardwareState, type CommandReceipt, type SignedHardwareAck } from './hardwareProtocol';
-=======
-import { COMMAND_TTL_MS, DEVICE_ONLINE_MS, type HardwareAction, type HardwareState, type CommandReceipt } from './hardwareProtocol';
 import { withHardwareDeviceLock, DeviceStopPendingError } from './hardwareControlLock';
 import type { Transaction } from 'sequelize';
 
@@ -30,7 +27,6 @@ const acknowledgeInTransaction = async (userId: string, deviceId: string, receip
   await command.update({ status: 'ACKED', result: receipt.result }, { transaction });
   return true;
 };
->>>>>>> origin/feature/major-improvements
 
 export const hardwareService = {
   async queue(userId: string, deviceId: string, action: HardwareAction, durationMs?: number) {
@@ -69,38 +65,13 @@ export const hardwareService = {
   },
 
   async sync(userId: string, deviceId: string, state: HardwareState, receipt?: CommandReceipt) {
-<<<<<<< HEAD
-    // Device-key authenticated sync is a heartbeat/state report only. It cannot
-    // acknowledge user commands or retrieve one-shot commands.
+    // The firmware consumes schedules and heartbeat state over HTTPS. Actuator
+    // commands and their acknowledgments use the signed MQTT path.
     void receipt;
     await HardwareDeviceState.upsert({ deviceId, state, receivedAt: new Date() });
     const schedules = await feedingService.listSchedules(userId);
     return { command: null, schedules: schedules.filter(s => s.enabled).slice(0, 20).map(s => ({ id: s.id, date: s.date, time: s.time })),
       timezone: 'Asia/Manila', serverTimeIso: new Date().toISOString() };
-=======
-    return withHardwareDeviceLock(userId, deviceId, async (transaction) => {
-      if (receipt && !(await acknowledgeInTransaction(userId, deviceId, receipt, transaction))) throw new Error('Unknown command receipt');
-      await HardwareDeviceState.upsert({ deviceId, state, receivedAt: new Date() }, { transaction });
-      await HardwareCommand.update({ status: 'EXPIRED', result: 'expired_before_delivery' }, {
-        where: { userId, deviceId, status: 'PENDING', expiresAt: { [Op.lte]: new Date() } }, transaction,
-      });
-      // Old feeder commands must not dispense food unexpectedly after a long outage.
-      await FeedingCommand.update({ status: 'ACKED', metadata: { deviceResult: 'expired_before_delivery' } }, {
-        where: { userId, deviceId, status: 'PENDING', createdAt: { [Op.lt]: new Date(Date.now() - COMMAND_TTL_MS) } }, transaction,
-      });
-      const [hardware, feeding, schedules] = await Promise.all([
-        HardwareCommand.findOne({ where: { userId, deviceId, status: 'PENDING' }, order: [['createdAt', 'ASC']], transaction }),
-        FeedingCommand.findOne({ where: { userId, deviceId, status: 'PENDING' }, order: [['createdAt', 'ASC']], transaction }),
-        feedingService.listSchedules(userId),
-      ]);
-      const command = hardware ? { id: hardware.id, source: 'hardware', action: hardware.action,
-        durationMs: hardware.durationMs ?? 0, ttlMs: Math.max(0, hardware.expiresAt.getTime() - Date.now()) }
-        : feeding ? { id: feeding.id, source: 'feeding', action: feeding.action, durationMs: 0,
-          ttlMs: Math.max(0, feeding.createdAt.getTime() + COMMAND_TTL_MS - Date.now()) } : null;
-      return { command, schedules: schedules.filter(s => s.enabled).slice(0, 20).map(s => ({ id: s.id, date: s.date, time: s.time })),
-        timezone: 'Asia/Manila', serverTimeIso: new Date().toISOString() };
-    });
->>>>>>> origin/feature/major-improvements
   },
 
   async expirePendingCommands(): Promise<void> {

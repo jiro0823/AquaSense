@@ -13,15 +13,9 @@ bool WaterManager::pumpTimingReady(bool filling) const {
 
 bool WaterManager::policyReady() const {
     return ActuatorConfig::WATER_POLICY_CONFIGURED && relays.isReady() &&
-<<<<<<< HEAD
-        ControlSafety::durationAllowed(ActuatorConfig::AUTO_DRAIN_MS, ActuatorConfig::MAX_DRAIN_RUNTIME_MS) &&
-        ControlSafety::durationAllowed(ActuatorConfig::AUTO_FILL_MS, ActuatorConfig::MAX_REFILL_RUNTIME_MS) &&
-        ActuatorConfig::AUTO_COOLDOWN_MS > 0 && Thresholds::WATER_PH_LOW < Thresholds::WATER_PH_HIGH &&
-=======
         pumpTimingReady(false) && pumpTimingReady(true) &&
         ActuatorConfig::PUMP_COOLDOWN_MS > 0 && ActuatorConfig::WATER_EXCHANGE_SETTLING_MS > 0 &&
         Thresholds::WATER_PH_LOW < Thresholds::WATER_PH_HIGH &&
->>>>>>> origin/feature/major-improvements
         Thresholds::WATER_ORP_LOW_MV < Thresholds::WATER_ORP_HIGH_MV && Thresholds::WATER_TURBIDITY_RAW_HIGH > 0;
 }
 
@@ -68,30 +62,13 @@ const char* WaterManager::clearFault() {
     faultText = "";
     return "accepted";
 }
-<<<<<<< HEAD
-const char* WaterManager::request(CommandAction action, uint32_t durationMs, uint32_t nowMs, uint32_t exchangeFillDurationMs) {
-    if (action == CommandAction::WaterStop) { automatic = false; stop(); return "accepted"; }
-=======
 
 const char* WaterManager::request(CommandAction action, uint32_t durationMs, uint32_t nowMs) {
     if (action == CommandAction::WaterStop) { automatic = false; stop(nowMs); return "accepted"; }
->>>>>>> origin/feature/major-improvements
     if (phase == Phase::Fault) return "fault_latched";
     if (action != CommandAction::Fill && action != CommandAction::Drain && action != CommandAction::WaterExchange)
         return "invalid_action";
     if (!relays.isReady()) return "relays_not_configured";
-<<<<<<< HEAD
-    if (action != CommandAction::Fill && action != CommandAction::Drain && action != CommandAction::WaterExchange) return "invalid_action";
-    const bool needsFill = action == CommandAction::Fill || action == CommandAction::WaterExchange;
-    const bool needsDrain = action == CommandAction::Drain || action == CommandAction::WaterExchange;
-    const uint32_t drainDuration = durationMs;
-    const uint32_t fillDuration = action == CommandAction::WaterExchange && exchangeFillDurationMs > 0
-        ? exchangeFillDurationMs : durationMs;
-    if ((needsDrain && !ControlSafety::durationAllowed(drainDuration, ActuatorConfig::MAX_DRAIN_RUNTIME_MS)) ||
-        (needsFill && !ControlSafety::durationAllowed(fillDuration, ActuatorConfig::MAX_REFILL_RUNTIME_MS))) return "unsafe_duration";
-    if (automatic) stop(); // A valid manual command overrides automatic operation.
-    if (phase == Phase::Draining || phase == Phase::Refilling) return "water_busy";
-=======
     if (phase == Phase::Draining || phase == Phase::SettlingAfterDrain || phase == Phase::Refilling)
         return "water_busy";
     if (phase == Phase::Cooldown || (cooldownStarted &&
@@ -111,7 +88,6 @@ const char* WaterManager::request(CommandAction action, uint32_t durationMs, uin
             return "unsafe_duration";
     }
 
->>>>>>> origin/feature/major-improvements
     automatic = false;
     exchange = action == CommandAction::WaterExchange;
     const bool filling = action == CommandAction::Fill;
@@ -123,34 +99,11 @@ const char* WaterManager::request(CommandAction action, uint32_t durationMs, uin
     }
     if (!relays.setPumps(filling, !filling)) return "relay_interlock";
     phase = filling ? Phase::Refilling : Phase::Draining;
-<<<<<<< HEAD
-    startedMs = nowMs; runMs = filling ? fillDuration : drainDuration; fillMs = fillDuration;
-=======
     startedMs = nowMs;
->>>>>>> origin/feature/major-improvements
     return "accepted";
 }
 
 void WaterManager::update(const SensorReadings& readings, uint32_t nowMs) {
-<<<<<<< HEAD
-    if (phase == Phase::Transition) {
-        // A full update/loop boundary with both pump outputs off is the transition dead time.
-        if (!relays.setPumps(false, false) || !relays.setPumps(true, false)) { fail("refill_start_failed"); return; }
-        phase = Phase::Refilling; startedMs = nowMs; runMs = fillMs;
-        return;
-    }
-    if (phase == Phase::Draining || phase == Phase::Refilling) {
-        if (!relays.isReady() || !ControlSafety::pumpCombination(relays.fillOn(), relays.drainOn())) { fail("relay_interlock"); return; }
-        const uint32_t hardLimit = phase == Phase::Draining ? ActuatorConfig::MAX_DRAIN_RUNTIME_MS : ActuatorConfig::MAX_REFILL_RUNTIME_MS;
-        if (hardLimit == 0 || hardLimit > 300000) { fail("pump_timeout"); return; }
-        if (ControlSafety::elapsed(nowMs, startedMs, runMs)) {
-            relays.setPumps(false, false);
-            if (phase == Phase::Draining && exchange) {
-                phase = Phase::Transition; exchange = false;
-            } else { phase = Phase::Complete; lastCycleMs = nowMs; completedCycle = true; }
-        } else if (ControlSafety::elapsed(nowMs, startedMs, hardLimit)) {
-            fail("pump_timeout");
-=======
     if (phase == Phase::Cooldown) {
         if (ControlSafety::elapsed(nowMs, phaseMs, ActuatorConfig::PUMP_COOLDOWN_MS)) phase = Phase::Idle;
         else return;
@@ -169,7 +122,6 @@ void WaterManager::update(const SensorReadings& readings, uint32_t nowMs) {
             } else {
                 enterCooldown(nowMs);
             }
->>>>>>> origin/feature/major-improvements
         }
         return;
     }
@@ -195,27 +147,17 @@ void WaterManager::update(const SensorReadings& readings, uint32_t nowMs) {
         readings.turbidityRaw > Thresholds::WATER_TURBIDITY_RAW_HIGH ||
         readings.orpMv < Thresholds::WATER_ORP_LOW_MV || readings.orpMv > Thresholds::WATER_ORP_HIGH_MV;
     if (critical) {
-<<<<<<< HEAD
-        const char* result = request(CommandAction::WaterExchange, ActuatorConfig::AUTO_DRAIN_MS,
-                                     nowMs, ActuatorConfig::AUTO_FILL_MS);
-        if (!strcmp(result, "accepted")) automatic = true;
-=======
         // A zero duration is intentional here: the exchange uses its independently
         // commissioned drain and fill targets, not a shared command duration.
         request(CommandAction::WaterExchange, 0, nowMs);
         automatic = true;
->>>>>>> origin/feature/major-improvements
     }
 }
 
 const char* WaterManager::phaseName() const {
     switch (phase) {
         case Phase::Draining: return "DRAINING";
-<<<<<<< HEAD
-        case Phase::Transition: return "TRANSITION";
-=======
         case Phase::SettlingAfterDrain: return "SETTLING_AFTER_DRAIN";
->>>>>>> origin/feature/major-improvements
         case Phase::Refilling: return "REFILLING";
         case Phase::Cooldown: return "COOLDOWN";
         case Phase::Fault: return "FAULT";

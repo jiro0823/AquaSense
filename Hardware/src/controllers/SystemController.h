@@ -17,7 +17,7 @@ public:
     void begin();
     CommandReceipt handle(const Command& command, uint32_t nowMs);
     void update(const SensorReadings& readings, uint32_t nowMs);
-    void stopRelayActuators();
+    void stopRelayActuators(uint32_t nowMs);
     void report(SystemState& state) const;
 private:
     const char* dispatch(const Command& command, uint32_t nowMs);

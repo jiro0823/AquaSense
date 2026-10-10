@@ -1,16 +1,21 @@
 import { Response } from 'express';
 import { sendError, sendSuccess } from '../../../utils/response';
 import { feedingService } from '../../../services/feedingService';
+import { DeviceStopPendingError } from '../../../services/hardwareControlLock';
 import { logger } from '../../../utils/logger';
 import type { FeedingCommandAction } from '../../../database/models/FeedingCommand';
 import type { AuthenticatedRequest } from '../../../middleware/authMiddleware';
 import { deviceService } from '../../../services/device.service';
 import type { DeviceAuthenticatedRequest } from '../../../middleware/deviceAuthMiddleware';
 import { auditLogService } from '../../../services/auditLog.service';
+<<<<<<< HEAD
 import { mqttService } from '../../../services/mqttService';
+=======
+import { config } from '../../../config/config';
+>>>>>>> origin/feature/major-improvements
 
-const DEFAULT_DEVICE_ID = process.env.FEEDER_DEVICE_ID || 'esp32-feeder-1';
-const FEEDING_TIMEZONE = process.env.FEEDING_TIMEZONE || 'Asia/Manila';
+const DEFAULT_DEVICE_ID = config.feeding.deviceId;
+const FEEDING_TIMEZONE = config.feeding.timezone;
 
 const parseAction = (raw: unknown): FeedingCommandAction | null => {
   if (typeof raw !== 'string') return null;
@@ -122,6 +127,10 @@ export const triggerManualCommand = async (req: AuthenticatedRequest, res: Respo
     sendSuccess(res, 202, 'Manual feed command queued; awaiting device acknowledgment',
       { commandId: command.id, status: 'PENDING_DEVICE_ACK', published });
   } catch (error) {
+    if (error instanceof DeviceStopPendingError) {
+      sendError(res, 409, error.message);
+      return;
+    }
     logger.error('Failed to queue manual feeding command', error);
     sendError(res, 500, 'Failed to queue manual feeding command');
   }

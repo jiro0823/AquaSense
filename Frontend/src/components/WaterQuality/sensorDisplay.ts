@@ -3,13 +3,14 @@ import type {WaterQualityReading} from '../../types/water';
 export function refreshDisplayReading(reading:WaterQualityReading|null,now=Date.now(),staleMs=15000):WaterQualityReading|null {
   if(!reading) return null;
   const result={...reading};
-  const frameStale=now-new Date(reading.timestamp).getTime()>staleMs;
+  const acquisitionTime=new Date(reading.timestamp).getTime();
+  const frameStale=!Number.isFinite(acquisitionTime) || now-acquisitionTime>staleMs;
   if(reading.sensorHealth) {
     result.sensorHealth={...reading.sensorHealth};
     for(const name of ['temperature','ph','turbidity','orp'] as const) {
       const s=reading.sensorHealth[name];
       if(frameStale || (s.timestamp && now-Date.parse(s.timestamp)>staleMs)) {
-        result.sensorHealth[name]={...s,health:'STALE',valid:false,readyForCalibration:false,reason:'No recent sensor reading received'};
+        result.sensorHealth[name]={...s,health:'STALE',valid:false,measurementValid:false,readyForCalibration:false,reason:'No recent sensor reading received'};
         result[name]=null;
         result.waterQuality={...result.waterQuality,[name]:'UNAVAILABLE'};
       }

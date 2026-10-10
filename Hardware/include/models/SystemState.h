@@ -15,7 +15,7 @@ struct SystemState {
     bool buzzer = false;
     bool automation = false;
     bool relaysReady = false;
-    char waterPhase[12] = "IDLE";
+    char waterPhase[24] = "IDLE";
     char fault[64] = {};
     uint32_t uptimeMs = 0;
 };

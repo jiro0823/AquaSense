@@ -3,13 +3,12 @@
 
 /*
  * ESP32 Water Quality Sensor with MQTT
- * Reads 4 sensors and publishes data to MQTT broker
+ * Publishes only measurements supported by installed sensors.
  *
  * Sensors:
  * - Temperature (DS18B20)
  * - pH (Analog sensor)
- * - Dissolved Oxygen (DO) (Analog sensor)
- * - Turbidity (Analog sensor)
+ * - Turbidity (raw ADC diagnostic; no validated NTU conversion)
  *
  * MQTT: Publishes to configured MQTT_TOPIC_READINGS
  * Backend: Subscribes and displays on dashboard
@@ -33,7 +32,13 @@ PubSubClient mqttClient(espClient);
 // ========== Global Variables ==========
 unsigned long lastReadTime = 0;
 unsigned long lastMQTTCheck = 0;
+<<<<<<< HEAD
 unsigned long lastWiFiReconnect = 0;
+=======
+uint32_t readingSequence = 0;
+String bootId;
+String deviceId;
+>>>>>>> origin/feature/major-improvements
 
 // ========== Function Prototypes ==========
 void PublishStatus(const char* status);
@@ -44,8 +49,6 @@ void reconnectMQTT();
 
 void publishSensorData();
 float readTemperature();
-float readpH();
-float readDO();
 float readTurbidity();
 
 // The legacy analog equations are estimates only. Keep them unavailable until
@@ -55,6 +58,9 @@ constexpr bool ANALOG_CALIBRATION_VERIFIED = false;
 void setup() {
   Serial.begin(115200);
   delay(2000);
+  const uint64_t mac = ESP.getEfuseMac();
+  deviceId = String((uint32_t)(mac >> 32), HEX) + String((uint32_t)mac, HEX);
+  bootId = deviceId + String(esp_random(), HEX);
 
   Serial.println("\n\n");
   Serial.println("╔════════════════════════════════════════╗");
@@ -173,6 +179,19 @@ void reconnectMQTT() {
 }
 
 // ========== Sensor Reading ==========
+<<<<<<< HEAD
+=======
+void readSensors() {
+  Serial.println("\n─── Sensor Reading ───");
+
+  float temp = readTemperature();
+  float turbidity = readTurbidity();
+
+  Serial.printf("  Temperature: %.2f°C\n", temp);
+  Serial.printf("  Turbidity raw ADC: %.0f\n", turbidity);
+}
+
+>>>>>>> origin/feature/major-improvements
 // ========== Publish Sensor Data ==========
 void publishSensorData() {
   if (!mqttClient.connected()) {
@@ -182,18 +201,31 @@ void publishSensorData() {
 
   // Read sensors
   float temp = readTemperature();
-  float ph = readpH();
-  float doLevel = readDO();
+  int phRaw = analogRead(PH_SENSOR_PIN);
   float turbidity = readTurbidity();
 
   // Create JSON payload
+<<<<<<< HEAD
   StaticJsonDocument<256> doc;
   if (isfinite(temp)) doc["temperature"] = temp; else doc["temperature"] = nullptr;
   if (isfinite(ph)) doc["ph"] = ph; else doc["ph"] = nullptr;
   if (isfinite(doLevel)) doc["do"] = doLevel; else doc["do"] = nullptr;
   if (isfinite(turbidity)) doc["turbidity"] = turbidity; else doc["turbidity"] = nullptr;
+=======
+  StaticJsonDocument<384> doc;
+  if (isfinite(temp)) doc["temperature"] = temp; else doc["temperature"] = nullptr;
+  doc["ph"] = nullptr;
+  doc["sensors"]["ph"]["rawAdc"] = phRaw;
+  doc["sensors"]["ph"]["conversion"] = "UNVERIFIED";
+  doc["turbidity"] = turbidity;
+  doc["turbidityUnit"] = "raw_adc";
+  doc["sensors"]["turbidity"]["rawAdc"] = (int)turbidity;
+  doc["bootId"] = bootId;
+  doc["deviceId"] = deviceId;
+  doc["sequence"] = readingSequence++;
+  doc["sampleAgeMs"] = 0;
+>>>>>>> origin/feature/major-improvements
   doc["location"] = "Tank A";
-  doc["uptimeMs"] = millis(); // Uptime is not a Unix timestamp; backend stamps receipt time.
 
   // Serialize to string
   String payload;
@@ -221,6 +253,7 @@ float readTemperature() {
   return temp;
 }
 
+<<<<<<< HEAD
 float readpH() {
   if (!ANALOG_CALIBRATION_VERIFIED) return NAN;
   // Read analog value
@@ -277,12 +310,16 @@ float readTurbidity() {
   if (!ANALOG_CALIBRATION_VERIFIED) return NAN;
   // Read multiple samples
   int samples = 15;
+=======
+float readTurbidity() {
+  const int samples = 15;
+>>>>>>> origin/feature/major-improvements
   int sum = 0;
-
   for (int i = 0; i < samples; i++) {
     sum += analogRead(TURBIDITY_SENSOR_PIN);
     delay(30);
   }
+<<<<<<< HEAD
 
   int raw = sum / samples;
 
@@ -310,6 +347,9 @@ float readTurbidity() {
   if (!isfinite(turbidity) || turbidity < 0 || turbidity > 150) return NAN;
 
   return turbidity;
+=======
+  return (float)(sum / samples);
+>>>>>>> origin/feature/major-improvements
 }
 
 // ========== Publish Status ==========

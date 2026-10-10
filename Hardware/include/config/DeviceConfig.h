@@ -28,8 +28,30 @@ constexpr uint8_t LCD_ROWS = 4;
 constexpr uint32_t RTC_READ_INTERVAL_MS = 1000;
 constexpr uint16_t I2C_TIMEOUT_MS = 20;
 constexpr const char* DEVICE_ID = "esp32-feeder-1"; // Must be registered to the backend owner.
-constexpr const char* BACKEND_API_BASE_URL = "http://192.168.1.100:5000/api/v1";
+constexpr const char* BACKEND_API_BASE_URL = "https://backend.example.invalid/api/v1";
 constexpr const char* BACKEND_ROOT_CA = ""; // PEM root CA required for HTTPS; never bypass certificate validation.
+#if defined(AQUASENSE_PRODUCTION_BUILD) && defined(AQUASENSE_ALLOW_INSECURE_HTTP)
+#error "Insecure backend HTTP cannot be enabled in a production build."
+#endif
+#if defined(AQUASENSE_DEVELOPMENT_BUILD) && defined(AQUASENSE_ALLOW_INSECURE_HTTP) && !defined(NDEBUG) && !defined(AQUASENSE_PRODUCTION_BUILD)
+constexpr bool ALLOW_INSECURE_BACKEND_HTTP = true;
+#else
+constexpr bool ALLOW_INSECURE_BACKEND_HTTP = false;
+#endif
+constexpr bool hasPrefix(const char* value, const char* prefix) {
+    return *prefix == '\0' || (*value != '\0' && *value == *prefix && hasPrefix(value + 1, prefix + 1));
+}
+constexpr bool validAuthorityChars(const char* value) {
+    return *value == '\0' || *value == '/' || *value == '?' || *value == '#' ||
+        (*value != ' ' && *value != '\t' && *value != '@' && validAuthorityChars(value + 1));
+}
+constexpr bool hasAuthority(const char* value) {
+    return *value != '\0' && *value != '/' && *value != '?' && *value != '#' && validAuthorityChars(value);
+}
+constexpr bool backendTransportConfigured(const char* url, const char* rootCa, bool allowInsecureHttp) {
+    return (hasPrefix(url, "https://") && hasAuthority(url + 8) && rootCa[0] != '\0') ||
+        (allowInsecureHttp && hasPrefix(url, "http://") && hasAuthority(url + 7));
+}
 constexpr uint32_t BACKEND_SYNC_INTERVAL_MS = 5000;
 constexpr uint32_t BACKEND_HTTP_TIMEOUT_MS = 2000;
 constexpr uint32_t BACKEND_TASK_STACK_BYTES = 8192;

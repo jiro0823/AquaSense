@@ -6,6 +6,7 @@ export interface SensorHealth {
   name: SensorName; value: number | null; rawAdc: number | null; voltage: number | null;
   adcMinimum: number|null; adcMaximum: number|null; adcLast: number|null; clippedSamples: number|null;
   unit: string; timestamp: string | null; health: HealthState; valid: boolean;
+  rawAvailable: boolean; measurementValid: boolean;
   stability: 'COLLECTING' | 'STABLE' | 'UNSTABLE'; calibration: 'REQUIRED' | 'CALIBRATED';
   reason: string; readyForCalibration: boolean; communication: boolean;
   adcRange: 'PASS' | 'WARNING' | 'UNKNOWN'; stuckDurationMs: number;
@@ -19,7 +20,15 @@ export function numeric(value: unknown): number | null {
   const result = Number(value); return Number.isFinite(result) ? result : null;
 }
 export function timestampMs(value: unknown): number {
-  return value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : NaN;
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 1_000_000_000_000 && value <= 4_102_444_800_000 ? value : NaN;
+  if (typeof value !== 'string') return NaN;
+  const parts=/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.exec(value);
+  if (!parts) return NaN;
+  const calendar=new Date(Date.UTC(Number(parts[1]),Number(parts[2])-1,Number(parts[3]),Number(parts[4]),Number(parts[5]),Number(parts[6])));
+  if (calendar.getUTCFullYear()!==Number(parts[1]) || calendar.getUTCMonth()!==Number(parts[2])-1 || calendar.getUTCDate()!==Number(parts[3]) || calendar.getUTCHours()!==Number(parts[4]) || calendar.getUTCMinutes()!==Number(parts[5]) || calendar.getUTCSeconds()!==Number(parts[6])) return NaN;
+  const at=Date.parse(value);
+  return Number.isFinite(at) ? at : NaN;
 }
 type Sample = { value: number; at: number };
 type Track = { samples: Sample[]; lastAt: number; anchor: number; unchangedSince: number; rails: number; railSide: number };
@@ -31,7 +40,7 @@ export class SensorValidator {
     const rawAdc = numeric(diagnostics?.rawAdc), voltage = numeric(diagnostics?.voltage);
     const result: SensorHealth = { name, value, rawAdc, voltage, unit: unit || ({temperature:'C',ph:'pH',turbidity:'unknown',orp:'mV'}[name]),
       adcMinimum:numeric(diagnostics?.adcMinimum),adcMaximum:numeric(diagnostics?.adcMaximum),adcLast:numeric(diagnostics?.adcLast),clippedSamples:numeric(diagnostics?.clippedSamples),
-      timestamp: Number.isFinite(at) ? new Date(at).toISOString() : null, health:'VALID', valid:true,
+      timestamp: Number.isFinite(at) ? new Date(at).toISOString() : null, health:'VALID', valid:true, rawAvailable:rawAdc!==null, measurementValid:value!==null,
       stability:'COLLECTING', calibration:'REQUIRED', reason:'', readyForCalibration:false, communication:value !== null || rawAdc !== null,
       adcRange:rawAdc === null ? 'UNKNOWN' : 'PASS', stuckDurationMs:0,
       window:{count:0,min:null,max:null,average:null,range:null,standardDeviation:null} };
@@ -39,13 +48,15 @@ export class SensorValidator {
     const key = `${device}:${name}`;
     let track = this.tracks.get(key);
     if (!track) { track = {samples:[],lastAt:-Infinity,anchor:NaN,unchangedSince:now,rails:0,railSide:0}; this.tracks.set(key,track); }
-    const rawOnly = value === null && rawAdc !== null && name !== 'temperature' && diagnostics?.conversion === 'UNVERIFIED';
-    if (rawOnly) result.reason = 'Raw signal only; electrical conversion and calibration are unverified';
+    const rawOnly = value === null && rawAdc !== null && name !== 'temperature';
+    if (rawOnly) fail('MISSING','Raw signal available; engineering conversion is unavailable');
     else if (input === null || input === undefined) fail('MISSING','No sensor reading supplied');
     else if (value === null) fail('INVALID','Malformed or non-finite reading');
     else if (name === 'temperature' && value === -127) fail('SENSOR_ERROR','DS18B20 disconnected/error reading detected');
     else if ((name === 'temperature' && (value < -55 || value > 125)) || (name === 'ph' && (value < 0 || value > 14)) ||
       (name === 'turbidity' && (value < 0 || (unit === 'raw_adc' && value > 4095)))) fail('INVALID','Outside sensor physical range');
+    // Device-supplied flags cannot authorize a calibration the backend has not commissioned.
+    if (name==='orp' && (value!==null || rawAdc!==null) && (result.calibration!=='CALIBRATED' || diagnostics?.conversion!=='VALIDATED')) fail('MISSING','ORP engineering conversion/calibration is not commissioned by the backend');
     if (!Number.isFinite(at) || at > now + 2000) fail('INVALID','Invalid or future acquisition timestamp');
     else if (now - at > this.config.staleMs) fail('STALE','No recent sensor reading received');
     if ((diagnostics?.rawAdc != null && rawAdc === null) || (rawAdc !== null && (rawAdc < 0 || rawAdc > 4095)) ||
@@ -83,6 +94,7 @@ export class SensorValidator {
     if (result.valid && result.stuckDurationMs >= this.config.stuckMs) fail('POSSIBLY_STUCK',`Nearly unchanged for ${result.stuckDurationMs} ms; stable water is also possible`);
     if (result.health==='SENSOR_ERROR') result.communication=false;
     result.readyForCalibration=result.valid && result.stability==='STABLE' && (name==='temperature' || result.adcRange==='PASS' && voltage !== null && diagnostics?.voltageSource === 'EFUSE');
+    result.measurementValid=result.valid && value!==null;
     if (this.tracks.size > 2048) this.tracks.delete(this.tracks.keys().next().value!);
     return result;
   }
@@ -90,7 +102,7 @@ export class SensorValidator {
 export function refreshHealth(summary: HealthSummary, now = Date.now(), staleMs = HEALTH_CONFIG.staleMs): HealthSummary {
   return Object.fromEntries(SENSOR_NAMES.map(name=> { const s=summary[name]; const at=timestampMs(s?.timestamp);
     if (!s) return [name,new SensorValidator().validate('missing',name,null,null,{},now)];
-    return [name, !Number.isFinite(at) || at>now+2000 || now-at>staleMs ? {...s,health:'STALE',valid:false,readyForCalibration:false,reason:'No valid recent acquisition timestamp'} : {...s}]; })) as HealthSummary;
+    return [name, !Number.isFinite(at) || at>now+2000 || now-at>staleMs ? {...s,health:'STALE',valid:false,measurementValid:false,readyForCalibration:false,reason:'No valid recent acquisition timestamp'} : {...s}]; })) as HealthSummary;
 }
 export function decisionEligible(summary?: HealthSummary): boolean {
   if (!summary) return false;
@@ -110,7 +122,12 @@ export function ammoniaSpeciation(health: HealthSummary, tan?: unknown, waterTyp
     now-timestampMs(t.timestamp)<=HEALTH_CONFIG.tanMaxAgeMs && timestampMs(t.timestamp)<=now+2000) {
     result.tan=t; result.concentrationReason='TAN available; valid source sensors and freshwater conditions are also required';
   }
-  if (!temperature.valid || !ph.valid || temperature.value === null || ph.value === null) return result;
+  const qualified = (source: SensorHealth) => source.valid && source.health==='VALID' && source.stability==='STABLE' && source.calibration==='CALIBRATED';
+  if (!qualified(temperature) || !qualified(ph) || temperature.value === null || ph.value === null) {
+    const reason = [temperature,ph].find(source=>source.health==='UNSTABLE') ? 'Stable pH and temperature are required' :
+      [temperature,ph].find(source=>source.calibration!=='CALIBRATED') ? 'Calibrated pH and temperature are required' : result.reason;
+    return {...result,reason};
+  }
   if (waterType !== 'freshwater') return {...result,reason:'Freshwater equation requires freshwater conditions; salinity correction is not implemented'};
   if (temperature.value < 0 || temperature.value > 50) return {...result,reason:'Outside freshwater speciation temperature domain (0–50 C)'};
   result.pKa=0.09018+2729.92/(273.2+temperature.value);

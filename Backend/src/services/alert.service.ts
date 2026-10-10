@@ -41,9 +41,13 @@ class AlertService {
     return this.mapAlert(alert);
   }
 
-  async updateStatus(alertId: string, status: AlertStatus): Promise<AlertRecord | null> {
-    const alert = await AlertModel.findByPk(alertId);
+  async updateStatus(alertId: string, status: AlertStatus, deviceIds?: string[]): Promise<AlertRecord | null> {
+    const alert = await AlertModel.findOne({ where: { id: alertId, ...(deviceIds ? { deviceId: { [Op.in]: deviceIds } } : {}) } });
     if (!alert) {
+      return null;
+    }
+
+    if ((status === 'ACKNOWLEDGED' && alert.status !== 'ACTIVE') || (status === 'RESOLVED' && alert.status === 'RESOLVED')) {
       return null;
     }
 
@@ -56,13 +60,13 @@ class AlertService {
     await AlertModel.update({ smsSentAt: sentAt }, { where: { id: alertId } });
   }
 
-  async getAlertById(alertId: string): Promise<AlertRecord | null> {
-    const alert = await AlertModel.findByPk(alertId);
+  async getAlertById(alertId: string, deviceIds?: string[]): Promise<AlertRecord | null> {
+    const alert = await AlertModel.findOne({ where: { id: alertId, ...(deviceIds ? { deviceId: { [Op.in]: deviceIds } } : {}) } });
     return alert ? this.mapAlert(alert) : null;
   }
 
-  async getAlerts(limit: number = 50, status?: AlertStatus): Promise<AlertRecord[]> {
-    const where = status ? { status } : {};
+  async getAlerts(limit: number = 50, status?: AlertStatus, deviceIds?: string[]): Promise<AlertRecord[]> {
+    const where = { ...(status ? { status } : {}), ...(deviceIds ? { deviceId: { [Op.in]: deviceIds } } : {}) };
     const alerts = await AlertModel.findAll({
       where,
       order: [['createdAt', 'DESC']],

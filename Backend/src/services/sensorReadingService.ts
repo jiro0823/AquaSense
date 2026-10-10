@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger';
 import { SensorReading as SensorReadingModel } from '../database/models/SensorReading';
 import { Op } from 'sequelize';
+import { getDatabase } from '../database/connection';
 import {ruleEngine} from './ruleEngine.service';
 import { SensorValidator, SENSOR_NAMES, numeric, timestampMs, refreshHealth, ammoniaSpeciation, type HealthSummary, type AmmoniaSpeciation, HEALTH_CONFIG } from './sensorHealth';
 export interface SensorReading {
@@ -13,7 +14,6 @@ export interface SensorReading {
 export interface SensorStatistics { parameter: string; current: number|null; average: number|null; min: number|null; max: number|null }
 class SensorReadingService {
   private validator = new SensorValidator();
-  private sequences = new Map<string,{boot:string; sequence:number; at:number}>();
   private transitions = new Map<string,string>();
   private logTransitions(device: string, health: HealthSummary) {
     for (const name of SENSOR_NAMES) { const key=`${device}:${name}`, next=health[name].health, prev=this.transitions.get(key);
@@ -24,27 +24,34 @@ class SensorReadingService {
   async ingest(deviceId: string, payload: Record<string,any>): Promise<SensorReading> {
     const now=Date.now();
     const age=payload.sampleAgeMs===undefined?0:numeric(payload.sampleAgeMs);
-    let acquired = payload.timestamp === undefined ? age!==null && age>=0 ? now-age : NaN : timestampMs(payload.timestamp);
-    let replay = false;
-    if (typeof payload.bootId==='number' && Number.isInteger(payload.sequence) && payload.sequence>=0) {
-      const prior=this.sequences.get(deviceId), boot=String(payload.bootId);
-      if (prior?.boot===boot && payload.sequence<=prior.sequence) { acquired=prior.at; replay=true; }
-      else this.sequences.set(deviceId,{boot,sequence:payload.sequence,at:acquired});
-      if(this.sequences.size>512) this.sequences.delete(this.sequences.keys().next().value!);
-    }
-    const timestamp = Number.isFinite(acquired) ? new Date(acquired) : new Date(now);
+    if (age===null || age<0 || age>86_400_000) throw new Error('Invalid sampleAgeMs');
+    const timestampInput=payload.acquiredAt ?? payload.timestamp;
+    const acquired = timestampInput === undefined ? now-age : timestampMs(timestampInput);
+    if (!Number.isFinite(acquired) || acquired < Date.UTC(2000,0,1) || acquired > now+2000 || now-acquired>HEALTH_CONFIG.staleMs) throw new Error('Invalid, future, or stale acquisition timestamp');
+    const timestamp = new Date(acquired);
+    const bootId=typeof payload.bootId==='string' && payload.bootId.length<=64 ? payload.bootId : null;
+    const sequenceId=bootId!==null && Number.isSafeInteger(payload.sequence) && payload.sequence>=0 ? payload.sequence : null;
     const unit=payload.turbidityUnit === 'raw_adc' ? 'raw_adc' : payload.turbidityUnit === 'NTU' ? 'NTU' : 'unknown';
-    const sensorHealth=Object.fromEntries(SENSOR_NAMES.map(name=>[name,this.validator.validate(deviceId,name,
-      payload[name], replay ? timestamp : payload.sensorTimestamps?.[name] ?? this.sensorTimestamp(payload.sensors?.[name],now,Number.isFinite(acquired)?timestamp:'invalid'),payload.sensors?.[name],now,name==='turbidity'?unit:undefined)])) as HealthSummary;
-    this.logTransitions(deviceId,sensorHealth);
-    const speciation=ammoniaSpeciation(sensorHealth,payload.tan,payload.waterType ?? 'freshwater',now);
-    const oxygen=numeric(payload.do ?? payload.dissolvedOxygen);
-    const doMeasured=payload.doMeasured!==false && oxygen!==null && oxygen>=0 && oxygen<=20 && Number.isFinite(acquired) && now-acquired<=HEALTH_CONFIG.staleMs && acquired<=now+2000;
-    const values=Object.fromEntries(SENSOR_NAMES.map(name=>[name,sensorHealth[name].valid ? sensorHealth[name].value : null]));
-    const model=await SensorReadingModel.create({...values,deviceId,do:doMeasured?oxygen:null,doMeasured,
-      ammonia:speciation.nh3N,turbidityUnit:unit,sensorHealth,speciation,
-      location:typeof payload.location==='string'?payload.location.slice(0,255):deviceId,timestamp});
-    return this.mapSensorModel(model);
+    const result=await getDatabase().transaction(async transaction=>{
+      await getDatabase().query('SELECT pg_advisory_xact_lock(hashtext(:deviceId))',{replacements:{deviceId},transaction});
+      if (bootId!==null && sequenceId!==null) {
+        const duplicate=await SensorReadingModel.findOne({where:{deviceId,bootId,sequenceId},transaction});
+        if (duplicate) return {model:duplicate,sensorHealth:null as HealthSummary|null,inserted:false};
+      }
+      const latest=await SensorReadingModel.findOne({where:{deviceId},order:[['timestamp','DESC']],transaction});
+      if (latest && ((bootId!==null && latest.bootId===bootId && sequenceId!==null && latest.sequenceId!==null && sequenceId<=Number(latest.sequenceId)) || acquired <= new Date(latest.timestamp).getTime())) throw new Error('Obsolete sensor frame');
+      const validationNow=Date.now();
+      const sensorHealth=Object.fromEntries(SENSOR_NAMES.map(name=>[name,this.validator.validate(deviceId,name,
+        payload[name], payload.sensorTimestamps?.[name] ?? this.sensorTimestamp(payload.sensors?.[name],validationNow,timestamp),payload.sensors?.[name],validationNow,name==='turbidity'?unit:undefined)])) as HealthSummary;
+      const speciation=ammoniaSpeciation(sensorHealth,payload.tan,payload.waterType ?? 'freshwater',validationNow);
+      const values=Object.fromEntries(SENSOR_NAMES.map(name=>[name,sensorHealth[name].valid ? sensorHealth[name].value : null]));
+      const model=await SensorReadingModel.create({...values,deviceId,do:null,doMeasured:false,bootId,sequenceId,
+        ammonia:speciation.nh3N,turbidityUnit:unit,sensorHealth,speciation,
+        location:typeof payload.location==='string'?payload.location.slice(0,255):deviceId,timestamp},{transaction});
+      return {model,sensorHealth,inserted:true};
+    });
+    if (result.inserted && result.sensorHealth) this.logTransitions(deviceId,result.sensorHealth);
+    return this.mapSensorModel(result.model);
   }
   private sensorTimestamp(diagnostic:any,now:number,fallback:Date|string):Date|string {
     if(diagnostic?.sampleAgeMs===undefined) return fallback;
@@ -53,7 +60,8 @@ class SensorReadingService {
   }
   async addSensorReading(deviceId:string,temperature:unknown,ph:unknown,do_value:unknown,turbidity:unknown,
     _ammonia:unknown=null,location='Default Location',timestamp=new Date(),doMeasured=true,orp:unknown=null) {
-    return this.ingest(deviceId,{temperature,ph,do:do_value,turbidity,location,timestamp:timestamp.toISOString(),doMeasured,orp});
+    void do_value; void doMeasured;
+    return this.ingest(deviceId,{temperature,ph,turbidity,location,timestamp:timestamp.toISOString(),orp});
   }
   async getLatestReading(): Promise<SensorReading|null> {
     const reading=await SensorReadingModel.findOne({order:[['createdAt','DESC']]});
@@ -84,22 +92,25 @@ class SensorReadingService {
     const sensorHealth=current?refreshHealth(original):original;
     if (current) this.logTransitions(reading.deviceId,sensorHealth);
     const speciation=ammoniaSpeciation(sensorHealth,reading.speciation?.tan,reading.speciation?.waterType??'freshwater',current?Date.now():at);
-    const stale=current && Date.now()-at>HEALTH_CONFIG.staleMs;
     const alerts=ruleEngine({temperature:sensorHealth.temperature.valid?sensorHealth.temperature.value:null,ph:sensorHealth.ph.valid?sensorHealth.ph.value:null,
       turbidity:sensorHealth.turbidity.valid?sensorHealth.turbidity.value:null,turbidityUnit:reading.turbidityUnit,
-      dissolvedOxygen:!stale&&reading.doMeasured?reading.do:null,dissolvedOxygenMeasured:!stale&&reading.doMeasured});
+      dissolvedOxygen:null,dissolvedOxygenMeasured:false});
     const condition=(name:'temperature'|'ph'|'turbidity',prefix:string)=> {
       if(!sensorHealth[name].valid) return 'UNAVAILABLE';
       if(name==='turbidity' && reading.turbidityUnit!=='NTU') return 'UNKNOWN (RAW ADC)';
       const related=alerts.filter(a=>a.category.startsWith(prefix));
-      return related.some(a=>a.severity==='CRITICAL'||a.severity==='EMERGENCY')?'CRITICAL':related.length?'WARNING':'NORMAL';
+      if (related.some(a=>a.severity==='CRITICAL'||a.severity==='EMERGENCY')) return 'CRITICAL';
+      if (related.length) return 'WARNING';
+      return sensorHealth[name].calibration==='CALIBRATED' && sensorHealth[name].stability==='STABLE' ? 'NORMAL' : 'CALIBRATION REQUIRED';
     };
     const waterQuality={temperature:condition('temperature','TEMP'),ph:condition('ph','PH'),turbidity:condition('turbidity','TURBIDITY'),orp:'NO WATER-QUALITY POLICY'};
-    const status=Object.values(waterQuality).includes('CRITICAL')?'critical':Object.values(waterQuality).includes('WARNING')?'warning':Object.values(waterQuality).includes('UNAVAILABLE')?'unavailable':'normal';
+    const qualityStates=Object.values(waterQuality);
+    const status=qualityStates.includes('CRITICAL')?'critical':qualityStates.includes('WARNING')?'warning':
+      qualityStates.some(state=>state==='UNAVAILABLE' || state==='CALIBRATION REQUIRED' || state.startsWith('UNKNOWN'))?'unavailable':'normal';
     return {id:reading.id,deviceId:reading.deviceId,temperature:sensorHealth.temperature.valid?sensorHealth.temperature.value:null,
       ph:sensorHealth.ph.valid?sensorHealth.ph.value:null,turbidity:sensorHealth.turbidity.valid?sensorHealth.turbidity.value:null,
-      orp:sensorHealth.orp.valid?sensorHealth.orp.value:null,do:!stale&&reading.doMeasured?reading.do:null,
-      doMeasured:!stale&&reading.doMeasured,ammonia:speciation.nh3N,sensorHealth,speciation,waterQuality,status,turbidityUnit:reading.turbidityUnit||'unknown',
+      orp:sensorHealth.orp.valid?sensorHealth.orp.value:null,do:null,
+      doMeasured:false,ammonia:speciation.nh3N,sensorHealth,speciation,waterQuality,status,turbidityUnit:reading.turbidityUnit||'unknown',
       location:reading.location,timestamp:reading.timestamp,createdAt:reading.createdAt,updatedAt:reading.updatedAt};
   }
 }

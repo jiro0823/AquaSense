@@ -19,18 +19,24 @@ struct MqttPendingAcknowledgement {
     CommandReceipt receipt{};
 };
 
-class MqttManager {
+class MqttManager
+{
 public:
     MqttManager();
     bool begin();
+<<<<<<< HEAD
     void update(const SensorReadings& readings);
     void updateState(const SystemState& state);
     bool takeCommand(MqttActuatorCommand& command);
     void acknowledge(const MqttActuatorCommand& command, const CommandReceipt& receipt);
+=======
+    void update(const SensorReadings &readings);
+>>>>>>> origin/feature/major-improvements
     bool isConnected() const;
     bool isRunning() const;
 
 private:
+<<<<<<< HEAD
     static void runTask(void* context);
     static void messageCallback(char* topic, uint8_t* payload, unsigned int length);
     void onMessage(const char* topic, const uint8_t* payload, unsigned int length);
@@ -38,6 +44,11 @@ private:
     bool publishReadings(const SensorReadings& readings);
     bool publishAcknowledgement(const MqttActuatorCommand& command, const CommandReceipt& receipt,
                                 const SystemState& state);
+=======
+    static void runTask(void *context);
+    void run();
+    bool publishReadings(const SensorReadings &readings);
+>>>>>>> origin/feature/major-improvements
 
     // Only the worker touches network objects. PubSubClient callback only validates and queues.
     WiFiClient transport;

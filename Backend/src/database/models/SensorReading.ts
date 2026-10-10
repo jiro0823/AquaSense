@@ -1,5 +1,5 @@
 import type { HealthSummary, AmmoniaSpeciation } from '../../services/sensorHealth';
-import { DataTypes, Model } from 'sequelize';
+import { DataTypes, Model, Op } from 'sequelize';
 import { getDatabase } from '../connection';
 
 /**
@@ -12,6 +12,8 @@ export class SensorReading extends Model {
   declare ph: number | null;
   declare do: number | null; // Dissolved Oxygen
   declare doMeasured: boolean;
+  declare bootId: string | null;
+  declare sequenceId: number | null;
   declare turbidity: number | null;
   declare orp: number | null; // Millivolts; never substituted for dissolved oxygen.
   declare ammonia: number | null;
@@ -50,6 +52,8 @@ export const initializeSensorReadingModel = (): void => {
         allowNull: false,
         defaultValue: false,
       },
+      bootId: { type: DataTypes.STRING(64), allowNull: true },
+      sequenceId: { type: DataTypes.BIGINT, allowNull: true },
       turbidity: { type: DataTypes.FLOAT, allowNull: true, defaultValue: null },
       orp: { type: DataTypes.DOUBLE, allowNull: true, defaultValue: null },
       ammonia: { type: DataTypes.FLOAT, allowNull: true, defaultValue: null },
@@ -82,6 +86,7 @@ export const initializeSensorReadingModel = (): void => {
         {
           fields: ['location'],
         },
+        { name: 'sensor_readings_device_frame_identity_uq', unique: true, fields: ['device_id', 'boot_id', 'sequence_id'], where: { boot_id: { [Op.ne]: null }, sequence_id: { [Op.ne]: null } } },
       ],
     }
   );

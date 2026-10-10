@@ -5,7 +5,7 @@ public:
     void begin();
     bool setPumps(bool fill, bool drain);
     bool setAerator(bool on);
-    void allOff();
+    bool allOff();
     bool isReady() const { return ready; }
     bool fillOn() const { return fill; }
     bool drainOn() const { return drain; }

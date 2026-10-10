@@ -11,6 +11,38 @@ interface UseWaterQualityWebSocketOptions {
   url?: string;
 }
 
+const parseTimestamp = (value: unknown): number | null => {
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return null;
+};
+
+const isOlderReading = (incoming: WaterQualityReading, current: WaterQualityReading | null): boolean => {
+  // Acquisition time is authoritative. An invalid incoming timestamp must not
+  // be made acceptable by falling back to the database insertion time.
+  const incomingTimestamp = parseTimestamp(incoming?.timestamp);
+  if (incomingTimestamp === null) return true;
+  if (!current) return false;
+
+  const currentTimestamp = parseTimestamp(current.timestamp);
+  if (currentTimestamp !== null) return incomingTimestamp <= currentTimestamp;
+  if (current.timestamp != null) return true;
+
+  // If the current record has no acquisition timestamp, compare DB timestamps
+  // only when both are valid. Otherwise recency cannot be established safely.
+  const incomingCreatedAt = parseTimestamp(incoming.createdAt);
+  const currentCreatedAt = parseTimestamp(current.createdAt);
+  if (incomingCreatedAt === null || currentCreatedAt === null) return true;
+  return incomingCreatedAt <= currentCreatedAt;
+};
+
 export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOptions = {}) => {
   const { autoConnect = true, url = WEBSOCKET_URL } = options;
 
@@ -47,11 +79,13 @@ export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOption
         console.log('[WebSocket] Connected successfully');
         setIsConnected(true);
         setError(null);
+        setStatistics((current) => current ? { ...current, stale: true } : current);
       });
 
       socketRef.current.on('disconnect', (reason: string) => {
         console.warn('[WebSocket] Disconnected', reason);
         setIsConnected(false);
+        setStatistics((current) => current ? { ...current, stale: true } : current);
         
         // Auto-reconnect if it was an unexpected disconnect
         if (reason !== 'io client namespace disconnect' && reason !== 'io server namespace disconnect') {
@@ -84,12 +118,12 @@ export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOption
 
       // Water quality event handlers
       socketRef.current.on('water:latest', (data: WaterQualityReading) => {
-        setLatestReading(data);
+        setLatestReading((current) => isOlderReading(data, current) ? current : data);
         setError(null); // Clear error on successful data
       });
 
       socketRef.current.on('water:new-reading', (data: WaterQualityReading) => {
-        setLatestReading(data);
+        setLatestReading((current) => isOlderReading(data, current) ? current : data);
       });
 
       socketRef.current.on('water:history', (data: WaterQualityReading[]) => {
@@ -97,11 +131,11 @@ export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOption
       });
 
       socketRef.current.on('water:stats', (data: WaterQualityStats) => {
-        setStatistics(data);
+        setStatistics({ ...data, stale: false });
       });
 
       socketRef.current.on('water:stats-update', (data: WaterQualityStats) => {
-        setStatistics(data);
+        setStatistics({ ...data, stale: false });
       });
 
       socketRef.current.on('water:alerts', (data: HealthAlert[]) => {

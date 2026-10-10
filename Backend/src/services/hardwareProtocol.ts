@@ -15,11 +15,25 @@ export const hardwareCommandSchema = z.object({ deviceId, action: z.enum(hardwar
   if (pump !== (value.durationMs !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom,
     message: 'durationMs is required only for pump commands (per phase for an exchange)' });
 });
+<<<<<<< HEAD
 const hardwareStateObject = z.object({
   fillPump: z.boolean(), drainPump: z.boolean(), aerator: z.boolean(), feederBusy: z.boolean(), buzzer: z.boolean(),
   automation: z.boolean(), waterPhase: z.enum(['IDLE', 'DRAINING', 'TRANSITION', 'REFILLING', 'COMPLETE', 'FAULT']),
   fault: z.string().max(64), relaysReady: z.boolean(), timeValid: z.boolean(), wifiConnected: z.boolean(),
   mqttConnected: z.boolean(), uptimeMs: z.number().int().min(0).max(0xffffffff),
+=======
+export const hardwareStateSchema = z.object({
+  fillPump: z.boolean(), drainPump: z.boolean(), aerator: z.boolean(),
+  feederBusy: z.boolean(), buzzer: z.boolean(), automation: z.boolean(),
+  waterPhase: z.enum(['IDLE', 'DRAINING', 'SETTLING_AFTER_DRAIN', 'REFILLING', 'COOLDOWN', 'COMPLETE', 'FAULT']),
+  fault: z.string().max(64), relaysReady: z.boolean(), timeValid: z.boolean(),
+  wifiConnected: z.boolean(), mqttConnected: z.boolean(),
+  uptimeMs: z.number().int().min(0).max(0xffffffff),
+}).strict();
+export const receiptSchema = z.object({
+  id: z.string().uuid(), source: z.enum(['hardware', 'feeding']),
+  result: z.string().min(1).max(64),
+>>>>>>> origin/feature/major-improvements
 }).strict();
 export const hardwareStateSchema = hardwareStateObject.superRefine((value, context) => {
   if (value.fillPump && value.drainPump) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Fill and drain cannot both be on' });

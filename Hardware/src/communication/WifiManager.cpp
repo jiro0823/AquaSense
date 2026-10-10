@@ -13,19 +13,27 @@ void WifiManager::begin() {
     WiFi.setAutoReconnect(true);
     WiFi.begin(Secrets::WIFI_SSID, Secrets::WIFI_PASSWORD);
     lastReconnectMs = millis();
-    Serial.println("WiFi connection started; local monitoring remains active.");
+    lastCheckMs = lastReconnectMs;
+    Serial.println("WiFi connection started.");
 }
 
-bool WifiManager::isConnected() const { return WiFi.status() == WL_CONNECTED; }
+bool WifiManager::isConnected() const { return wasConnected; }
 
 void WifiManager::update(uint32_t nowMs) {
-    const bool connected = isConnected();
-    if (connected != wasConnected) {
-        Serial.println(connected ? "WiFi connected" : "WiFi disconnected");
-        wasConnected = connected;
+    // During connection attempts the reference checks the live status on each
+    // pass. Once connected, defer link polling to its five-second cadence.
+    if (!wasConnected || uint32_t(nowMs - lastCheckMs) >= DeviceConfig::WIFI_CHECK_INTERVAL_MS) {
+        lastCheckMs = nowMs;
+        const bool connected = WiFi.status() == WL_CONNECTED;
+        if (connected != wasConnected) {
+            Serial.println(connected ? "WiFi connected" : "WiFi disconnected");
+            wasConnected = connected;
+        }
+        if (wasConnected) lastReconnectMs = nowMs;
     }
-    if (!connected && uint32_t(nowMs - lastReconnectMs) >= DeviceConfig::WIFI_RECONNECT_INTERVAL_MS) {
+    if (!wasConnected && uint32_t(nowMs - lastReconnectMs) >= DeviceConfig::WIFI_RECONNECT_INTERVAL_MS) {
         lastReconnectMs = nowMs;
-        WiFi.reconnect(); // Start a connection attempt; never wait in a retry loop.
+        WiFi.disconnect();
+        WiFi.begin(Secrets::WIFI_SSID, Secrets::WIFI_PASSWORD); // Nonblocking retry from the reference flow.
     }
 }

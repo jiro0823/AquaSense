@@ -182,15 +182,27 @@ bool MqttManager::publishReadings(const SensorReadings& reading) {
         snprintf(statusTopic, sizeof(statusTopic), "aquasense/%s/status", name);
         if (sensorConnected && valid) snprintf(valueText, sizeof(valueText), decimals == 1 ? "%.1f" : "%.2f", double(value));
         else snprintf(valueText, sizeof(valueText), "DISCONNECTED");
+        const bool effectiveConnected = sensorConnected && valid;
         const bool valuePublished = client.publish(topic, valueText, true);
-        const bool statusPublished = client.publish(statusTopic, sensorConnected ? "CONNECTED" : "DISCONNECTED", true);
+        const bool statusPublished = client.publish(statusTopic, effectiveConnected ? "CONNECTED" : "DISCONNECTED", true);
         return valuePublished && statusPublished;
     };
     bool success = client.publish("aquasense/device-id", DeviceConfig::DEVICE_ID, true);
     success = publishSensor("orp", reading.orpConnected, reading.orpValid, reading.orpMv, 1) && success;
     success = publishSensor("temperature", reading.temperatureConnected, reading.temperatureValid, reading.temperatureC, 2) && success;
     success = publishSensor("ph", reading.phConnected, reading.phValid, reading.ph, 2) && success;
+    // Preserve the existing topic contract: the backend interprets
+    // `turbidity` as raw ADC and `turbidity-ntu` as calibrated NTU.
     success = publishSensor("turbidity-ntu", reading.turbidityConnected, reading.turbidityValid, reading.turbidityRaw, 1) && success;
+    char valueText[24];
+    if (reading.turbidityConnected && reading.turbidityValid)
+        snprintf(valueText, sizeof(valueText), "%.0f", double(reading.turbidityDiagnostics.rawAdc));
+    else
+        snprintf(valueText, sizeof(valueText), "DISCONNECTED");
+    const bool rawValuePublished = client.publish("aquasense/turbidity", valueText, true);
+    const bool rawStatusPublished = client.publish("aquasense/turbidity/status",
+        reading.turbidityConnected && reading.turbidityValid ? "CONNECTED" : "DISCONNECTED", true);
+    success = rawValuePublished && rawStatusPublished && success;
     return success;
 }
 

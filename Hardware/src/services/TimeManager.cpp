@@ -3,10 +3,16 @@
 #include <time.h>
 #include <sys/time.h>
 #include <esp_sntp.h>
+#include <Wire.h>
 #include "config/DeviceConfig.h"
 
 void TimeManager::begin() {
+    Wire.beginTransmission(0x68);
+    const bool addressPresent = Wire.endTransmission() == 0;
+    if (!addressPresent) Serial.println("RTC: not present (optional)");
+    else Serial.println("RTC: DS3231 address detected at 0x68");
     available = rtc.begin();
+    if (addressPresent && !available) Serial.println("RTC: present but initialization failed");
     const bool metadataReady = metadata.begin("aq-clock", false);
     // Only a RTC previously synchronized by this firmware is trusted as UTC.
     if (available && metadataReady && metadata.getBool("utc", false) && !rtc.lostPower()) {

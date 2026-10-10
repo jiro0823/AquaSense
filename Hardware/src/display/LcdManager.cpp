@@ -1,9 +1,15 @@
 #include "LcdManager.h"
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
 #include <stdio.h>
 #include <string.h>
 #include "config/DeviceConfig.h"
+#if __has_include("secrets/Secrets.h")
+#include "secrets/Secrets.h"
+#else
+#include "secrets/Secrets.example.h"
+#endif
 
 LcdManager::LcdManager() : lcd(DeviceConfig::LCD_ADDRESS, DeviceConfig::LCD_COLUMNS, DeviceConfig::LCD_ROWS) {}
 
@@ -20,13 +26,23 @@ void LcdManager::begin() {
     uint8_t lightBlock[8] = {0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010};
     lcd.createChar(0, fullBlock);
     lcd.createChar(1, lightBlock);
-    writeRow(0, "      AQUASENSE");
+    writeRow(0, "     AQUASENSE");
     writeRow(1, " Water Quality Mon. ");
-    writeRow(2, "Starting sensors...");
-    writeRow(3, "                    ");
-    welcomeStartedMs = millis();
-    showingWelcome = true;
-    wifiStageStartedMs = welcomeStartedMs;
+    writeRow(2, "                    ");
+    drawProgress(3, 0, 100);
+    for (uint32_t percent = 1; percent <= 100; percent += 5) {
+        drawProgress(3, percent, 100);
+        delay(80);
+    }
+    for (uint8_t blink = 0; blink < 2; ++blink) {
+        delay(250);
+        lcd.noDisplay();
+        delay(150);
+        lcd.display();
+    }
+    delay(300);
+    lcd.clear();
+    wifiStageStartedMs = millis();
 }
 
 void LcdManager::writeRow(uint8_t row, const char* text) {
@@ -40,10 +56,9 @@ void LcdManager::writeRow(uint8_t row, const char* text) {
 }
 
 void LcdManager::drawProgress(uint8_t row, uint32_t elapsedMs, uint32_t timeoutMs) {
-    char progress[DeviceConfig::LCD_COLUMNS + 1];
-    const uint32_t cycle = timeoutMs ? elapsedMs % timeoutMs : 0;
+    const uint32_t boundedElapsed = timeoutMs && elapsedMs < timeoutMs ? elapsedMs : timeoutMs;
     const uint8_t filled = timeoutMs
-        ? uint8_t((uint64_t(cycle) * DeviceConfig::LCD_COLUMNS) / timeoutMs)
+        ? uint8_t((uint64_t(boundedElapsed) * DeviceConfig::LCD_COLUMNS + timeoutMs / 2) / timeoutMs)
         : 0;
     lcd.setCursor(0, row);
     for (uint8_t i = 0; i < DeviceConfig::LCD_COLUMNS; ++i) lcd.write(byte(i < filled ? 0 : 1));
@@ -68,38 +83,75 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
 }
 
 void LcdManager::update(const SensorReadings& reading, const SystemState& state, uint32_t nowMs) {
-    if (!available || uint32_t(nowMs - lastRefreshMs) < DeviceConfig::LCD_REFRESH_INTERVAL_MS) return;
+    if (uint32_t(nowMs - lastRefreshMs) < DeviceConfig::LCD_REFRESH_INTERVAL_MS) return;
     lastRefreshMs = nowMs;
+    Wire.beginTransmission(DeviceConfig::LCD_ADDRESS);
+    if (Wire.endTransmission() != 0) {
+        available = false;
+        return;
+    }
+    if (!available) {
+        lcd.init();
+        lcd.backlight();
+        uint8_t fullBlock[8] = {0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111};
+        uint8_t lightBlock[8] = {0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010};
+        lcd.createChar(0, fullBlock);
+        lcd.createChar(1, lightBlock);
+        available = true;
+        startupComplete = false;
+        wasWifiConnected = false;
+        wasMqttConnected = false;
+        wifiStageStartedMs = nowMs;
+        mqttStageStartedMs = 0;
+    }
     if (!state.wifiConnected) {
         if (wasWifiConnected || wifiStageStartedMs == 0) wifiStageStartedMs = nowMs;
         mqttStageStartedMs = 0;
         startupComplete = false;
         successScreenActive = false;
-        if (showingWelcome && uint32_t(nowMs - welcomeStartedMs) < DeviceConfig::LCD_WELCOME_DURATION_MS) {
-            drawProgress(3, uint32_t(nowMs - welcomeStartedMs), DeviceConfig::LCD_WELCOME_DURATION_MS);
-            wasWifiConnected = false;
-            wasMqttConnected = state.mqttConnected;
-            return;
-        }
-        showingWelcome = false;
-        writeRow(0, "AQUASENSE");
-        writeRow(1, "Connecting WiFi...");
-        writeRow(2, "Monitoring continues");
-        drawProgress(3, uint32_t(nowMs - wifiStageStartedMs), DeviceConfig::WIFI_CONNECT_TIMEOUT_MS);
+        wifiSuccessScreenActive = false;
+        char ssidRow[DeviceConfig::LCD_COLUMNS + 1];
+        snprintf(ssidRow, sizeof(ssidRow), "   %.17s", Secrets::WIFI_SSID);
+        writeRow(0, "Connecting WiFi");
+        writeRow(1, ssidRow);
+        const uint32_t wifiElapsed = uint32_t(nowMs - wifiStageStartedMs);
+        drawProgress(3, wifiElapsed, DeviceConfig::WIFI_CONNECT_TIMEOUT_MS);
+        if (wifiElapsed > DeviceConfig::WIFI_CONNECT_TIMEOUT_MS) wifiStageStartedMs = nowMs;
         wasWifiConnected = false;
         wasMqttConnected = state.mqttConnected;
         return;
     }
 
+    // Preserve the reference flow's WiFi success screen before displaying
+    // MQTT progress. The shared state exposes connection booleans only, so
+    // this transition is inferred from the WiFi rising edge.
+    if (!wasWifiConnected && !wifiSuccessScreenActive) {
+        const String ip = WiFi.localIP().toString();
+        writeRow(0, "WiFi OK");
+        writeRow(1, ip.c_str());
+        writeRow(2, "Starting MQTT...");
+        drawProgress(3, 100, 100);
+        wifiSuccessStartedMs = nowMs;
+        wifiSuccessScreenActive = true;
+        mqttStageStartedMs = nowMs;
+        wasWifiConnected = true;
+        wasMqttConnected = false;
+        return;
+    }
+    if (wifiSuccessScreenActive) {
+        if (uint32_t(nowMs - wifiSuccessStartedMs) < DeviceConfig::LCD_SUCCESS_HOLD_MS) return;
+        wifiSuccessScreenActive = false;
+    }
+
     if (!state.mqttConnected) {
-        if (wasWifiConnected == false || wasMqttConnected || mqttStageStartedMs == 0) mqttStageStartedMs = nowMs;
+        if (wasMqttConnected || mqttStageStartedMs == 0) mqttStageStartedMs = nowMs;
         startupComplete = false;
         successScreenActive = false;
-        showingWelcome = false;
-        writeRow(0, "AQUASENSE");
-        writeRow(1, "WiFi connected");
-        writeRow(2, "Connecting MQTT...");
-        drawProgress(3, uint32_t(nowMs - mqttStageStartedMs), DeviceConfig::MQTT_CONNECT_TIMEOUT_MS);
+        writeRow(0, "Connecting MQTT...");
+        writeRow(1, DeviceConfig::MQTT_HOST);
+        const uint32_t mqttElapsed = uint32_t(nowMs - mqttStageStartedMs);
+        drawProgress(3, mqttElapsed, DeviceConfig::MQTT_CONNECT_TIMEOUT_MS);
+        if (mqttElapsed > DeviceConfig::MQTT_CONNECT_TIMEOUT_MS) mqttStageStartedMs = nowMs;
         wasWifiConnected = true;
         wasMqttConnected = false;
         return;
@@ -122,7 +174,6 @@ void LcdManager::update(const SensorReadings& reading, const SystemState& state,
         successScreenActive = false;
     }
 
-    showingWelcome = false;
     showReadings(reading, nowMs);
     wasWifiConnected = true;
     wasMqttConnected = true;

@@ -13,6 +13,7 @@
 #include "controllers/SystemController.h"
 
 namespace {
+enum class AppState { Boot, WifiConnecting, MqttConnecting, Running };
 SensorManager sensors;
 WifiManager wifi;
 MqttManager mqtt;
@@ -27,6 +28,64 @@ BuzzerManager buzzer;
 SystemController control(relays, water, aerator, feeder, buzzer);
 SystemState state;
 uint32_t lastLoggedSequence = 0;
+AppState appState = AppState::Boot;
+uint32_t connectionSuccessStartedMs = 0;
+bool connectionSuccessHoldActive = false;
+
+void updateAppState(uint32_t nowMs) {
+    const bool wifiConnected = wifi.isConnected();
+    const bool mqttConnected = mqtt.isConnected();
+    if (appState == AppState::Boot) {
+        appState = AppState::WifiConnecting;
+        connectionSuccessHoldActive = false;
+        Serial.println("Connection state: WiFi connecting");
+    }
+    if (appState == AppState::WifiConnecting) {
+        if (!wifiConnected) { connectionSuccessHoldActive = false; return; }
+        if (!connectionSuccessHoldActive) {
+            connectionSuccessHoldActive = true;
+            connectionSuccessStartedMs = nowMs;
+            return;
+        }
+        if (uint32_t(nowMs - connectionSuccessStartedMs) >= DeviceConfig::LCD_SUCCESS_HOLD_MS) {
+            appState = AppState::MqttConnecting;
+            connectionSuccessHoldActive = false;
+            Serial.println("Connection state: MQTT connecting");
+        }
+        return;
+    }
+    if (appState == AppState::MqttConnecting) {
+        if (!wifiConnected) {
+            appState = AppState::WifiConnecting;
+            connectionSuccessHoldActive = false;
+            Serial.println("Connection state: WiFi reconnecting");
+            return;
+        }
+        if (!mqttConnected) { connectionSuccessHoldActive = false; return; }
+        if (!connectionSuccessHoldActive) {
+            connectionSuccessHoldActive = true;
+            connectionSuccessStartedMs = nowMs;
+            return;
+        }
+        if (uint32_t(nowMs - connectionSuccessStartedMs) >= DeviceConfig::LCD_SUCCESS_HOLD_MS) {
+            appState = AppState::Running;
+            connectionSuccessHoldActive = false;
+            Serial.println("AquaSense RUNNING.");
+        }
+        return;
+    }
+    if (appState == AppState::Running) {
+        if (!wifiConnected) {
+            appState = AppState::WifiConnecting;
+            connectionSuccessHoldActive = false;
+            Serial.println("WiFi lost; returning to connection flow.");
+        } else if (!mqttConnected) {
+            appState = AppState::MqttConnecting;
+            connectionSuccessHoldActive = false;
+            Serial.println("MQTT lost; returning to connection flow.");
+        }
+    }
+}
 }
 void setup() {
     Serial.begin(DeviceConfig::SERIAL_BAUD);
@@ -41,16 +100,17 @@ void setup() {
 }
 void loop() {
     const uint32_t nowMs = millis();
-    sensors.update(nowMs);
     MqttActuatorCommand mqttCommand{};
     CommandReceipt mqttReceipt{};
-    const bool hasMqttCommand = mqtt.takeCommand(mqttCommand);
-    if (hasMqttCommand) mqttReceipt = control.handle(mqttCommand.command, nowMs);
     FeedingSchedules schedules;
     if (backend.takeSchedules(schedules)) feeder.setSchedules(schedules);
-    const SensorReadings& readings = sensors.getReadings();
     wifi.update(nowMs);
     timeManager.update(nowMs, wifi.isConnected());
+    updateAppState(nowMs);
+    const bool hasMqttCommand = appState == AppState::Running && mqtt.takeCommand(mqttCommand);
+    if (hasMqttCommand) mqttReceipt = control.handle(mqttCommand.command, nowMs);
+    if (appState == AppState::Running) sensors.update(nowMs);
+    const SensorReadings& readings = sensors.getReadings();
     mqtt.update(readings);
     if (!wifi.isConnected() || !mqtt.isConnected()) control.stopRelayActuators(millis());
     control.update(readings, nowMs);

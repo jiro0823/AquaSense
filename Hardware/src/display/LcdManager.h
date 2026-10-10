@@ -14,14 +14,14 @@ private:
     void showReadings(const SensorReadings& readings, uint32_t nowMs);
     LiquidCrystal_I2C lcd;
     bool available = false;
-    bool showingWelcome = false;
     bool startupComplete = false;
     bool successScreenActive = false;
+    bool wifiSuccessScreenActive = false;
     bool wasWifiConnected = false;
     bool wasMqttConnected = false;
-    uint32_t welcomeStartedMs = 0;
     uint32_t lastRefreshMs = 0;
     uint32_t wifiStageStartedMs = 0;
     uint32_t mqttStageStartedMs = 0;
     uint32_t successStartedMs = 0;
+    uint32_t wifiSuccessStartedMs = 0;
 };

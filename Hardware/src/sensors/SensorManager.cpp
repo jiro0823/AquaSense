@@ -39,8 +39,6 @@ void SensorManager::begin() {
     efuseCharacterized = source != ESP_ADC_CAL_VAL_DEFAULT_VREF;
     snprintf(readings.bootId, sizeof(readings.bootId), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
     temperatureSensor.begin();
-    // Refuse ambiguous bus enumeration instead of silently switching probes.
-    temperatureAddressValid = temperatureSensor.getDeviceCount() == 1 && temperatureSensor.getAddress(temperatureAddress, 0);
     temperatureSensor.setResolution(DeviceConfig::TEMPERATURE_RESOLUTION_BITS);
     temperatureSensor.setWaitForConversion(false);
 }
@@ -66,65 +64,57 @@ void SensorManager::startSampling(Phase next, uint32_t nowMs) {
     if (next == Phase::Turbidity || next == Phase::Orp) delay(2);
     phase = next;
     adcSum = 0;
-    adcSamples = 0;
     voltageSumMv = 0;
     burst = AnalogDiagnostics{};
     burst.efuseCharacterized = efuseCharacterized;
-    lastAdcSampleUs = micros();
     (void)nowMs;
 }
 
 void SensorManager::startVoltageSampling(Phase next) {
     phase = next;
     voltageSumMv = 0;
-    voltageSamples = 0;
-    lastAdcSampleUs = micros();
 }
 
 void SensorManager::update(uint32_t nowMs) {
     if (phase == Phase::Idle) {
-        if (hasSample && uint32_t(nowMs - lastCompletedMs) < DeviceConfig::SENSOR_READ_INTERVAL_MS) return;
-        if (!temperatureAddressValid) {
-            temperatureAddressValid = temperatureSensor.getDeviceCount() == 1 &&
-                temperatureSensor.getAddress(temperatureAddress, 0);
-        }
+        if (hasSample && uint32_t(nowMs - lastSampleStartedMs) < DeviceConfig::SENSOR_READ_INTERVAL_MS) return;
+        lastSampleStartedMs = nowMs;
         pending = readings;
-        temperatureSensor.requestTemperatures();
-        phaseStartedMs = nowMs;
-        phase = Phase::Temperature;
+        // Keep the reference acquisition order on the shared ADC: pH,
+        // turbidity, ORP, then temperature. Temperature conversion is
+        // requested after analog sampling to avoid a long blocking wait.
+        startSampling(Phase::Ph, nowMs);
         return;
     }
     if (phase == Phase::Temperature) {
         if (uint32_t(nowMs - phaseStartedMs) < DeviceConfig::TEMPERATURE_CONVERSION_MS) return;
-        const float raw = temperatureAddressValid ? temperatureSensor.getTempC(temperatureAddress) : DEVICE_DISCONNECTED_C;
-        if (raw == DEVICE_DISCONNECTED_C) temperatureAddressValid = false;
+        const bool devicePresent = temperatureSensor.getDeviceCount() > 0;
+        const float raw = devicePresent ? temperatureSensor.getTempCByIndex(0) : DEVICE_DISCONNECTED_C;
         const float corrected = raw + CalibrationConfig::TEMPERATURE_OFFSET_C;
         const bool sampleValid = raw != DEVICE_DISCONNECTED_C && isfinite(corrected) &&
             corrected > Thresholds::TEMPERATURE_MIN_C && corrected < Thresholds::TEMPERATURE_MAX_C;
         pending.temperatureConnected = updateConnection(sampleValid, pending.temperatureConnected,
             temperatureConnectCount, temperatureDisconnectCount, "TEMP");
         if (pending.temperatureConnected && sampleValid) {
-            pending.temperatureC = SensorConversions::filter(readings.temperatureC, corrected, temperatureInitialized);
+            pending.temperatureC = corrected;
             pending.temperatureValid = true;
         } else if (!pending.temperatureConnected) {
+            pending.temperatureC = NAN;
             pending.temperatureValid = false;
         }
-        temperatureInitialized = pending.temperatureConnected && pending.temperatureValid;
         pending.temperatureSampledAtMs = nowMs;
-        // Match the supplied sketch's analog read order. pH is sampled first
-        // because an unplugged pH input can disturb the shared ADC mux.
-        startSampling(Phase::Ph, nowMs);
+        finishSample(nowMs);
         return;
     }
     const bool samplingVoltage = phase == Phase::PhVoltage || phase == Phase::OrpVoltage;
-    const uint32_t nowUs = micros();
-    if (uint32_t(nowUs - lastAdcSampleUs) < DeviceConfig::ADC_SAMPLE_INTERVAL_US) return;
-    lastAdcSampleUs = nowUs;
     const int pin = phase == Phase::Turbidity ? Pins::TURBIDITY :
                     phase == Phase::Ph || phase == Phase::PhVoltage ? Pins::PH : Pins::ORP;
     if (samplingVoltage) {
-        voltageSumMv += analogReadMilliVolts(pin);
-        if (++voltageSamples < DeviceConfig::VOLTAGE_SAMPLE_COUNT) return;
+        voltageSumMv = 0;
+        for (uint8_t i = 0; i < DeviceConfig::VOLTAGE_SAMPLE_COUNT; ++i) {
+            voltageSumMv += analogReadMilliVolts(pin);
+            delayMicroseconds(DeviceConfig::ADC_SAMPLE_INTERVAL_US);
+        }
         burst.voltage = float(voltageSumMv) / DeviceConfig::VOLTAGE_SAMPLE_COUNT / 1000.0f;
         burst.sampledAtMs = nowMs;
         if (phase == Phase::PhVoltage) {
@@ -132,27 +122,40 @@ void SensorManager::update(uint32_t nowMs) {
             if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED && isfinite(ph)) {
                 pending.ph = constrain(ph, 0.0f, 14.0f);
                 pending.phValid = true;
+            } else {
+                pending.ph = NAN;
+                pending.phValid = false;
             }
             pending.phDiagnostics = burst;
+            delayMicroseconds(200);
             startSampling(Phase::Turbidity, nowMs);
         } else {
             const float orp = SensorConversions::orpFromVoltage(burst.voltage);
             if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED && isfinite(orp)) {
                 pending.orpMv = orp;
                 pending.orpValid = true;
+            } else {
+                pending.orpMv = NAN;
+                pending.orpValid = false;
             }
             pending.orpDiagnostics = burst;
-            finishSample(nowMs);
+            delayMicroseconds(200);
+            temperatureSensor.requestTemperatures();
+            phaseStartedMs = nowMs;
+            phase = Phase::Temperature;
         }
         return;
     }
-    const uint16_t count = analogRead(pin);
-    adcSum += count;
-    burst.minimum = count < burst.minimum ? count : burst.minimum;
-    burst.maximum = count > burst.maximum ? count : burst.maximum;
-    burst.last = count;
-    if (!SensorConversions::adcUsable(count)) ++burst.clipped;
-    if (++adcSamples < DeviceConfig::ADC_SAMPLE_COUNT) return;
+    adcSum = 0;
+    for (uint8_t i = 0; i < DeviceConfig::ADC_SAMPLE_COUNT; ++i) {
+        const uint16_t count = analogRead(pin);
+        adcSum += count;
+        burst.minimum = count < burst.minimum ? count : burst.minimum;
+        burst.maximum = count > burst.maximum ? count : burst.maximum;
+        burst.last = count;
+        if (!SensorConversions::adcUsable(count)) ++burst.clipped;
+        delayMicroseconds(DeviceConfig::ADC_SAMPLE_INTERVAL_US);
+    }
 
     // Integer division matches the supplied Arduino sketch's ADC averaging.
     const int raw = adcSum / DeviceConfig::ADC_SAMPLE_COUNT;
@@ -166,10 +169,14 @@ void SensorManager::update(uint32_t nowMs) {
                     deviation <= CalibrationConfig::STABILITY_MAX_DEV;
         pending.turbidityConnected = updateConnection(connected, pending.turbidityConnected,
             turbidityConnectCount, turbidityDisconnectCount, "TURB");
-        if (pending.turbidityConnected && connected) {
+        if (pending.turbidityConnected) {
             pending.turbidityRaw = SensorConversions::turbidityFromAdc(raw);
             pending.turbidityValid = isfinite(pending.turbidityRaw);
-        } else if (!pending.turbidityConnected) pending.turbidityValid = false;
+        } else if (!pending.turbidityConnected) {
+            pending.turbidityRaw = NAN;
+            pending.turbidityValid = false;
+        }
+        delayMicroseconds(200);
         startSampling(Phase::Orp, nowMs);
     } else if (phase == Phase::Ph) {
         pending.phDiagnostics = burst;
@@ -177,10 +184,10 @@ void SensorManager::update(uint32_t nowMs) {
                     deviation <= CalibrationConfig::STABILITY_MAX_DEV;
         pending.phConnected = updateConnection(connected, pending.phConnected,
             phConnectCount, phDisconnectCount, "pH");
-        if (pending.phConnected && connected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
+        if (pending.phConnected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
             startVoltageSampling(Phase::PhVoltage);
         } else {
-            if (!pending.phConnected) pending.phValid = false;
+            if (!pending.phConnected) { pending.ph = NAN; pending.phValid = false; }
             startSampling(Phase::Turbidity, nowMs);
         }
     } else {
@@ -189,11 +196,13 @@ void SensorManager::update(uint32_t nowMs) {
                     deviation <= CalibrationConfig::STABILITY_MAX_DEV;
         pending.orpConnected = updateConnection(connected, pending.orpConnected,
             orpConnectCount, orpDisconnectCount, "ORP");
-        if (pending.orpConnected && connected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
+        if (pending.orpConnected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
             startVoltageSampling(Phase::OrpVoltage);
         } else {
-            if (!pending.orpConnected) pending.orpValid = false;
-            finishSample(nowMs);
+            if (!pending.orpConnected) { pending.orpMv = NAN; pending.orpValid = false; }
+            temperatureSensor.requestTemperatures();
+            phaseStartedMs = nowMs;
+            phase = Phase::Temperature;
         }
     }
 }
@@ -203,6 +212,5 @@ void SensorManager::finishSample(uint32_t nowMs) {
     pending.sequence = readings.sequence + 1;
     readings = pending; // Only expose a complete acquisition to consumers.
     hasSample = true;
-    lastCompletedMs = nowMs;
     phase = Phase::Idle;
 }

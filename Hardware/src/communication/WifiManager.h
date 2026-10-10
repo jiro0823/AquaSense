@@ -8,5 +8,6 @@ public:
     bool isConnected() const;
 private:
     uint32_t lastReconnectMs = 0;
+    uint32_t lastCheckMs = 0;
     bool wasConnected = false;
 };

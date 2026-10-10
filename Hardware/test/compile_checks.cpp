@@ -52,7 +52,12 @@ static_assert(!SensorConversions::phPlausible(14.1f), "Reject impossible pH");
 static_assert(uint32_t(uint32_t(15) - uint32_t(0xfffffff0)) == 31, "Elapsed timing must survive millis rollover");
 static_assert(Pins::PH == 35 && Pins::TURBIDITY == 34 && Pins::ORP == 32 && Pins::TEMPERATURE == 4,
               "Supplied water-monitor wiring regression");
-static_assert(DeviceConfig::ADC_SAMPLE_COUNT == 10, "Preserve averaging sample count");
+static_assert(DeviceConfig::ADC_SAMPLE_COUNT == 12, "Match reference ADC averaging sample count");
+static_assert(DeviceConfig::SENSOR_READ_INTERVAL_MS == 1000 && DeviceConfig::MQTT_PUBLISH_INTERVAL_MS == 5000,
+              "Match reference sensor and MQTT intervals");
+static_assert(DeviceConfig::WIFI_RECONNECT_INTERVAL_MS == 3000 && DeviceConfig::WIFI_CHECK_INTERVAL_MS == 5000 &&
+              DeviceConfig::MQTT_RECONNECT_INTERVAL_MS == 3000,
+              "Match reference nonblocking connection retry/check intervals");
 static_assert(DeviceConfig::backendTransportConfigured("https://backend.example/api/v1", "trusted-ca", false),
               "HTTPS requires a configured trusted CA");
 static_assert(!DeviceConfig::backendTransportConfigured("https://backend.example/api/v1", "", true),

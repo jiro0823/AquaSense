@@ -1,174 +1,126 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
-import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
+import { apiClient, getApiErrorMessage } from '../../services/apiClient';
 
-type AeratorMode = 'manual' | 'automatic';
-type AeratorPower = 'ON' | 'OFF';
-type Tone = 'emerald' | 'amber' | 'cyan' | 'rose' | 'gray';
-
-interface AeratorState {
-  mode: AeratorMode;
-  power: AeratorPower;
-  lastChangedAt: string | null;
+interface Device { deviceId: string; name?: string; isActive: boolean }
+interface HardwareState {
+  deviceId: string;
+  online: boolean;
+  receivedAt: string | null;
+  state: null | { aerator: boolean; automation: boolean; wifiConnected: boolean; mqttConnected: boolean };
 }
-
-const STORAGE_KEY = 'aeratorState';
-
-const toneStyles: Record<Tone, { bg: string; text: string; dot: string; pillBg: string; pillText: string }> = {
-  emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600', dot: 'bg-emerald-500', pillBg: 'bg-emerald-100', pillText: 'text-emerald-700' },
-  amber: { bg: 'bg-amber-50', text: 'text-amber-600', dot: 'bg-amber-500', pillBg: 'bg-amber-100', pillText: 'text-amber-700' },
-  cyan: { bg: 'bg-cyan-50', text: 'text-cyan-600', dot: 'bg-cyan-500', pillBg: 'bg-cyan-100', pillText: 'text-cyan-700' },
-  rose: { bg: 'bg-rose-50', text: 'text-rose-600', dot: 'bg-rose-500', pillBg: 'bg-rose-100', pillText: 'text-rose-700' },
-  gray: { bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-400', pillBg: 'bg-gray-100', pillText: 'text-gray-600' },
-};
-
-const Pill = ({ label, tone }: { label: string; tone: Tone }) => (
-  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${toneStyles[tone].pillBg} ${toneStyles[tone].pillText}`}>
-    <span className={`h-1.5 w-1.5 rounded-full ${toneStyles[tone].dot}`} />
-    {label}
-  </span>
-);
-
-const MetricTile = ({ label, value, detail, tone, icon }: { label: string; value: string; detail?: string; tone: Tone; icon: React.ReactNode }) => (
-  <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-2.5 flex flex-col gap-1 min-w-0">
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-500 truncate">{label}</span>
-      <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-lg ${toneStyles[tone].bg} ${toneStyles[tone].text}`}>{icon}</span>
-    </div>
-    <p className={`text-base font-bold leading-tight truncate ${toneStyles[tone].text}`}>{value}</p>
-    {detail && <p className="text-[9px] text-gray-400 leading-snug line-clamp-2">{detail}</p>}
-  </div>
-);
-
-const loadAeratorState = (): AeratorState => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<AeratorState>;
-    return {
-      mode: saved.mode || 'automatic',
-      power: saved.power || 'OFF',
-      lastChangedAt: saved.lastChangedAt || null,
-    };
-  } catch {
-    return { mode: 'automatic', power: 'OFF', lastChangedAt: null };
-  }
-};
+interface ApiCommand { id: string; action: string; status: 'PENDING' | 'ACKED' | 'EXPIRED'; result?: string | null; expiresAt?: string }
+type TrackedCommand = Omit<ApiCommand, 'status'> & { status: ApiCommand['status'] | 'TIMEOUT' };
 
 const DashboardAeratorPage: React.FC = () => {
-  const { latestReading, statistics } = useDashboardData();
-  const [state, setState] = useState<AeratorState>(loadAeratorState);
-  const currentDo = latestReading?.do ?? statistics?.do.current ?? 0;
-  const shouldRunAutomatically = state.mode === 'automatic' && currentDo > 0 && currentDo < 5;
-  const effectivePower: AeratorPower = state.mode === 'automatic' ? (shouldRunAutomatically ? 'ON' : 'OFF') : state.power;
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [deviceId, setDeviceId] = useState('');
+  const [hardware, setHardware] = useState<HardwareState | null>(null);
+  const [trackedCommand, setTrackedCommand] = useState<TrackedCommand | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
 
-  const oxygenStatus = useMemo(() => {
-    if (currentDo === 0) return { label: 'No DO data', tone: 'gray' as const, detail: 'Waiting for dissolved oxygen reading.' };
-    if (currentDo < 3) return { label: 'Critical oxygen', tone: 'rose' as const, detail: 'Aerator should run continuously until oxygen recovers.' };
-    if (currentDo < 5) return { label: 'Low oxygen', tone: 'amber' as const, detail: 'Automatic mode will turn the aerator on.' };
-    return { label: 'Oxygen stable', tone: 'emerald' as const, detail: 'Automatic mode can keep the aerator on standby.' };
-  }, [currentDo]);
+  const refresh = useCallback(async (selectedId = deviceId) => {
+    if (!selectedId) return;
+    try {
+      const response = await apiClient.get<HardwareState & { commands?: ApiCommand[] }>(`/hardware/state?deviceId=${encodeURIComponent(selectedId)}`);
+      setHardware(response.data);
+      setTrackedCommand((current) => {
+        if (!current || current.status !== 'PENDING') return current;
+        const updated = response.data.commands?.find((item) => item.id === current.id);
+        if (updated && updated.status !== 'PENDING') return { ...current, ...updated };
+        if (current.expiresAt && Date.now() >= new Date(current.expiresAt).getTime()) return { ...current, status: 'TIMEOUT' };
+        return updated ? { ...current, ...updated } : current;
+      });
+      setLoadedAt(Date.now());
+      setError(null);
+    } catch (cause) {
+      setError(getApiErrorMessage(cause, 'Unable to read device state.'));
+    }
+  }, [deviceId]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    let active = true;
+    void apiClient.get<Device[]>('/devices').then((response) => {
+      if (!active) return;
+      const available = (response.data || []).filter((device) => device.isActive);
+      setDevices(available);
+      setDeviceId((current) => current || available[0]?.deviceId || '');
+    }).catch((cause) => { if (active) setError(getApiErrorMessage(cause, 'Unable to load registered devices.')); });
+    return () => { active = false; };
+  }, []);
 
-  const setMode = (mode: AeratorMode) => {
-    setState((current) => ({ ...current, mode, lastChangedAt: new Date().toISOString() }));
+  useEffect(() => {
+    if (!deviceId) return;
+    void refresh(deviceId);
+    const timer = window.setInterval(() => void refresh(deviceId), 5000);
+    return () => window.clearInterval(timer);
+  }, [deviceId, refresh]);
+
+  const command = async (action: 'AERATOR_ON' | 'AERATOR_OFF' | 'AERATOR_AUTO') => {
+    if (!deviceId || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const response = await apiClient.post<ApiCommand>('/hardware/commands', { deviceId, action });
+      setTrackedCommand(response.data);
+      await refresh(deviceId);
+    } catch (cause) {
+      setError(getApiErrorMessage(cause, 'Command could not be queued.'));
+    } finally {
+      setPending(false);
+      window.setTimeout(() => void refresh(deviceId), 1200);
+    }
   };
 
-  const setPower = (power: AeratorPower) => {
-    setState((current) => ({ ...current, mode: 'manual', power, lastChangedAt: new Date().toISOString() }));
-  };
+  const fresh = hardware?.online === true && loadedAt !== null && Date.now() - loadedAt < 20000;
+  const state = hardware?.state;
+  const commandStatus = !trackedCommand ? 'No command sent in this session'
+    : trackedCommand.status === 'PENDING' ? 'QUEUED — awaiting device acknowledgement'
+      : trackedCommand.status === 'TIMEOUT' ? 'TIMEOUT — device acknowledgement was not received before command expiry'
+        : trackedCommand.status === 'EXPIRED' ? 'EXPIRED — device did not execute this command'
+          : trackedCommand.result === 'accepted' ? 'DEVICE ACKNOWLEDGED — command accepted'
+            : `DEVICE REJECTED — ${trackedCommand.result || 'execution was not accepted'}`;
 
-  return (
-    <div className="flex flex-col gap-2.5 lg:h-full lg:min-h-0">
-      <header className="shrink-0 flex items-center gap-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-3">
-        <div className="bg-cyan-50 p-2 rounded-lg flex-shrink-0">
-          <span className="text-cyan-600"><DashboardIcon name="aerator" /></span>
-        </div>
-        <div>
-          <h1 className="text-base lg:text-lg font-bold tracking-tight text-gray-900">Aerator</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Manual control and oxygen-based automatic mode</p>
-        </div>
-      </header>
+  return <div className="flex flex-col gap-3">
+    <header className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+      <span className="flex-shrink-0 rounded-lg bg-cyan-50 p-2 text-cyan-600"><DashboardIcon name="aerator" /></span>
+      <div><h1 className="text-base font-bold tracking-tight text-gray-900 lg:text-lg">Aerator</h1><p className="mt-0.5 text-xs text-gray-500">Authenticated device control. Reported output state is logical state, not physical feedback.</p></div>
+    </header>
 
-      <section className="shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-        <MetricTile label="Aerator State" value={effectivePower} detail={state.mode === 'automatic' ? 'Based on dissolved oxygen' : 'Manual command selected'} tone={effectivePower === 'ON' ? 'emerald' : 'gray'} icon={<DashboardIcon name="aerator" />} />
-        <MetricTile label="Mode" value={state.mode === 'automatic' ? 'Auto' : 'Manual'} detail={state.lastChangedAt ? `Changed ${new Date(state.lastChangedAt).toLocaleString()}` : 'Default mode'} tone={state.mode === 'automatic' ? 'cyan' : 'amber'} icon={<DashboardIcon name="settings" />} />
-        <MetricTile label="Dissolved Oxygen" value={currentDo ? `${currentDo.toFixed(2)} mg/L` : '--'} detail={oxygenStatus.detail} tone={oxygenStatus.tone} icon={<DashboardIcon name="pulse" />} />
-      </section>
+    <section className="grid gap-3 sm:grid-cols-2">
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <label className="block text-xs font-semibold text-gray-600" htmlFor="aerator-device">Device</label>
+        <select id="aerator-device" value={deviceId} onChange={(event) => { setDeviceId(event.target.value); setHardware(null); setTrackedCommand(null); }} className="mt-1 w-full rounded border p-2 text-sm">
+          {devices.length === 0 && <option value="">No active registered device</option>}
+          {devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} ({device.deviceId})</option>)}
+        </select>
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <div><dt className="text-gray-500">Connection</dt><dd className="font-semibold">{fresh ? 'ONLINE' : 'OFFLINE / STALE'}</dd></div>
+          <div><dt className="text-gray-500">Aerator output (logical)</dt><dd className="font-semibold">{fresh && state ? (state.aerator ? 'ON' : 'OFF') : 'UNKNOWN'}</dd></div>
+          <div><dt className="text-gray-500">Control mode</dt><dd className="font-semibold">{fresh && state ? (state.automation ? 'AUTOMATIC' : 'MANUAL') : 'UNKNOWN'}</dd></div>
+          <div><dt className="text-gray-500">Device network</dt><dd className="font-semibold">{fresh && state ? `${state.wifiConnected ? 'Wi-Fi' : 'Wi-Fi disconnected'} · ${state.mqttConnected ? 'MQTT' : 'MQTT disconnected'}` : 'UNKNOWN'}</dd></div>
+        </dl>
+        <p className="mt-3 text-[11px] text-gray-500">State reported {hardware?.receivedAt ? new Date(hardware.receivedAt).toLocaleString() : 'not yet reported'}.</p>
+        <p className="mt-1 text-[11px] text-gray-500">Automatic mode applies the firmware temperature policy. It does not use dissolved oxygen or ORP as a dissolved-oxygen reading.</p>
+      </div>
 
-      <section className="shrink-0 grid grid-cols-1 xl:grid-cols-2 gap-2.5">
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-3">
-          <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-              Manual Control
-            </h3>
-            <Pill label={state.mode === 'manual' ? 'Active' : 'Standby'} tone={state.mode === 'manual' ? 'amber' : 'gray'} />
-          </div>
-          <div className="grid grid-cols-2 gap-2.5">
-            <button onClick={() => setPower('ON')} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors">
-              Turn ON
-            </button>
-            <button onClick={() => setPower('OFF')} className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 transition-colors">
-              Turn OFF
-            </button>
-          </div>
-          <p className="mt-2.5 text-[10px] text-gray-400">Manual commands override automatic behavior until automatic mode is enabled again.</p>
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-gray-800">Aerator control</h2>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <button disabled={!deviceId || pending} onClick={() => void command('AERATOR_ON')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Turn ON</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('AERATOR_OFF')} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Turn OFF</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('AERATOR_AUTO')} className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Automatic</button>
         </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-3">
-          <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-              <span className="h-1.5 w-1.5 rounded-full bg-cyan-500" />
-              Automatic Mode
-            </h3>
-            <Pill label={state.mode === 'automatic' ? 'Enabled' : 'Disabled'} tone={state.mode === 'automatic' ? 'emerald' : 'gray'} />
-          </div>
-          <div className="grid grid-cols-2 gap-2.5">
-            <button onClick={() => setMode('automatic')} className="rounded-lg bg-cyan-600 px-4 py-2 text-xs font-semibold text-white hover:bg-cyan-700 transition-colors">
-              Auto ON
-            </button>
-            <button onClick={() => setMode('manual')} className="rounded-lg bg-gray-500 px-4 py-2 text-xs font-semibold text-white hover:bg-gray-600 transition-colors">
-              Auto OFF
-            </button>
-          </div>
-          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-gray-900">Automation rule</p>
-              <Pill label={oxygenStatus.label} tone={oxygenStatus.tone} />
-            </div>
-            <p className="mt-1.5 text-[10px] text-gray-500 leading-relaxed">Run aerator when dissolved oxygen drops below 5.00 mg/L. Treat below 3.00 mg/L as critical.</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="lg:flex-1 lg:min-h-0 rounded-xl border border-gray-200 bg-white shadow-sm p-3">
-        <h3 className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Aerator Details
-        </h3>
-        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
-            <p className="text-xs font-semibold text-gray-900">Control Source</p>
-            <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">
-              {state.mode === 'automatic' ? 'Automatic mode is deciding from dissolved oxygen.' : 'Manual mode is using the farmer command.'}
-            </p>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
-            <p className="text-xs font-semibold text-gray-900">Oxygen Threshold</p>
-            <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">Auto ON below 5.00 mg/L. Critical condition below 3.00 mg/L.</p>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
-            <p className="text-xs font-semibold text-gray-900">Last Change</p>
-            <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">
-              {state.lastChangedAt ? new Date(state.lastChangedAt).toLocaleString() : 'No farmer command recorded yet.'}
-            </p>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
+        <p className="mt-3 text-[11px] text-gray-500">Manual ON/OFF selects manual mode on the device. Automatic returns control to the firmware temperature policy.</p>
+        <p className="mt-3 text-xs" aria-live="polite">{pending ? 'Submitting command…' : commandStatus}</p>
+        {trackedCommand && <p className="mt-1 text-[10px] text-gray-500">Command {trackedCommand.id} · {trackedCommand.action}</p>}
+        {loadedAt && <p className="mt-1 text-[10px] text-gray-400">Last state poll: {new Date(loadedAt).toLocaleTimeString()}</p>}
+        {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
+      </div>
+    </section>
+  </div>;
 };
 
 export default DashboardAeratorPage;

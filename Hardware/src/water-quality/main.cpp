@@ -18,6 +18,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <math.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
@@ -32,6 +33,7 @@ PubSubClient mqttClient(espClient);
 // ========== Global Variables ==========
 unsigned long lastReadTime = 0;
 unsigned long lastMQTTCheck = 0;
+unsigned long lastWiFiReconnect = 0;
 
 // ========== Function Prototypes ==========
 void PublishStatus(const char* status);
@@ -39,13 +41,16 @@ void setupWiFi();
 void setupMQTT();
 void reconnectWiFi();
 void reconnectMQTT();
-void readSensors();
+
 void publishSensorData();
-void onMQTTMessage(char* topic, byte* payload, unsigned int length);
 float readTemperature();
 float readpH();
 float readDO();
 float readTurbidity();
+
+// The legacy analog equations are estimates only. Keep them unavailable until
+// the installed probes have been calibrated against reference solutions.
+constexpr bool ANALOG_CALIBRATION_VERIFIED = false;
 
 void setup() {
   Serial.begin(115200);
@@ -62,7 +67,6 @@ void setup() {
 
   // Configure MQTT
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  mqttClient.setCallback(onMQTTMessage);
   mqttClient.setBufferSize(512); // Allow the full JSON payload plus MQTT topic/header.
 
   // Connect to WiFi
@@ -77,7 +81,7 @@ void setup() {
 void loop() {
   // Check WiFi connection
   if (WiFi.status() != WL_CONNECTED) {
-    reconnectWiFi();
+    if (millis() - lastWiFiReconnect >= 10000) reconnectWiFi();
   }
 
   // Check MQTT connection periodically
@@ -93,7 +97,7 @@ void loop() {
 
   // Read sensors at interval
   if (millis() - lastReadTime >= SENSOR_READ_INTERVAL) {
-    readSensors();
+
     publishSensorData();
     lastReadTime = millis();
   }
@@ -136,9 +140,6 @@ void setupMQTT() {
     Serial.print("  Topic: ");
     Serial.println(MQTT_TOPIC_READINGS);
 
-    // Subscribe to command topics
-    mqttClient.subscribe("capstone2026/water/commands/restart");
-    mqttClient.subscribe("capstone2026/water/commands/threshold-update");
   } else {
     Serial.print("✗ MQTT Connection failed! State: ");
     Serial.println(mqttClient.state());
@@ -147,9 +148,8 @@ void setupMQTT() {
 
 // ========== WiFi Reconnect ==========
 void reconnectWiFi() {
-  if (millis() % 2000 == 0) {  // Log every 2 seconds
-    Serial.println("WiFi disconnected - reconnecting...");
-  }
+  lastWiFiReconnect = millis();
+  Serial.println("WiFi disconnected - starting reconnect attempt...");
   WiFi.reconnect();
 }
 
@@ -163,10 +163,6 @@ void reconnectMQTT() {
     if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD)) {
       Serial.println(" ✓ Connected");
 
-      // Resubscribe to topics
-      mqttClient.subscribe("capstone2026/water/commands/restart");
-      mqttClient.subscribe("capstone2026/water/commands/threshold-update");
-
       // Publish status
       PublishStatus("online");
     } else {
@@ -177,20 +173,6 @@ void reconnectMQTT() {
 }
 
 // ========== Sensor Reading ==========
-void readSensors() {
-  Serial.println("\n─── Sensor Reading ───");
-
-  float temp = readTemperature();
-  float ph = readpH();
-  float doLevel = readDO();
-  float turbidity = readTurbidity();
-
-  Serial.printf("  Temperature: %.2f°C\n", temp);
-  Serial.printf("  pH:          %.2f\n", ph);
-  Serial.printf("  DO:          %.2f mg/L\n", doLevel);
-  Serial.printf("  Turbidity:   %.2f NTU\n", turbidity);
-}
-
 // ========== Publish Sensor Data ==========
 void publishSensorData() {
   if (!mqttClient.connected()) {
@@ -206,10 +188,10 @@ void publishSensorData() {
 
   // Create JSON payload
   StaticJsonDocument<256> doc;
-  doc["temperature"] = temp;
-  doc["ph"] = ph;
-  doc["do"] = doLevel;
-  doc["turbidity"] = turbidity;
+  if (isfinite(temp)) doc["temperature"] = temp; else doc["temperature"] = nullptr;
+  if (isfinite(ph)) doc["ph"] = ph; else doc["ph"] = nullptr;
+  if (isfinite(doLevel)) doc["do"] = doLevel; else doc["do"] = nullptr;
+  if (isfinite(turbidity)) doc["turbidity"] = turbidity; else doc["turbidity"] = nullptr;
   doc["location"] = "Tank A";
   doc["uptimeMs"] = millis(); // Uptime is not a Unix timestamp; backend stamps receipt time.
 
@@ -231,22 +213,23 @@ float readTemperature() {
   tempSensor.requestTemperatures();
   float temp = tempSensor.getTempCByIndex(0);
 
-  if (temp == DEVICE_DISCONNECTED_C) {
+  if (!isfinite(temp) || temp == DEVICE_DISCONNECTED_C || temp < -55 || temp > 125) {
     Serial.println("  ! Temperature sensor disconnected");
-    return 0.0;
+    return NAN;
   }
 
   return temp;
 }
 
 float readpH() {
+  if (!ANALOG_CALIBRATION_VERIFIED) return NAN;
   // Read analog value
   int raw = analogRead(PH_SENSOR_PIN);
 
   // Detect disconnected probe (pin floating to GND or pulled to VCC)
   if (raw <= 10 || raw >= 4090) {
     Serial.println("  ! pH sensor disconnected or out of range");
-    return -1.0; // Error code
+    return NAN;
   }
 
   // Convert to voltage
@@ -260,19 +243,19 @@ float readpH() {
   // Apply offset and scale
   ph = (ph * PH_SCALE) + PH_OFFSET;
 
-  // Clamp to valid range
-  if (ph < 0) ph = 0;
-  if (ph > 14) ph = 14;
+  // Reject out-of-range estimates rather than presenting clamped values.
+  if (!isfinite(ph) || ph < 0 || ph > 14) return NAN;
 
   return ph;
 }
 
 float readDO() {
+  if (!ANALOG_CALIBRATION_VERIFIED) return NAN;
   // Read analog value
   int raw = analogRead(DO_SENSOR_PIN);
 
   if (raw <= 10 || raw >= 4090) {
-     return -1.0; // Error code for disconnected
+     return NAN;
   }
 
   // Convert to voltage
@@ -284,14 +267,14 @@ float readDO() {
   // Apply offset and scale
   doLevel = (doLevel * DO_SCALE) + DO_OFFSET;
 
-  // Clamp to valid range
-  if (doLevel < 0) doLevel = 0;
-  if (doLevel > 20) doLevel = 20;
+  // Reject out-of-range estimates rather than presenting clamped values.
+  if (!isfinite(doLevel) || doLevel < 0 || doLevel > 20) return NAN;
 
   return doLevel;
 }
 
 float readTurbidity() {
+  if (!ANALOG_CALIBRATION_VERIFIED) return NAN;
   // Read multiple samples
   int samples = 15;
   int sum = 0;
@@ -303,9 +286,9 @@ float readTurbidity() {
 
   int raw = sum / samples;
 
-  if (raw <= 10) {
-    Serial.println("  ! Turbidity sensor disconnected (0V)");
-    return -1.0;
+  if (raw <= 10 || raw >= 4085) {
+    Serial.println("  ! Turbidity sensor ADC is at a rail");
+    return NAN;
   }
 
   // Convert to voltage
@@ -323,33 +306,10 @@ float readTurbidity() {
   // Apply offset and scale
   turbidity = (turbidity * TURBIDITY_SCALE) + TURBIDITY_OFFSET;
 
-  // Clamp to valid range
-  if (turbidity < 0) turbidity = 0;
-  if (turbidity > 150) turbidity = 150;
+  // Reject out-of-range estimates rather than presenting clamped values.
+  if (!isfinite(turbidity) || turbidity < 0 || turbidity > 150) return NAN;
 
   return turbidity;
-}
-
-// ========== MQTT Message Handler ==========
-void onMQTTMessage(char* topic, byte* payload, unsigned int length) {
-  Serial.print("✓ MQTT Message received on topic: ");
-  Serial.println(topic);
-
-  // Convert payload to string
-  String message = "";
-  for (unsigned int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
-
-  Serial.print("  Payload: ");
-  Serial.println(message);
-
-  // Handle commands
-  if (strcmp(topic, "capstone2026/water/commands/restart") == 0) {
-    Serial.println("  ! Restart command received - restarting in 2 seconds...");
-    delay(2000);
-    ESP.restart();
-  }
 }
 
 // ========== Publish Status ==========

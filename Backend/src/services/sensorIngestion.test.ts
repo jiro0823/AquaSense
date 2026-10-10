@@ -37,6 +37,25 @@ test('faulted MQTT frames reach storage and realtime UI with health metadata',as
   assert.equal(received.temperature,null);assert.equal(received.sensorHealth.ph.health,'MISSING');assert.equal(received.orp,220);
   assert.equal((notify.mock.calls[0].arguments as any)[0].temperature,null);
 });
+test('topic MQTT keeps NTU and raw ADC turbidity units distinct',async()=>{
+  const rows=storage();
+  mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const ntu=new MQTTService();
+  (ntu as any).handleAquasenseTopicValue('aquasense/device-id','water-monitor-test');
+  (ntu as any).handleAquasenseTopicValue('aquasense/temperature','25');
+  (ntu as any).handleAquasenseTopicValue('aquasense/ph','7.5');
+  (ntu as any).handleAquasenseTopicValue('aquasense/turbidity-ntu','20');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows[0].turbidityUnit,'NTU');
+  assert.equal(rows[0].deviceId,'water-monitor-test');
+
+  const raw=new MQTTService();
+  (raw as any).handleAquasenseTopicValue('aquasense/temperature','25');
+  (raw as any).handleAquasenseTopicValue('aquasense/ph','7.5');
+  (raw as any).handleAquasenseTopicValue('aquasense/turbidity','1800');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows[0].turbidityUnit,'raw_adc');
+});
 test('latest read ages sensors and speciation without new packets; history retains acquisition diagnostics',async()=>{
   const rows=storage();const now=Date.now();
   const r=await sensorReadingService.ingest('freshness-test',{temperature:25,ph:8,orp:220,turbidity:1800,turbidityUnit:'raw_adc'});

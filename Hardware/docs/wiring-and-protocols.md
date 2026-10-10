@@ -2,19 +2,30 @@
 
 ## Modular water-monitor target
 
-The newly supplied ORP/LCD/DS3231 program uses GPIO35 pH, GPIO34 turbidity,
-GPIO32 ORP, GPIO4 DS18B20 and GPIO21/22 shared I2C. LCD is 0x27, 16x2.
-It publishes a single JSON snapshot on `water/esp32/readings` with device ID,
-temperature, pH, raw ADC turbidity and nullable signed ORP in mV.
-See [its complete source/wiring map](water-monitor-migration.md), including
-the diagram's GPIO19 servo versus the standalone feeder's GPIO13.
-Servo uses GPIO19 and buzzer GPIO18. Relay input signals are GPIO25/26/27;
-load mapping and active polarity remain unconfirmed, so relay initialization
-is disabled. Loads connect to relay output terminals, powered by their appropriate
-supplies; the relay module uses separate 5 V and shares ground with ESP32.
-Channel four is unused. There are no float switches.
-See [backend/control setup](backend-control.md) for authenticated commands,
-timed pump limits, feeding and RTC/NTP behavior.
+The integrated target uses pH GPIO35, turbidity GPIO34, ORP GPIO32, DS18B20
+GPIO4 and shared I2C SDA/SCL GPIO21/22. The current monitor source is configured
+for a 20x4 LCD at address 0x27, as in the attached code. The earlier wiring
+diagram labels a 16x2 LCD; verify the physical panel before deployment. Both use
+the same I2C wiring, but only four-row hardware can show the full sensor page.
+The supplied wiring reference sets
+the integrated servo to GPIO13 (older integrated code used GPIO19) and passive
+buzzer to GPIO18.
+
+The diagram routes GPIO25, GPIO26, GPIO27 and GPIO33 to relay IN1..IN4 in order.
+IN1 drives pump 1 (fill), IN2 drives pump 2 (drain), IN3 drives the aerator, and
+IN4 is unused. The code maps the first three signals accordingly. Relay polarity
+is not marked in the diagram, so `RELAY_ACTIVE_LEVEL` remains unknown and relay
+initialization stays disabled until the actual board's trigger level and OFF
+behavior are measured. The relay module has a separate 5 V supply and shares
+ground with ESP32. Verify the module's input bias holds the relay OFF while ESP32
+GPIOs are high-impedance during reset; firmware cannot drive outputs during reset.
+There are no float switches.
+
+Sensors publish retained values/status under `aquasense/`; actuator commands
+use signed, non-retained, device-scoped MQTT messages after authenticated API
+authorization. Device state/ack messages are signed and correlated by command
+ID. Authenticated HTTP sync remains for schedules and state heartbeat. See
+[backend/control setup](backend-control.md) for the contract and commissioning.
 
 ## Preserved earlier targets
 
@@ -46,26 +57,24 @@ sensor-specific wiring against its manufacturer's documentation.
 - The original cycle is 25 degrees / 800 ms, 140 degrees / 1000 ms, then
   25 degrees / 800 ms. Startup sets the servo to the off position.
 
-## Four-sensor MQTT
+## Preserved four-sensor JSON target
 
 Default broker is `broker.hivemq.com:1883`. Configuration retains:
 
 - Readings: `capstone2026/water/esp32/readings`.
 - Status: `capstone2026/water/esp32/status`.
-- JSON reading fields: `temperature`, `ph`, `do`, `turbidity`, `location`, `uptimeMs`.
-- Restart subscription: `capstone2026/water/commands/restart`.
-- Existing threshold-update subscription is retained but has no handler.
+- JSON fields: `temperature`, `ph`, `do`, `turbidity`, `location`, `uptimeMs`.
 
-The backend's code default for JSON readings is `water/esp32/readings`; an existing
-environment variable can override it. Set the firmware's `MQTT_TOPIC_READINGS` to
-the backend's **actual** configured topic and point it to the same broker. This
-migration does not change backend configuration. The original restart callback
-and subscriptions remain in `main.cpp`; review them when changing topic namespaces.
+This target is isolated from the modular water-monitor. It subscribes to no
+command topics. Its analog pH, DO and turbidity output remains null until its
+calibration gate is enabled in source; its temperature channel reports null when
+the DS18B20 is disconnected.
 
-The analog formulas are the original calibration estimates. Configure the scale
-and offset values in `config.h` using reference measurements; compilation does
-not establish measurement accuracy. The original four-sensor code reports some
-disconnected sensors as 0 or -1; verify backend handling during board checks.
+The backend's default JSON subscription is `water/esp32/readings`; configure
+`MQTT_TOPIC_READINGS` to match this target's actual topic and use the same broker.
+The modular water-monitor instead publishes per-sensor values under
+`aquasense/`, uses a device-ID-derived MQTT client ID, and receives authenticated
+actuator commands through MQTT. Its registered `DEVICE_ID` must be unique per board.
 
 ## Three-sensor MQTT
 

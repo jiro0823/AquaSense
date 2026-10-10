@@ -80,6 +80,10 @@ compile_commands.json
 *.elf
 *.map
 .agents/
+!.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 # Keep Codex runtime/state files private, but share this project's agent definitions.
 .codex/*
 !.codex/config.toml

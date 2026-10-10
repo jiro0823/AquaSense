@@ -38,18 +38,19 @@ performed. Follow the supervised checks below before operational deployment.
 ## Physical acceptance
 
 1. Verify module/flash, signal voltages, grounding, LCD address and GPIOs against
-   the diagram. With loads unpowered, establish relay input polarity, channel
-   mapping, reset behavior and hardware OFF bias. The fourth channel is unused.
+   the diagram. With loads unpowered, verify relay input polarity, the configured
+   channel mapping, reset behavior and hardware OFF bias. The fourth channel is unused.
    Do not add float switches; this installation has none.
-2. Compare stable known sensor inputs against the original sketch and reference
-   solutions. Allow filters to settle. Confirm raw turbidity is not labeled or
-   interpreted as calibrated NTU in operational alert decisions.
-3. Subscribe to water/esp32/readings. Verify same-acquisition JSON, device ID,
-   negative/zero ORP, null invalid ORP and Backend persistence/realtime values.
-   Invalid required temperature/pH/turbidity suppresses the full publish.
+2. Compare the supplied pH/ORP/turbidity conversions against reference solutions
+   and confirm the actual analog front ends/dividers. Allow connection windows
+   to settle and verify that turbidity and Backend both use NTU.
+3. Subscribe to `aquasense/#`. Verify retained sensor values, `/status` topics,
+   negative/zero signed ORP and Backend persistence/realtime values. Confirm
+   `aquasense/turbidity-ntu` is stored as NTU, while legacy
+   `aquasense/turbidity` remains raw ADC.
 4. Register and provision the backend device. Verify missing/wrong keys fail,
    state reports relaysReady=false before configuration, and pump requests are
-   acknowledged with rejection instead of operation.
+   acknowledged with rejection instead of operation while relay polarity is unknown.
 5. After confirmed pin/polarity/timing setup, test short fill and drain runs
    separately, stop, drain-to-refill transition, simultaneous-run rejection,
    busy rejection, maximum duration and latched fault/clear behavior. Measure
@@ -64,7 +65,7 @@ performed. Follow the supervised checks below before operational deployment.
 8. Test NTP failure, RTC absence/battery loss and valid UTC RTC reboot without
    WiFi. Invalid time must inhibit schedules. Missed minutes must not catch up.
 9. During bounded supervised runs, interrupt WiFi/backend/broker separately.
-   Confirm local pump/servo deadlines still act, stale pending commands expire,
+   Confirm pumps and aerator go OFF on Wi-Fi/MQTT loss, local pump/servo deadlines still act, stale pending commands expire,
    receipts retry without repeating physical work, and state eventually reports
    offline. A remote stop cannot substitute for local power isolation.
 10. Soak-test sensor cadence, GPIO reset behavior, heap, worker stack headroom

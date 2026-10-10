@@ -1,24 +1,102 @@
 #include "MqttManager.h"
-#include <stdio.h>
 #include <ArduinoJson.h>
+#include <Arduino.h>
+#include <mbedtls/md.h>
+#include <time.h>
+#include <stdio.h>
+#include <string.h>
 #include "config/DeviceConfig.h"
-#include "config/CalibrationConfig.h"
 #if __has_include("secrets/Secrets.h")
 #include "secrets/Secrets.h"
 #else
 #include "secrets/Secrets.example.h"
 #endif
 
+namespace {
+constexpr size_t COMMAND_BUFFER_BYTES = 1024;
+constexpr size_t STATE_BUFFER_BYTES = 2048;
+
+bool hmacHex(const char* message, char* output, size_t outputSize) {
+    if (!Secrets::DEVICE_KEY[0] || outputSize < 65) return false;
+    uint8_t digest[32];
+    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (!info || mbedtls_md_hmac(info, reinterpret_cast<const unsigned char*>(Secrets::DEVICE_KEY),
+            strlen(Secrets::DEVICE_KEY), reinterpret_cast<const unsigned char*>(message),
+            strlen(message), digest) != 0) return false;
+    for (size_t i = 0; i < sizeof(digest); ++i) snprintf(output + i * 2, 3, "%02x", digest[i]);
+    output[64] = '\0';
+    return true;
+}
+
+bool signatureMatches(const char* message, const char* signature) {
+    if (!signature || strlen(signature) != 64) return false;
+    char expected[65];
+    if (!hmacHex(message, expected, sizeof(expected))) return false;
+    uint8_t difference = 0;
+    for (size_t i = 0; i < 64; ++i) difference |= uint8_t(expected[i] ^ signature[i]);
+    return difference == 0;
+}
+
+bool validId(const char* id) {
+    if (!id || strlen(id) != 36) return false;
+    for (size_t i = 0; i < 36; ++i) {
+        const char c = id[i];
+        if (i == 8 || i == 13 || i == 18 || i == 23) { if (c != '-') return false; }
+        else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
+}
+
+CommandAction actionFor(const char* action, bool feeding) {
+    if (feeding) {
+        if (!strcmp(action, "TRIGGER")) return CommandAction::FeedTrigger;
+        if (!strcmp(action, "ON")) return CommandAction::FeedOn;
+        if (!strcmp(action, "OFF")) return CommandAction::FeedOff;
+        return CommandAction::Invalid;
+    }
+    const char* names[] = {"FILL", "DRAIN", "WATER_EXCHANGE", "WATER_STOP", "AERATOR_ON", "AERATOR_OFF", "AERATOR_AUTO",
+        "AUTOMATION_ON", "AUTOMATION_OFF", "BUZZER_ON", "BUZZER_OFF", "ALL_OFF", "CLEAR_FAULT"};
+    for (uint8_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+        if (!strcmp(action, names[i])) return static_cast<CommandAction>(i);
+    return CommandAction::Invalid;
+}
+
+const char* actionName(CommandAction action) {
+    switch (action) {
+        case CommandAction::Fill: return "FILL"; case CommandAction::Drain: return "DRAIN";
+        case CommandAction::WaterExchange: return "WATER_EXCHANGE"; case CommandAction::WaterStop: return "WATER_STOP";
+        case CommandAction::AeratorOn: return "AERATOR_ON"; case CommandAction::AeratorOff: return "AERATOR_OFF";
+        case CommandAction::AeratorAuto: return "AERATOR_AUTO"; case CommandAction::AutomationOn: return "AUTOMATION_ON";
+        case CommandAction::AutomationOff: return "AUTOMATION_OFF"; case CommandAction::BuzzerOn: return "BUZZER_ON";
+        case CommandAction::BuzzerOff: return "BUZZER_OFF"; case CommandAction::AllOff: return "ALL_OFF";
+        case CommandAction::ClearFault: return "CLEAR_FAULT"; case CommandAction::FeedTrigger: return "TRIGGER";
+        case CommandAction::FeedOn: return "ON"; case CommandAction::FeedOff: return "OFF"; default: return "INVALID";
+    }
+}
+
+uint64_t epochMillis() {
+    const time_t seconds = time(nullptr);
+    if (seconds < time_t(DeviceConfig::MIN_VALID_EPOCH)) return 0;
+    return uint64_t(seconds) * 1000ULL;
+}
+}
+
+MqttManager* MqttManager::callbackOwner = nullptr;
 MqttManager::MqttManager() : client(transport) {}
 
 bool MqttManager::begin() {
     if (task != nullptr) return true;
+    if (!Secrets::DEVICE_KEY[0]) Serial.println("MQTT actuator commands disabled: DEVICE_KEY is empty; telemetry remains enabled.");
     client.setServer(DeviceConfig::MQTT_HOST, DeviceConfig::MQTT_PORT);
     client.setSocketTimeout(DeviceConfig::MQTT_SOCKET_TIMEOUT_SECONDS);
+    client.setCallback(messageCallback);
     if (!client.setBufferSize(3072)) return false;
     snapshots = xQueueCreateStatic(1, sizeof(SensorReadings), queueBytes, &queueStorage);
-    if (snapshots == nullptr) return false;
-    // PubSubClient/TCP/DNS can block. Keep them off the sensor/display loop.
+    commands = xQueueCreate(4, sizeof(MqttActuatorCommand));
+    states = xQueueCreate(1, sizeof(SystemState));
+    acknowledgements = xQueueCreate(4, sizeof(MqttPendingAcknowledgement));
+    if (!snapshots || !commands || !states || !acknowledgements) return false;
+    callbackOwner = this;
     if (xTaskCreate(runTask, "aquasense-mqtt", DeviceConfig::MQTT_TASK_STACK_BYTES,
                     this, 1, &task) != pdPASS) {
         task = nullptr;
@@ -30,96 +108,162 @@ bool MqttManager::begin() {
 
 void MqttManager::update(const SensorReadings& readings) {
     if (task == nullptr || readings.sequence == lastQueuedSequence) return;
-    xQueueOverwrite(snapshots, &readings); // Copy: never share mutable sensor storage.
+    xQueueOverwrite(snapshots, &readings);
     lastQueuedSequence = readings.sequence;
 }
-
+void MqttManager::updateState(const SystemState& state) { if (states) xQueueOverwrite(states, &state); }
+bool MqttManager::takeCommand(MqttActuatorCommand& command) { return commands && xQueueReceive(commands, &command, 0) == pdTRUE; }
+void MqttManager::acknowledge(const MqttActuatorCommand& command, const CommandReceipt& receipt) {
+    if (!acknowledgements) return;
+    MqttPendingAcknowledgement pending{};
+    pending.command = command;
+    pending.receipt = receipt;
+    if (xQueueSend(acknowledgements, &pending, 0) != pdTRUE)
+        Serial.printf("MQTT acknowledgement queue full; command %s result %s was not queued.\n",
+                      command.command.id, receipt.result);
+}
 bool MqttManager::isConnected() const { return connected.load(); }
 bool MqttManager::isRunning() const { return task != nullptr; }
 void MqttManager::runTask(void* context) { static_cast<MqttManager*>(context)->run(); }
+void MqttManager::messageCallback(char* topic, uint8_t* payload, unsigned int length) {
+    if (callbackOwner) callbackOwner->onMessage(topic, payload, length);
+}
+
+void MqttManager::onMessage(const char* topic, const uint8_t* payload, unsigned int length) {
+    char expectedTopic[96];
+    snprintf(expectedTopic, sizeof(expectedTopic), "aquasense/%s/command", DeviceConfig::DEVICE_ID);
+    if (!topic || strcmp(topic, expectedTopic) || !payload || length == 0 || length >= COMMAND_BUFFER_BYTES) return;
+    // PubSubClient exposes the retain bit through its packet state only in some versions;
+    // its callback does not provide it. Commands therefore also carry a short expiry and ID.
+    // The MQTT layer additionally subscribes with no replay-safe persistent-session setup.
+    char input[COMMAND_BUFFER_BYTES]; memcpy(input, payload, length); input[length] = '\0';
+    StaticJsonDocument<768> doc;
+    if (deserializeJson(doc, input) || !doc.is<JsonObject>()) return;
+    const char* id = doc["id"] | ""; const char* deviceId = doc["deviceId"] | "";
+    const char* source = doc["source"] | ""; const char* action = doc["action"] | "";
+    const char* signature = doc["signature"] | "";
+    const uint8_t version = doc["v"] | 0;
+    const uint32_t duration = doc["durationMs"] | 0u;
+    const uint64_t expiresAt = doc["expiresAt"] | uint64_t(0);
+    if (version != 1 || strcmp(deviceId, DeviceConfig::DEVICE_ID) || !validId(id) ||
+        (strcmp(source, "hardware") && strcmp(source, "feeding")) || !action[0] || strlen(action) >= 24) return;
+    const bool feeding = !strcmp(source, "feeding");
+    const CommandAction parsedAction = actionFor(action, feeding);
+    if (parsedAction == CommandAction::Invalid) return;
+    char canonical[320];
+    snprintf(canonical, sizeof(canonical), "v1|%s|%s|%s|%s|%lu|%llu", deviceId, id, source, action,
+             static_cast<unsigned long>(duration), static_cast<unsigned long long>(expiresAt));
+    if (!signatureMatches(canonical, signature)) return;
+    const uint64_t now = epochMillis();
+    if (!now || expiresAt <= now || expiresAt - now > uint64_t(DeviceConfig::COMMAND_MAX_TTL_MS)) return;
+    MqttActuatorCommand queued{};
+    strlcpy(queued.command.id, id, sizeof(queued.command.id));
+    queued.command.feedingSource = feeding; queued.command.action = parsedAction;
+    queued.command.durationMs = duration; queued.command.receivedAtMs = millis();
+    queued.command.ttlMs = uint32_t(expiresAt - now);
+    strlcpy(queued.source, source, sizeof(queued.source)); strlcpy(queued.action, action, sizeof(queued.action));
+    if (xQueueSend(commands, &queued, 0) != pdTRUE) {
+        // Reject explicitly instead of silently losing a valid command. This callback
+        // runs from the MQTT worker's client.loop(); only queue work here, and let the
+        // worker publish the signed acknowledgement on its next iteration.
+        CommandReceipt receipt{};
+        strlcpy(receipt.id, id, sizeof(receipt.id));
+        receipt.feedingSource = feeding;
+        strlcpy(receipt.result, "queue_full", sizeof(receipt.result));
+        acknowledge(queued, receipt);
+        Serial.printf("MQTT command queue full; rejected command %s.\n", id);
+    }
+}
 
 bool MqttManager::publishReadings(const SensorReadings& reading) {
-    // Fault frames are observations too. Never suppress the healthy channels.
-    DynamicJsonDocument payload(3072);
-    const uint32_t nowMs = millis();
-    payload["schemaVersion"] = 2;
-    payload["deviceId"] = DeviceConfig::DEVICE_ID;
-    payload["bootId"] = reading.bootId;
-    payload["firmwareVersion"] = "water-monitor-precal-1";
-    payload["calibrationProfileId"] = CalibrationConfig::PROFILE_ID;
-    payload["sampleAgeMs"] = uint32_t(nowMs - reading.sampledAtMs);
-    if (reading.temperatureValid) payload["temperature"] = reading.temperatureC; else payload["temperature"] = nullptr;
-    if (reading.phValid) payload["ph"] = reading.ph; else payload["ph"] = nullptr;
-    if (reading.turbidityValid) payload["turbidity"] = reading.turbidityRaw; else payload["turbidity"] = nullptr;
-    if (reading.orpValid) payload["orp"] = reading.orpMv; else payload["orp"] = nullptr;
-    payload["doMeasured"] = false;
-    payload["do"] = nullptr;
-    payload["turbidityUnit"] = "raw_adc";
-    payload["uptimeMs"] = reading.sampledAtMs; payload["sequence"] = reading.sequence;
-    JsonObject sensors = payload.createNestedObject("sensors");
-    JsonObject temperature = sensors.createNestedObject("temperature");
-    temperature["sampleAgeMs"] = uint32_t(nowMs - reading.temperatureSampledAtMs);
-    temperature["health"] = reading.temperatureValid ? "VALID" : "SENSOR_ERROR";
-    const auto addAnalog = [&](const char* name, const AnalogDiagnostics& diagnostic) {
-        JsonObject sensor = sensors.createNestedObject(name);
-        sensor["rawAdc"] = diagnostic.rawAdc;
-        sensor["voltage"] = diagnostic.voltage;
-        sensor["voltageSource"] = diagnostic.efuseCharacterized ? "EFUSE" : "NOMINAL_FALLBACK";
-        sensor["voltageNode"] = "ESP32_ADC_PIN";
-        sensor["conversion"] = "UNVERIFIED";
-        sensor["calibration"] = "REQUIRED";
-        sensor["adcMinimum"] = diagnostic.minimum;
-        sensor["adcMaximum"] = diagnostic.maximum;
-        sensor["adcLast"] = diagnostic.last;
-        sensor["clippedSamples"] = diagnostic.clipped;
-        sensor["sampleAgeMs"] = uint32_t(nowMs - diagnostic.sampledAtMs);
-        sensor["health"] = diagnostic.clipped ? "SATURATED" : "VALID";
+    const auto publishSensor = [&](const char* name, bool sensorConnected, bool valid, float value, uint8_t decimals) {
+        char topic[40], statusTopic[48], valueText[24];
+        snprintf(topic, sizeof(topic), "aquasense/%s", name);
+        snprintf(statusTopic, sizeof(statusTopic), "aquasense/%s/status", name);
+        if (sensorConnected && valid) snprintf(valueText, sizeof(valueText), decimals == 1 ? "%.1f" : "%.2f", double(value));
+        else snprintf(valueText, sizeof(valueText), "DISCONNECTED");
+        const bool valuePublished = client.publish(topic, valueText, true);
+        const bool statusPublished = client.publish(statusTopic, sensorConnected ? "CONNECTED" : "DISCONNECTED", true);
+        return valuePublished && statusPublished;
     };
-    addAnalog("ph", reading.phDiagnostics);
-    addAnalog("turbidity", reading.turbidityDiagnostics);
-    addAnalog("orp", reading.orpDiagnostics);
-    char body[2560];
-    if (payload.overflowed() || measureJson(payload) >= sizeof(body)) return false;
-    serializeJson(payload, body, sizeof(body));
-    return client.publish(DeviceConfig::TOPIC_READINGS, body, false);
+    bool success = client.publish("aquasense/device-id", DeviceConfig::DEVICE_ID, true);
+    success = publishSensor("orp", reading.orpConnected, reading.orpValid, reading.orpMv, 1) && success;
+    success = publishSensor("temperature", reading.temperatureConnected, reading.temperatureValid, reading.temperatureC, 2) && success;
+    success = publishSensor("ph", reading.phConnected, reading.phValid, reading.ph, 2) && success;
+    success = publishSensor("turbidity-ntu", reading.turbidityConnected, reading.turbidityValid, reading.turbidityRaw, 1) && success;
+    return success;
+}
+
+bool MqttManager::publishAcknowledgement(const MqttActuatorCommand& command, const CommandReceipt& receipt,
+                                         const SystemState& state) {
+    const uint64_t reportedAt = epochMillis();
+    if (!reportedAt) return false;
+    char signature[65];
+    const char* source = command.source;
+    // The publish occurs only while the MQTT connection is active.
+    char fullCanonical[680];
+    snprintf(fullCanonical, sizeof(fullCanonical),
+        "v1|%s|%s|%s|%s|%s|%llu|%d|%d|%d|%d|%d|%d|%s|%s|%d|%d|%d|%d|%lu",
+        DeviceConfig::DEVICE_ID, command.command.id, source, command.action, receipt.result,
+        static_cast<unsigned long long>(reportedAt), state.fillPump, state.drainPump, state.aerator,
+        state.feederBusy, state.buzzer, state.automation, state.waterPhase, state.fault,
+        state.relaysReady, state.rtcTimeValid, state.wifiConnected, 1,
+        static_cast<unsigned long>(state.uptimeMs));
+    if (!hmacHex(fullCanonical, signature, sizeof(signature))) return false;
+    StaticJsonDocument<STATE_BUFFER_BYTES> doc;
+    doc["v"] = 1; doc["deviceId"] = DeviceConfig::DEVICE_ID; doc["id"] = command.command.id;
+    doc["source"] = source; doc["action"] = command.action; doc["result"] = receipt.result; doc["reportedAt"] = reportedAt;
+    JsonObject reported = doc.createNestedObject("state");
+    reported["fillPump"] = state.fillPump; reported["drainPump"] = state.drainPump; reported["aerator"] = state.aerator;
+    reported["feederBusy"] = state.feederBusy; reported["buzzer"] = state.buzzer; reported["automation"] = state.automation;
+    reported["waterPhase"] = state.waterPhase; reported["fault"] = state.fault; reported["relaysReady"] = state.relaysReady;
+    reported["timeValid"] = state.rtcTimeValid; reported["wifiConnected"] = state.wifiConnected;
+    reported["mqttConnected"] = true; reported["uptimeMs"] = state.uptimeMs; doc["signature"] = signature;
+    char topic[96], payload[STATE_BUFFER_BYTES];
+    snprintf(topic, sizeof(topic), "aquasense/%s/state", DeviceConfig::DEVICE_ID);
+    const size_t size = serializeJson(doc, payload, sizeof(payload));
+    return size > 0 && client.publish(topic, reinterpret_cast<const uint8_t*>(payload), size, false);
 }
 
 void MqttManager::run() {
-    SensorReadings latest;
-    bool hasSnapshot = false;
-    bool attemptedConnection = false;
-    bool attemptedPublish = false;
-    uint32_t lastReconnectMs = 0;
-    uint32_t lastPublishMs = 0;
-    uint32_t publishedSequence = 0;
-
-    for (;;) { // Dedicated worker; always yields, even when WiFi/MQTT are unavailable.
-        if (xQueueReceive(snapshots, &latest, 0) == pdTRUE) hasSnapshot = true;
+    SensorReadings latest{}; SystemState latestState{};
+    bool hasSnapshot = false, attemptedConnection = false, attemptedPublish = false, staleStatusPublished = false;
+    uint32_t lastReconnectMs = 0, lastPublishMs = 0, publishedSequence = 0;
+    for (;;) {
+        if (xQueueReceive(snapshots, &latest, 0) == pdTRUE) { hasSnapshot = true; staleStatusPublished = false; }
+        xQueueReceive(states, &latestState, 0);
         const uint32_t nowMs = millis();
-        if (WiFi.status() != WL_CONNECTED) {
-            transport.stop();
-            connected.store(false);
-        } else {
-            if (!client.connected() && (!attemptedConnection ||
-                uint32_t(nowMs - lastReconnectMs) >= DeviceConfig::MQTT_RECONNECT_INTERVAL_MS)) {
-                attemptedConnection = true;
-                connected.store(false);
-                const bool ok = Secrets::MQTT_USERNAME[0] == '\0'
-                    ? client.connect(DeviceConfig::MQTT_CLIENT_ID)
-                    : client.connect(DeviceConfig::MQTT_CLIENT_ID, Secrets::MQTT_USERNAME, Secrets::MQTT_PASSWORD);
-                lastReconnectMs = millis(); // Retry interval starts after the attempt finishes.
+        if (WiFi.status() != WL_CONNECTED) { transport.stop(); connected.store(false); }
+        else {
+            if (!client.connected() && (!attemptedConnection || uint32_t(nowMs - lastReconnectMs) >= DeviceConfig::MQTT_RECONNECT_INTERVAL_MS)) {
+                attemptedConnection = true; connected.store(false);
+                const bool ok = Secrets::MQTT_USERNAME[0] == '\0' ? client.connect(DeviceConfig::MQTT_CLIENT_ID) :
+                    client.connect(DeviceConfig::MQTT_CLIENT_ID, Secrets::MQTT_USERNAME, Secrets::MQTT_PASSWORD);
+                lastReconnectMs = millis();
+                if (ok) {
+                    char topic[96]; snprintf(topic, sizeof(topic), "aquasense/%s/command", DeviceConfig::DEVICE_ID);
+                    client.subscribe(topic, 1); // Commands are always published non-retained by the backend.
+                }
                 Serial.printf("MQTT %s (state=%d)\n", ok ? "connected" : "connect failed", client.state());
             }
-            client.loop();
-            connected.store(client.connected());
-            // Refresh after any slow connection attempt and reject stale telemetry.
-            if (xQueueReceive(snapshots, &latest, 0) == pdTRUE) hasSnapshot = true;
+            client.loop(); connected.store(client.connected());
+            if (xQueueReceive(snapshots, &latest, 0) == pdTRUE) { hasSnapshot = true; staleStatusPublished = false; }
+            xQueueReceive(states, &latestState, 0);
+            MqttPendingAcknowledgement pending{};
+            if (client.connected() && xQueueReceive(acknowledgements, &pending, 0) == pdTRUE)
+                publishAcknowledgement(pending.command, pending.receipt, latestState);
             const uint32_t publishMs = millis();
-            if (client.connected() && hasSnapshot && latest.sequence != publishedSequence &&
-                uint32_t(publishMs - latest.sampledAtMs) <= DeviceConfig::TELEMETRY_MAX_AGE_MS &&
+            const bool stale = hasSnapshot && uint32_t(publishMs - latest.sampledAtMs) > DeviceConfig::TELEMETRY_MAX_AGE_MS;
+            if (client.connected() && stale && !staleStatusPublished &&
                 (!attemptedPublish || uint32_t(publishMs - lastPublishMs) >= DeviceConfig::MQTT_PUBLISH_INTERVAL_MS)) {
-                attemptedPublish = true;
-                lastPublishMs = publishMs;
+                SensorReadings disconnected = latest;
+                disconnected.phValid = disconnected.temperatureValid = disconnected.turbidityValid = disconnected.orpValid = false;
+                disconnected.phConnected = disconnected.temperatureConnected = disconnected.turbidityConnected = disconnected.orpConnected = false;
+                attemptedPublish = true; lastPublishMs = publishMs; staleStatusPublished = publishReadings(disconnected);
+            }
+            if (client.connected() && hasSnapshot && latest.sequence != publishedSequence && !stale &&
+                (!attemptedPublish || uint32_t(publishMs - lastPublishMs) >= DeviceConfig::MQTT_PUBLISH_INTERVAL_MS)) {
+                attemptedPublish = true; lastPublishMs = publishMs;
                 if (publishReadings(latest)) publishedSequence = latest.sequence;
             }
         }

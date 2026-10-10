@@ -4,12 +4,20 @@
 #include "config/ActuatorConfig.h"
 
 void BuzzerManager::begin() {
+    pinMode(Pins::Diagram::BUZZER, OUTPUT);
+    digitalWrite(Pins::Diagram::BUZZER, LOW);
     ledcSetup(ActuatorConfig::BUZZER_CHANNEL, ActuatorConfig::BUZZER_FREQUENCY_HZ, 8);
     ledcAttachPin(Pins::Diagram::BUZZER, ActuatorConfig::BUZZER_CHANNEL);
     ledcWrite(ActuatorConfig::BUZZER_CHANNEL, 0);
+    sounding = false;
 }
-void BuzzerManager::update(bool fault, uint32_t nowMs) {
-    if (!manual && !fault) { sounding = false; ledcWrite(ActuatorConfig::BUZZER_CHANNEL, 0); changedMs = nowMs; return; }
+void BuzzerManager::update(bool criticalSensorReading, uint32_t nowMs) {
+    if (!criticalSensorReading) {
+        sounding = false;
+        ledcWrite(ActuatorConfig::BUZZER_CHANNEL, 0);
+        changedMs = nowMs;
+        return;
+    }
     const uint32_t interval = sounding ? ActuatorConfig::BUZZER_ON_MS : ActuatorConfig::BUZZER_OFF_MS;
     if (uint32_t(nowMs - changedMs) >= interval) {
         sounding = !sounding; changedMs = nowMs;

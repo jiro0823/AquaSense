@@ -6,7 +6,7 @@
 class WaterManager {
 public:
     explicit WaterManager(RelayController& outputs) : relays(outputs) {}
-    const char* request(CommandAction action, uint32_t durationMs, uint32_t nowMs);
+    const char* request(CommandAction action, uint32_t durationMs, uint32_t nowMs, uint32_t exchangeFillDurationMs = 0);
     void update(const SensorReadings& readings, uint32_t nowMs);
     void stop();
     const char* setAutomatic(bool enabled);
@@ -15,7 +15,7 @@ public:
     const char* phaseName() const;
     const char* fault() const { return faultText; }
 private:
-    enum class Phase { Idle, Draining, Refilling, Complete, Fault };
+    enum class Phase { Idle, Draining, Transition, Refilling, Complete, Fault };
     void fail(const char* reason);
     bool policyReady() const;
     RelayController& relays;

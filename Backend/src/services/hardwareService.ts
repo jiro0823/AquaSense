@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { HardwareCommand, HardwareDeviceState } from '../database/models/HardwareControl';
 import { FeedingCommand } from '../database/models/FeedingCommand';
 import { feedingService } from './feedingService';
-import { COMMAND_TTL_MS, DEVICE_ONLINE_MS, type HardwareAction, type HardwareState, type CommandReceipt } from './hardwareProtocol';
+import { COMMAND_TTL_MS, DEVICE_ONLINE_MS, type HardwareAction, type HardwareState, type CommandReceipt, type SignedHardwareAck } from './hardwareProtocol';
 
 export const hardwareService = {
   async queue(userId: string, deviceId: string, action: HardwareAction, durationMs?: number) {
@@ -41,26 +41,37 @@ export const hardwareService = {
   },
 
   async sync(userId: string, deviceId: string, state: HardwareState, receipt?: CommandReceipt) {
-    if (receipt && !(await this.acknowledge(userId, deviceId, receipt))) throw new Error('Unknown command receipt');
+    // Device-key authenticated sync is a heartbeat/state report only. It cannot
+    // acknowledge user commands or retrieve one-shot commands.
+    void receipt;
     await HardwareDeviceState.upsert({ deviceId, state, receivedAt: new Date() });
-    await HardwareCommand.update({ status: 'EXPIRED', result: 'expired_before_delivery' }, {
-      where: { userId, deviceId, status: 'PENDING', expiresAt: { [Op.lte]: new Date() } },
-    });
-    // Old feeder commands must not dispense food unexpectedly after a long outage.
-    await FeedingCommand.update({ status: 'ACKED', metadata: { deviceResult: 'expired_before_delivery' } }, {
-      where: { userId, deviceId, status: 'PENDING', createdAt: { [Op.lt]: new Date(Date.now() - COMMAND_TTL_MS) } },
-    });
-    const [hardware, feeding, schedules] = await Promise.all([
-      HardwareCommand.findOne({ where: { userId, deviceId, status: 'PENDING' }, order: [['createdAt', 'ASC']] }),
-      feedingService.getLatestDeviceCommand(userId, deviceId),
-      feedingService.listSchedules(userId),
-    ]);
-    const command = hardware ? { id: hardware.id, source: 'hardware', action: hardware.action,
-      durationMs: hardware.durationMs ?? 0, ttlMs: Math.max(0, hardware.expiresAt.getTime() - Date.now()) }
-      : feeding ? { id: feeding.id, source: 'feeding', action: feeding.action, durationMs: 0,
-        ttlMs: Math.max(0, feeding.createdAt.getTime() + COMMAND_TTL_MS - Date.now()) } : null;
-    return { command, schedules: schedules.filter(s => s.enabled).slice(0, 20).map(s => ({ id: s.id, date: s.date, time: s.time })),
+    const schedules = await feedingService.listSchedules(userId);
+    return { command: null, schedules: schedules.filter(s => s.enabled).slice(0, 20).map(s => ({ id: s.id, date: s.date, time: s.time })),
       timezone: 'Asia/Manila', serverTimeIso: new Date().toISOString() };
+  },
+
+  async expirePendingCommands(): Promise<void> {
+    const now = new Date();
+    await HardwareCommand.update({ status: 'EXPIRED', result: 'expired_before_delivery' },
+      { where: { status: 'PENDING', expiresAt: { [Op.lte]: now } } });
+    await FeedingCommand.update({ status: 'ACKED', metadata: { deviceResult: 'expired_before_delivery' } },
+      { where: { status: 'PENDING', source: 'MANUAL', createdAt: { [Op.lt]: new Date(now.getTime() - COMMAND_TTL_MS) } } });
+  },
+
+  async acceptMqttAck(userId: string, ack: SignedHardwareAck): Promise<boolean> {
+    const { signature: _signature, v: _version, reportedAt, id, source, action, result, deviceId, state } = ack;
+    if (source === 'hardware') {
+      const command = await HardwareCommand.findOne({ where: { id, userId, deviceId } });
+      if (!command || command.action !== action) return false;
+      if (command.status === 'PENDING') await command.update({ status: 'ACKED', result });
+    } else {
+      const command = await FeedingCommand.findOne({ where: { id, userId, deviceId } });
+      if (!command || command.action !== action || command.source !== 'MANUAL') return false;
+      if (command.status === 'PENDING') await feedingService.ackCommand(userId, deviceId, id,
+        { deviceResult: result, reportedAt: new Date(reportedAt).toISOString() });
+    }
+    await HardwareDeviceState.upsert({ deviceId, state, receivedAt: new Date(reportedAt) });
+    return true;
   },
 
   async getState(userId: string, deviceId: string) {

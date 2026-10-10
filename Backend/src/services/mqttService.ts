@@ -10,6 +10,12 @@ import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
 import type { WaterQualityReading, WaterQualityStats } from '../iot/water/types';
+import { config } from '../config/config';
+import { HardwareCommand } from '../database/models/HardwareControl';
+import { FeedingCommand } from '../database/models/FeedingCommand';
+import { deviceService } from './device.service';
+import { ackCanonical, commandCanonical, parseSignedAck, signCanonical, verifyCanonical } from './hardwareProtocol';
+import { hardwareService } from './hardwareService';
 
 interface MQTTConfig {
   brokerUrl: string;
@@ -37,6 +43,8 @@ export class MQTTService {
     ammonia?: unknown;
     orp?: unknown;
   } = {};
+  private latestTurbidityUnit: 'raw_adc' | 'NTU' = 'raw_adc';
+  private latestDeviceId = 'mqtt-device';
   private pendingBatchFlags = {
     temperature: false,
     ph: false,
@@ -48,6 +56,7 @@ export class MQTTService {
   private sensorTimestamps: Record<string,string> = {};
   private latestDoReceivedAt = 0;
   private latestOrpReceivedAt = 0;
+  private actuatorRedeliveryInterval: NodeJS.Timeout | null = null;
 
   constructor(config?: Partial<MQTTConfig>) {
     this.config = {
@@ -86,6 +95,10 @@ export class MQTTService {
         this.isConnected = true;
         logger.info('âœ“ MQTT Connected successfully');
         this.subscribe();
+        void this.redeliverPendingActuatorCommands();
+        if (!this.actuatorRedeliveryInterval) this.actuatorRedeliveryInterval = setInterval(() => {
+          void this.redeliverPendingActuatorCommands();
+        }, 5000);
         this.publishStatus('online');
 
         // Clear any existing reconnect interval
@@ -136,7 +149,7 @@ export class MQTTService {
     if (!this.client) return;
 
     try {
-      this.client.subscribe([this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands], (err) => {
+      this.client.subscribe([this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'], (err) => {
         if (err) {
           logger.error('MQTT subscription error:', err.message);
         } else {
@@ -160,6 +173,8 @@ export class MQTTService {
 
       if (topic === this.config.topics.readings) {
         this.handleSensorReading(message);
+      } else if (/^aquasense\/[^/]+\/state$/.test(topic)) {
+        void this.handleActuatorAck(topic, message);
       } else if (this.isAquasenseSensorTopic(topic)) {
         this.handleAquasenseTopicValue(topic, message);
       } else if (topic.startsWith('water/commands/')) {
@@ -168,6 +183,62 @@ export class MQTTService {
     } catch (error) {
       logger.error(`Error processing MQTT message from ${topic}:`, error);
     }
+  }
+
+  /** Publish one non-retained, signed actuator command. Publishing means queued, never confirmed. */
+  async dispatchHardwareCommand(input: { id: string; deviceId: string; source: 'hardware' | 'feeding'; action: string; durationMs?: number; expiresAt: Date }): Promise<boolean> {
+    if (!this.client || !this.isConnected) return false;
+    const key = config.device.keys[input.deviceId];
+    if (!key) return false;
+    const unsigned = { v: 1 as const, deviceId: input.deviceId, id: input.id, source: input.source,
+      action: input.action, durationMs: input.durationMs ?? 0, expiresAt: input.expiresAt.getTime() };
+    const payload = JSON.stringify({ ...unsigned, signature: signCanonical(commandCanonical(unsigned), key) });
+    return new Promise((resolve) => this.client!.publish(`aquasense/${input.deviceId}/command`, payload,
+      { qos: 1, retain: false }, error => {
+        if (error) { logger.warn('Actuator MQTT publish failed', { deviceId: input.deviceId, commandId: input.id, error: error.message }); resolve(false); }
+        else resolve(true);
+      }));
+  }
+
+  private async redeliverPendingActuatorCommands(): Promise<void> {
+    if (!this.client || !this.isConnected) return;
+    try {
+      const [hardware, feeding] = await Promise.all([
+        HardwareCommand.findAll({ where: { status: 'PENDING' }, order: [['createdAt', 'ASC']], limit: 100 }),
+        FeedingCommand.findAll({ where: { status: 'PENDING', source: 'MANUAL' }, order: [['createdAt', 'ASC']], limit: 100 }),
+      ]);
+      const now = Date.now();
+      for (const command of hardware) {
+        if (command.expiresAt.getTime() <= now) continue;
+        if (!(await deviceService.verifyOwnership(command.userId, command.deviceId))) continue;
+        await this.dispatchHardwareCommand({ id: command.id, deviceId: command.deviceId, source: 'hardware', action: command.action,
+          durationMs: command.durationMs ?? undefined, expiresAt: command.expiresAt });
+      }
+      for (const command of feeding) {
+        const expiresAt = command.createdAt.getTime() + 120_000;
+        if (expiresAt <= now || !(await deviceService.verifyOwnership(command.userId, command.deviceId))) continue;
+        await this.dispatchHardwareCommand({ id: command.id, deviceId: command.deviceId, source: 'feeding', action: command.action,
+          expiresAt: new Date(expiresAt) });
+      }
+      // Expired commands are not redelivered after a reconnect/outage.
+      await hardwareService.expirePendingCommands();
+    } catch (error) { logger.error('Actuator command redelivery failed', error); }
+  }
+
+  private async handleActuatorAck(topic: string, payload: string): Promise<void> {
+    const ack = parseSignedAck(payload);
+    const topicDeviceId = topic.split('/')[1];
+    if (!ack || ack.deviceId !== topicDeviceId) { logger.warn('Rejected malformed actuator state/ack', { topic }); return; }
+    const key = config.device.keys[ack.deviceId];
+    if (!key || !verifyCanonical(ackCanonical(ack), ack.signature, key)) {
+      logger.warn('Rejected actuator state/ack with invalid signature', { deviceId: ack.deviceId, commandId: ack.id }); return;
+    }
+    try {
+      const device = await deviceService.getActiveDevice(ack.deviceId);
+      if (!device) return;
+      const accepted = await hardwareService.acceptMqttAck(device.userId, ack);
+      if (!accepted) logger.warn('Rejected out-of-scope actuator state/ack', { deviceId: ack.deviceId, commandId: ack.id });
+    } catch (error) { logger.error('Failed to persist actuator state/ack', error); }
   }
 
   /**
@@ -209,6 +280,9 @@ export class MQTTService {
 
     if(topicSuffix) this.sensorTimestamps[topicSuffix]=new Date().toISOString();
     switch (topicSuffix) {
+      case 'device-id':
+        if (payload.trim()) this.latestDeviceId = payload.trim();
+        return;
       case 'temperature':
         this.latestSensorPayload.temperature = value;
         this.pendingBatchFlags.temperature = true;
@@ -219,6 +293,12 @@ export class MQTTService {
         break;
       case 'turbidity':
         this.latestSensorPayload.turbidity = value;
+        this.latestTurbidityUnit = 'raw_adc';
+        this.pendingBatchFlags.turbidity = true;
+        break;
+      case 'turbidity-ntu':
+        this.latestSensorPayload.turbidity = value;
+        this.latestTurbidityUnit = 'NTU';
         this.pendingBatchFlags.turbidity = true;
         break;
       case 'orp':
@@ -248,11 +328,12 @@ export class MQTTService {
       this.latestSensorPayload.turbidity !== undefined))
     ) {
       const normalizedPayload = {
+        deviceId: this.latestDeviceId,
         temperature: this.latestSensorPayload.temperature,
         ph: this.latestSensorPayload.ph,
         do: Date.now() - this.latestDoReceivedAt <= 15000 ? this.latestSensorPayload.do : undefined,
         turbidity: this.latestSensorPayload.turbidity,
-        turbidityUnit: 'raw_adc',
+        turbidityUnit: this.latestTurbidityUnit,
         orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
         sensorTimestamps: {...this.sensorTimestamps},
         location: 'ESP32-MQTT',
@@ -325,6 +406,7 @@ export class MQTTService {
    * Disconnect from MQTT broker
    */
   async disconnect(): Promise<void> {
+    if (this.actuatorRedeliveryInterval) { clearInterval(this.actuatorRedeliveryInterval); this.actuatorRedeliveryInterval = null; }
     return new Promise((resolve) => {
       if (!this.client) {
         resolve();

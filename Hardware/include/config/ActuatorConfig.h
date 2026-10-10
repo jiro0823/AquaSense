@@ -3,8 +3,9 @@
 
 namespace ActuatorConfig {
 // Commissioning gate: do not infer relay polarity from the module's 5 V supply.
-constexpr int RELAY_ACTIVE_LEVEL = -1; // Set to 0 (LOW) or 1 (HIGH) after testing.
-constexpr uint32_t PUMP_MAX_RUN_MS = 0; // Required measured safe hard limit per phase.
+constexpr int RELAY_ACTIVE_LEVEL = -1; // Verify the exact module on a bench; never infer this value.
+constexpr uint32_t MAX_DRAIN_RUNTIME_MS = 60000; // Initial hard cap; recalibrate after measuring flow.
+constexpr uint32_t MAX_REFILL_RUNTIME_MS = 60000; // Initial hard cap; recalibrate after measuring flow.
 constexpr uint32_t AUTO_DRAIN_MS = 0;   // Calibrate from tank volume and pump flow.
 constexpr uint32_t AUTO_FILL_MS = 0;
 constexpr uint32_t AUTO_COOLDOWN_MS = 0;

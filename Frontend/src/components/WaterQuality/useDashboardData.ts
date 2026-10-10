@@ -140,8 +140,8 @@ export const useDashboardData = () => {
     return () => clearInterval(batteryInterval);
   }, []);
 
-  const triggerManual = async (action: 'ON' | 'OFF' | 'TRIGGER') => {
-    await apiClient.post('/feeding/manual', { action });
+  const triggerManual = async (action: 'ON' | 'OFF' | 'TRIGGER', deviceId?: string) => {
+    await apiClient.post('/feeding/manual', { action, ...(deviceId ? { deviceId } : {}) });
     await loadFeedingSchedules();
   };
 

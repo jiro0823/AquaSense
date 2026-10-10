@@ -32,6 +32,7 @@ PubSubClient mqttClient(espClient);
 // ========== Global Variables ==========
 unsigned long lastReadTime = 0;
 unsigned long lastMQTTCheck = 0;
+unsigned long lastWiFiReconnect = 0;
 uint32_t readingSequence = 0;
 String bootId;
 String deviceId;

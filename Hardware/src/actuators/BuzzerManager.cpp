@@ -9,10 +9,12 @@ void BuzzerManager::begin() {
     ledcSetup(ActuatorConfig::BUZZER_CHANNEL, ActuatorConfig::BUZZER_FREQUENCY_HZ, 8);
     ledcAttachPin(Pins::Diagram::BUZZER, ActuatorConfig::BUZZER_CHANNEL);
     ledcWrite(ActuatorConfig::BUZZER_CHANNEL, 0);
+    manualRequested = false;
     sounding = false;
 }
 void BuzzerManager::update(bool criticalSensorReading, uint32_t nowMs) {
-    if (!criticalSensorReading) {
+    // Safety alarms take priority; manual requests use the same bounded pattern.
+    if (!criticalSensorReading && !manualRequested) {
         sounding = false;
         ledcWrite(ActuatorConfig::BUZZER_CHANNEL, 0);
         changedMs = nowMs;

@@ -27,9 +27,6 @@ export const WaterQualityDashboard: React.FC = () => {
     useWaterQualityWebSocket();
   const navigate = useNavigate();
 
-  const [batteryLevel, setBatteryLevel] = useState(92);
-  const [tankWaterLevel, setTankWaterLevel] = useState(78);
-  const [isDraining, setIsDraining] = useState(false);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [feedingSchedules, setFeedingSchedules] = useState<FeedingSchedule[]>([]);
   const [feedingLoading, setFeedingLoading] = useState(false);
@@ -138,26 +135,6 @@ export const WaterQualityDashboard: React.FC = () => {
 
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    const batteryInterval = setInterval(() => {
-      setBatteryLevel((prev) => (prev - 0.1 < 0 ? 0 : prev - 0.1));
-    }, 5000);
-    return () => clearInterval(batteryInterval);
-  }, []);
-
-  const handleDrainWater = () => {
-    setIsDraining(true);
-    let level = tankWaterLevel;
-    const drainInterval = setInterval(() => {
-      level -= 5;
-      setTankWaterLevel(level);
-      if (level <= 0) {
-        clearInterval(drainInterval);
-        setIsDraining(false);
-      }
-    }, 300);
-  };
 
   const handleLogout = async () => {
     try {
@@ -284,11 +261,11 @@ export const WaterQualityDashboard: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400">Battery</span>
-                  <span className="text-white">{batteryLevel.toFixed(0)}%</span>
+                  <span className="text-amber-300">Unavailable</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-400">Tank</span>
-                  <span className="text-white">{tankWaterLevel.toFixed(0)}%</span>
+                  <span className="text-gray-400">Water level</span>
+                  <span className="text-amber-300">Unavailable</span>
                 </div>
               </div>
             </div>
@@ -321,17 +298,18 @@ export const WaterQualityDashboard: React.FC = () => {
             </div>
             <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
               <p className="text-xs tracking-wide text-gray-500 uppercase">Battery</p>
-              <p className="mt-2 text-3xl font-bold text-amber-300">{batteryLevel.toFixed(0)}%</p>
+              <p className="mt-2 text-3xl font-bold text-amber-300">Unavailable</p>
+              <p className="mt-1 text-xs text-gray-500">No battery telemetry is available.</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
-              <p className="text-xs tracking-wide text-gray-500 uppercase">Tank Reserve</p>
-              <p className="mt-2 text-3xl font-bold text-cyan-300">{tankWaterLevel.toFixed(0)}%</p>
+              <p className="text-xs tracking-wide text-gray-500 uppercase">Water Level</p>
+              <p className="mt-2 text-3xl font-bold text-amber-300">Unavailable</p>
+              <p className="mt-1 text-xs text-gray-500">No level sensor is installed.</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-[#14151b] p-4">
-              <p className="text-xs tracking-wide text-gray-500 uppercase">Tank Control</p>
-              <button onClick={handleDrainWater} disabled={isDraining || tankWaterLevel === 0} className="w-full px-3 py-2 mt-2 text-sm font-semibold text-white rounded-lg bg-rose-600 disabled:opacity-40">
-                {isDraining ? 'Draining...' : tankWaterLevel === 0 ? 'Empty' : 'Drain Water'}
-              </button>
+              <p className="text-xs tracking-wide text-gray-500 uppercase">Level Sensor</p>
+              <p className="mt-2 text-sm font-semibold text-amber-300">Not installed / uncommissioned</p>
+              <p className="mt-1 text-xs text-gray-500">Level-based automation is unavailable.</p>
             </div>
           </section>
 

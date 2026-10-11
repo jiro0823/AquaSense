@@ -8,8 +8,17 @@ interface HardwareState {
   online: boolean;
   receivedAt: string | null;
   state: null | { fillPump: boolean; drainPump: boolean; waterPhase: 'IDLE' | 'DRAINING' | 'SETTLING_AFTER_DRAIN' | 'REFILLING' | 'COOLDOWN' | 'COMPLETE' | 'FAULT'; fault: string; automation: boolean };
+  commands?: ApiCommand[];
 }
-interface ApiCommand { id: string; action: string; status: 'PENDING' | 'ACKED' | 'EXPIRED'; result?: string | null; expiresAt?: string }
+interface ApiCommand {
+  id: string;
+  action: string;
+  status: 'PENDING' | 'ACKED' | 'EXPIRED';
+  result?: string | null;
+  durationMs?: number | null;
+  expiresAt?: string;
+  createdAt?: string;
+}
 type TrackedCommand = Omit<ApiCommand, 'status'> & { status: ApiCommand['status'] | 'TIMEOUT' };
 
 const WaterChangePage: React.FC = () => {
@@ -83,6 +92,7 @@ const WaterChangePage: React.FC = () => {
 
   const state = hardware?.state;
   const fresh = hardware?.online === true && loadedAt !== null && Date.now() - loadedAt < 20000;
+  const pumpCommands = hardware?.commands?.filter((item) => ['FILL', 'DRAIN', 'WATER_EXCHANGE', 'WATER_STOP'].includes(item.action)) ?? [];
   const stateText = !hardware || !fresh ? 'OFFLINE / STALE' : state?.waterPhase || 'UNKNOWN';
   const commandStatus = !trackedCommand ? 'No command sent in this session'
     : trackedCommand.status === 'PENDING' ? 'QUEUED — awaiting device acknowledgement'
@@ -130,6 +140,50 @@ const WaterChangePage: React.FC = () => {
         {loadedAt && <p className="mt-1 text-[10px] text-gray-400">Last state poll: {new Date(loadedAt).toLocaleTimeString()}</p>}
         {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
       </div>
+    </section>
+
+    <section className="rounded-xl border bg-white p-4 shadow-sm" aria-labelledby="water-level-heading">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 id="water-level-heading" className="text-sm font-semibold text-gray-800">Water level</h2>
+          <p className="mt-1 text-xs text-gray-500">Ultrasonic level sensing is not installed or commissioned for this device.</p>
+        </div>
+        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">UNAVAILABLE</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+        <div className="rounded-lg bg-gray-50 p-3"><span className="text-gray-500">Measured level</span><p className="font-semibold">Unavailable</p></div>
+        <div className="rounded-lg bg-gray-50 p-3"><span className="text-gray-500">Estimated volume</span><p className="font-semibold">Unavailable</p></div>
+        <div className="rounded-lg bg-gray-50 p-3"><span className="text-gray-500">Level-based pump automation</span><p className="font-semibold">Disabled</p></div>
+      </div>
+      <p className="mt-3 text-[11px] text-gray-500">No level percentage, pond capacity, or exchange volume is estimated. Sensor model, wiring, and tank calibration must be confirmed before these values or level-based automation can be enabled.</p>
+    </section>
+
+    <section className="rounded-xl border bg-white p-4 shadow-sm" aria-labelledby="pump-history-heading">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 id="pump-history-heading" className="text-sm font-semibold text-gray-800">Recent pump commands</h2>
+          <p className="mt-1 text-xs text-gray-500">Command attempts and device acknowledgments; acknowledgment does not confirm physical water flow or a completed exchange.</p>
+        </div>
+        {fresh && <span className="text-[11px] text-gray-400">Latest device report {hardware?.receivedAt ? new Date(hardware.receivedAt).toLocaleString() : 'unknown'}</span>}
+      </div>
+      {pumpCommands.length ? (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[620px] text-left text-xs">
+            <thead className="border-b text-gray-500"><tr><th className="py-2 pr-3 font-medium">Requested</th><th className="py-2 pr-3 font-medium">Command</th><th className="py-2 pr-3 font-medium">Duration</th><th className="py-2 pr-3 font-medium">Status</th><th className="py-2 font-medium">Device result</th></tr></thead>
+            <tbody>
+              {pumpCommands.map((item) => (
+                <tr key={item.id} className="border-b last:border-0">
+                  <td className="py-2 pr-3 text-gray-600">{item.createdAt && Number.isFinite(new Date(item.createdAt).getTime()) ? new Date(item.createdAt).toLocaleString() : 'Time unavailable'}</td>
+                  <td className="py-2 pr-3 font-medium">{item.action}</td>
+                  <td className="py-2 pr-3">{item.durationMs == null ? '—' : `${(item.durationMs / 1000).toFixed(1)} s`}</td>
+                  <td className="py-2 pr-3">{item.status}</td>
+                  <td className="py-2">{item.result || 'No result reported'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <p className="mt-3 text-xs text-gray-500">{hardware ? 'No persisted pump commands are available for this device.' : 'Select a device and load its state to view command history.'}</p>}
     </section>
   </div>;
 };

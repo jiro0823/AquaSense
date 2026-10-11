@@ -34,8 +34,6 @@ export const useDashboardData = () => {
   useEffect(() => { const timer=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(timer); },[]);
   const newest = polledReading && (!latestReading || new Date(polledReading.createdAt || polledReading.timestamp)>=new Date(latestReading.createdAt || latestReading.timestamp)) ? polledReading : latestReading;
   const displayReading = refreshDisplayReading(newest,now);
-  const [batteryLevel, setBatteryLevel] = useState(92);
-  const [tankWaterLevel, setTankWaterLevel] = useState(78);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [feedingSchedules, setFeedingSchedules] = useState<FeedingSchedule[]>([]);
   const [feedingLoading, setFeedingLoading] = useState(false);
@@ -157,11 +155,6 @@ export const useDashboardData = () => {
     return () => clearInterval(interval);
   }, [ws.alerts]);
 
-  useEffect(() => {
-    const batteryInterval = setInterval(() => setBatteryLevel((prev) => (prev - 0.1 < 0 ? 0 : prev - 0.1)), 5000);
-    return () => clearInterval(batteryInterval);
-  }, []);
-
   const triggerManual = async (action: 'ON' | 'OFF' | 'TRIGGER', deviceId?: string) => {
     await apiClient.post('/feeding/manual', { action, ...(deviceId ? { deviceId } : {}) });
     await loadFeedingSchedules();
@@ -187,17 +180,6 @@ export const useDashboardData = () => {
     await loadFeedingSchedules();
   };
 
-  const drainWater = () => {
-    let level = tankWaterLevel;
-    const timer = setInterval(() => {
-      level -= 5;
-      setTankWaterLevel(level);
-      if (level <= 0) {
-        clearInterval(timer);
-      }
-    }, 300);
-  };
-
   return {
     ...ws,
     error: ws.error || restError,
@@ -205,15 +187,11 @@ export const useDashboardData = () => {
     alerts: activeAlerts.length > 0 ? activeAlerts : ws.alerts,
     activeAlerts,
     recentAlerts,
-    batteryLevel,
-    tankWaterLevel,
     chartData,
     feedingSchedules,
     feedingLoading,
     predictiveWarning: displayReading?.sensorHealth?.temperature.valid && displayReading.sensorHealth.ph.valid && displayReading.sensorHealth.turbidity.valid && displayReading.doMeasured ? predictiveWarning : null,
     smsLogs,
-    setTankWaterLevel,
-    drainWater,
     triggerManual,
     addSchedule,
     toggleSchedule,

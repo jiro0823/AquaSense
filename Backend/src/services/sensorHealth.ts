@@ -134,7 +134,18 @@ export function ammoniaSpeciation(health: HealthSummary, tan?: unknown, waterTyp
   result.fraction=1/(1+10**(result.pKa-ph.value)); result.percent=result.fraction*100; result.status='AVAILABLE';
   result.reason='Fraction of TAN only; source-sensor accuracy has not been formally verified';
   if (result.tan) {
-    result.nh3N=result.tan.value*result.fraction; result.concentrationReason='NH3-N calculated from measured TAN (both mg/L as N)';
+    const tanAt=timestampMs(result.tan.timestamp);
+    const temperatureAt=timestampMs(temperature.timestamp);
+    const phAt=timestampMs(ph.timestamp);
+    const aligned=Math.abs(tanAt-temperatureAt)<=HEALTH_CONFIG.staleMs &&
+      Math.abs(tanAt-phAt)<=HEALTH_CONFIG.staleMs &&
+      Math.abs(temperatureAt-phAt)<=HEALTH_CONFIG.staleMs;
+    if (aligned) {
+      result.nh3N=result.tan.value*result.fraction;
+      result.concentrationReason='NH3-N calculated from time-aligned measured TAN, pH and temperature (mg/L as N)';
+    } else {
+      result.concentrationReason='TAN, pH and temperature acquisition times must be within 15 seconds to calculate NH3-N';
+    }
   }
   return result;
 }

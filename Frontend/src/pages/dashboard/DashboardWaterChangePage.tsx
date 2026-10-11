@@ -108,13 +108,13 @@ const WaterChangePage: React.FC = () => {
     </header>
 
     <section className="grid gap-3 sm:grid-cols-2">
-      <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="p-4 bg-white border shadow-sm rounded-xl">
         <label className="block text-xs font-semibold text-gray-600" htmlFor="water-device">Device</label>
-        <select id="water-device" value={deviceId} onChange={(event) => { setDeviceId(event.target.value); setHardware(null); setTrackedCommand(null); }} className="mt-1 w-full rounded border p-2 text-sm">
+        <select id="water-device" value={deviceId} onChange={(event) => { setDeviceId(event.target.value); setHardware(null); setTrackedCommand(null); }} className="w-full p-2 mt-1 text-sm border rounded">
           {devices.length === 0 && <option value="">No active registered device</option>}
           {devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} ({device.deviceId})</option>)}
         </select>
-        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+        <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
           <div><span className="text-gray-500">Device</span><p className="font-semibold">{fresh ? 'ONLINE' : 'OFFLINE / STALE'}</p></div>
           <div><span className="text-gray-500">Water phase</span><p className="font-semibold">{stateText}</p></div>
           <div><span className="text-gray-500">Drain output (logical)</span><p className="font-semibold">{fresh && state ? (state.drainPump ? 'ON' : 'OFF') : 'UNKNOWN'}</p></div>
@@ -124,15 +124,15 @@ const WaterChangePage: React.FC = () => {
         <p className="mt-1 text-[11px] text-gray-500">Automation {state?.automation ? 'enabled on device' : 'disabled on device'}. The device firmware owns automatic water-change decisions; predictive risk on this page does not start pumps.</p>
       </div>
 
-      <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="p-4 bg-white border shadow-sm rounded-xl">
         <h2 className="text-sm font-semibold text-gray-800">Manual water control</h2>
-        <label className="mt-3 block text-xs font-semibold text-gray-600" htmlFor="pump-duration">Duration (seconds, required by the API)</label>
-        <input id="pump-duration" type="number" min="1" max="60" step="1" value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)} placeholder="Enter duration (max 60 seconds)" className="mt-1 w-full rounded border p-2 text-sm" />
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button disabled={!deviceId || pending} onClick={() => void command('DRAIN')} className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Drain for duration</button>
-          <button disabled={!deviceId || pending} onClick={() => void command('FILL')} className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Fill for duration</button>
-          <button disabled={!deviceId || pending} onClick={() => void command('WATER_EXCHANGE')} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Exchange (commissioned targets)</button>
-          <button disabled={!deviceId || pending} onClick={() => void command('WATER_STOP')} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Stop</button>
+        <label className="block mt-3 text-xs font-semibold text-gray-600" htmlFor="pump-duration">Duration (seconds, required by the API)</label>
+        <input id="pump-duration" type="number" min="1" max="60" step="1" value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)} placeholder="Enter duration (max 60 seconds)" className="w-full p-2 mt-1 text-sm border rounded" />
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <button disabled={!deviceId || pending} onClick={() => void command('DRAIN')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-cyan-700 disabled:opacity-40">Drain for duration</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('FILL')} className="px-3 py-2 text-xs font-semibold text-white bg-blue-700 rounded-lg disabled:opacity-40">Fill for duration</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('WATER_EXCHANGE')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-violet-700 disabled:opacity-40">Exchange (commissioned targets)</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('WATER_STOP')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-rose-700 disabled:opacity-40">Stop</button>
         </div>
         <p className="mt-2 text-[11px] text-gray-500">FILL and DRAIN requests are capped at 60 seconds and may not exceed the commissioned pump target. WATER_EXCHANGE uses its separately commissioned drain and fill targets; the entered duration is required for API compatibility. Pump controls remain fail-closed until timing and relay settings are commissioned.</p>
         <p className="mt-3 text-xs" aria-live="polite">{pending ? 'Submitting command…' : commandStatus}</p>
@@ -142,23 +142,23 @@ const WaterChangePage: React.FC = () => {
       </div>
     </section>
 
-    <section className="rounded-xl border bg-white p-4 shadow-sm" aria-labelledby="water-level-heading">
+    <section className="p-4 bg-white border shadow-sm rounded-xl" aria-labelledby="water-level-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id="water-level-heading" className="text-sm font-semibold text-gray-800">Water level</h2>
           <p className="mt-1 text-xs text-gray-500">Ultrasonic level sensing is not installed or commissioned for this device.</p>
         </div>
-        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">UNAVAILABLE</span>
+        <span className="px-3 py-1 text-xs font-semibold rounded-full bg-amber-50 text-amber-800">UNAVAILABLE</span>
       </div>
-      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
-        <div className="rounded-lg bg-gray-50 p-3"><span className="text-gray-500">Measured level</span><p className="font-semibold">Unavailable</p></div>
-        <div className="rounded-lg bg-gray-50 p-3"><span className="text-gray-500">Estimated volume</span><p className="font-semibold">Unavailable</p></div>
-        <div className="rounded-lg bg-gray-50 p-3"><span className="text-gray-500">Level-based pump automation</span><p className="font-semibold">Disabled</p></div>
+      <div className="grid gap-2 mt-3 text-sm sm:grid-cols-3">
+        <div className="p-3 rounded-lg bg-gray-50"><span className="text-gray-500">Measured level</span><p className="font-semibold">Unavailable</p></div>
+        <div className="p-3 rounded-lg bg-gray-50"><span className="text-gray-500">Estimated volume</span><p className="font-semibold">Unavailable</p></div>
+        <div className="p-3 rounded-lg bg-gray-50"><span className="text-gray-500">Level-based pump automation</span><p className="font-semibold">Disabled</p></div>
       </div>
       <p className="mt-3 text-[11px] text-gray-500">No level percentage, pond capacity, or exchange volume is estimated. Sensor model, wiring, and tank calibration must be confirmed before these values or level-based automation can be enabled.</p>
     </section>
 
-    <section className="rounded-xl border bg-white p-4 shadow-sm" aria-labelledby="pump-history-heading">
+    <section className="p-4 bg-white border shadow-sm rounded-xl" aria-labelledby="pump-history-heading">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 id="pump-history-heading" className="text-sm font-semibold text-gray-800">Recent pump commands</h2>
@@ -169,7 +169,7 @@ const WaterChangePage: React.FC = () => {
       {pumpCommands.length ? (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[620px] text-left text-xs">
-            <thead className="border-b text-gray-500"><tr><th className="py-2 pr-3 font-medium">Requested</th><th className="py-2 pr-3 font-medium">Command</th><th className="py-2 pr-3 font-medium">Duration</th><th className="py-2 pr-3 font-medium">Status</th><th className="py-2 font-medium">Device result</th></tr></thead>
+            <thead className="text-gray-500 border-b"><tr><th className="py-2 pr-3 font-medium">Requested</th><th className="py-2 pr-3 font-medium">Command</th><th className="py-2 pr-3 font-medium">Duration</th><th className="py-2 pr-3 font-medium">Status</th><th className="py-2 font-medium">Device result</th></tr></thead>
             <tbody>
               {pumpCommands.map((item) => (
                 <tr key={item.id} className="border-b last:border-0">

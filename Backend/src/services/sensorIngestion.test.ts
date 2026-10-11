@@ -25,8 +25,16 @@ function storage() {
 }
 test('HTTP schemas preserve null, missing and malformed readings for diagnostics',()=>{
   for(const schema of [waterReadingSchema,sensorIngestSchema]) {
-    const data=schema.parse({deviceId:'test',temperature:null,ph:'7junk',sensors:{ph:{rawAdc:3000}},tan:{value:1}});
+    const data=schema.parse({deviceId:'test',temperature:null,ph:'7junk',sensors:{ph:{rawAdc:3000}}});
     assert.equal(data.temperature,null);assert.equal(data.ph,'7junk');assert.equal(data.do,undefined);assert.ok(data.sensors);
+  }
+});
+test('TAN transport requires measured value provenance, units, validation and timestamp',()=>{
+  const tan={value:1,unit:'mg/L as N',source:'test_kit',validated:true,timestamp:'2026-09-14T04:00:00.000Z'};
+  assert.equal(waterReadingSchema.safeParse({tan}).success,true);
+  assert.equal(sensorIngestSchema.safeParse({deviceId:'test',tan}).success,true);
+  for(const invalid of [1,{...tan,unit:'mg/L NH3'},{...tan,source:'unknown'},{...tan,validated:false},{...tan,timestamp:'not-a-time'},{...tan,value:-1},{...tan,extra:'unverified'}]) {
+    assert.equal(waterReadingSchema.safeParse({tan:invalid}).success,false,`expected invalid TAN payload: ${JSON.stringify(invalid)}`);
   }
 });
 test('production ingestion retains error diagnostics, rejects legacy DO input and never invents ammonia',async()=>{
@@ -36,14 +44,22 @@ test('production ingestion retains error diagnostics, rejects legacy DO input an
   assert.equal(r.sensorHealth.ph.rawAdc,3000);assert.equal(r.do,null);assert.equal(r.doMeasured,false);assert.equal(r.ammonia,null);assert.equal(r.speciation.status,'UNAVAILABLE');
   assert.equal(rows[0].temperature,null);assert.equal(rows[0].ammonia,null);
 });
-test('faulted MQTT frames retain health metadata without accepting uncalibrated ORP as mV',async()=>{
+test('faulted MQTT frames expose reported ORP only alongside invalid calibration health',async()=>{
   storage();const notify=mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
   const service=new MQTTService();let received:any;
   service.setRealtimeHandlers({onReadingReceived:r=>received=r});
   await (service as any).handleSensorReading(JSON.stringify({deviceId:'mqtt-fault-test',temperature:-127,ph:null,turbidity:1800,turbidityUnit:'raw_adc',orp:220}));
-  assert.equal(received.temperature,null);assert.equal(received.sensorHealth.ph.health,'MISSING');assert.equal(received.orp,null);
+  assert.equal(received.temperature,null);assert.equal(received.sensorHealth.ph.health,'MISSING');assert.equal(received.orp,220);
   assert.equal(received.sensorHealth.orp.health,'MISSING');assert.equal(received.do,null);assert.equal(received.doMeasured,false);
   assert.equal((notify.mock.calls[0].arguments as any)[0].temperature,null);
+});
+test('HTTP reading exposes reported ORP for a clearly uncalibrated trend only',async()=>{
+  storage();
+  const reading=await sensorReadingService.ingest('orp-display-test',{temperature:25,ph:8,orp:-330.4});
+  assert.equal(reading.orp,-330.4);
+  assert.equal(reading.sensorHealth.orp.valid,false);
+  assert.equal(reading.sensorHealth.orp.calibration,'REQUIRED');
+  assert.equal(reading.waterQuality.orp,'NO WATER-QUALITY POLICY');
 });
 test('topic MQTT keeps NTU and raw ADC turbidity units distinct',async()=>{
   const rows=storage();
@@ -64,6 +80,69 @@ test('topic MQTT keeps NTU and raw ADC turbidity units distinct',async()=>{
   await new Promise<void>(resolve=>setImmediate(resolve));
   assert.equal(rows[0].turbidityUnit,'raw_adc');
 });
+test('topic MQTT assembles out-of-order sensor updates without mixing raw ADC into NTU',async()=>{
+  const rows=storage();
+  mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const service=new MQTTService();
+  (service as any).handleAquasenseTopicValue('aquasense/device-id','ordered-topic-test');
+  (service as any).handleAquasenseTopicValue('aquasense/ph','7.5');
+  (service as any).handleAquasenseTopicValue('aquasense/turbidity-ntu','20');
+  (service as any).handleAquasenseTopicValue('aquasense/turbidity','1800');
+  assert.equal(rows.length,0,'incomplete topic frame must not reuse cached temperature');
+  (service as any).handleAquasenseTopicValue('aquasense/temperature','25');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].turbidity,20);
+  assert.equal(rows[0].turbidityUnit,'NTU');
+  assert.equal(rows[0].sensorHealth.turbidity.rawAdc,1800);
+});
+test('topic MQTT duplicate updates cannot emit a second frame without fresh required parameters',async()=>{
+  const rows=storage();
+  mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const service=new MQTTService();
+  (service as any).handleAquasenseTopicValue('aquasense/device-id','duplicate-topic-test');
+  (service as any).handleAquasenseTopicValue('aquasense/temperature','25');
+  (service as any).handleAquasenseTopicValue('aquasense/ph','7.5');
+  (service as any).handleAquasenseTopicValue('aquasense/turbidity-ntu','20');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows.length,1);
+  (service as any).handleAquasenseTopicValue('aquasense/turbidity-ntu','20');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows.length,1);
+});
+test('topic MQTT missing and disconnected values never persist cached measurements',async()=>{
+  const rows=storage();
+  mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const service=new MQTTService();
+  (service as any).handleAquasenseTopicValue('aquasense/device-id','missing-topic-test');
+  (service as any).handleAquasenseTopicValue('aquasense/temperature','25');
+  (service as any).handleAquasenseTopicValue('aquasense/ph','7.5');
+  (service as any).handleAquasenseTopicValue('aquasense/turbidity-ntu','DISCONNECTED');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows.length,0);
+
+  const interrupted=new MQTTService();
+  (interrupted as any).handleAquasenseTopicValue('aquasense/device-id','interrupted-topic-test');
+  (interrupted as any).handleAquasenseTopicValue('aquasense/turbidity','1800');
+  (interrupted as any).handleAquasenseTopicValue('aquasense/turbidity','DISCONNECTED');
+  (interrupted as any).handleAquasenseTopicValue('aquasense/temperature','25');
+  (interrupted as any).handleAquasenseTopicValue('aquasense/ph','7.5');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows.length,0,'disconnect must clear an unflushed raw value');
+});
+test('raw-only topic source remains explicitly raw_adc',async()=>{
+  const rows=storage();
+  mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const service=new MQTTService();
+  (service as any).handleAquasenseTopicValue('aquasense/device-id','raw-only-topic-test');
+  (service as any).handleAquasenseTopicValue('aquasense/temperature','25');
+  (service as any).handleAquasenseTopicValue('aquasense/ph','7.5');
+  (service as any).handleAquasenseTopicValue('aquasense/turbidity','1800');
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].turbidity,1800);
+  assert.equal(rows[0].turbidityUnit,'raw_adc');
+});
 test('latest read ages sensors and speciation without new packets; history retains acquisition diagnostics',async()=>{
   const rows=storage();const now=Date.now();
   const r=await sensorReadingService.ingest('freshness-test',{temperature:25,ph:8,orp:220,turbidity:1800,turbidityUnit:'raw_adc'});
@@ -81,7 +160,7 @@ test('current failure prevents fallback to older healthy prediction history',asy
   storage();const firstAcquiredAt=Date.now()-2;
   await sensorReadingService.ingest('prediction-test',{temperature:25,ph:7.5,do:6,turbidity:20,turbidityUnit:'NTU',acquiredAt:new Date(firstAcquiredAt).toISOString()});
   await sensorReadingService.ingest('prediction-test',{temperature:-127,ph:7.5,do:6,turbidity:20,turbidityUnit:'NTU',acquiredAt:new Date(firstAcquiredAt+1).toISOString()});
-  const prediction=await predictiveAnalyticsService.getWarningCard();assert.equal(prediction.analysisStatus,'INSUFFICIENT_VALID_SENSOR_DATA');assert.equal(prediction.riskScore,null);
+  const prediction=await predictiveAnalyticsService.getWarningCard();assert.equal(prediction.modelStatus,'UNAVAILABLE');assert.equal(prediction.validationStatus,'NOT_COMMISSIONED');assert.equal(prediction.analysisStatus,'INSUFFICIENT_VALID_SENSOR_DATA');assert.equal(prediction.riskScore,null);
 });
 test('uncalibrated measured parameters cannot produce a mortality forecast',async()=>{
   storage();await sensorReadingService.ingest('prediction-valid',{temperature:25,ph:7.5,do:6,turbidity:20,turbidityUnit:'NTU'});

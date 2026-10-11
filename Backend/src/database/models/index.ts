@@ -9,6 +9,7 @@ import { initializeDeviceModel } from './Device';
 import { initializeAuditLogModel } from './AuditLog';
 import { initializeHardwareControlModels } from './HardwareControl';
 import { initializeWaterQualitySettingModel } from './WaterQualitySetting';
+import { initializeTanMeasurementModel, TanMeasurement } from './TanMeasurement';
 import { User } from './User';
 import { SensorReading } from './SensorReading';
 import { Alert } from './Alert';
@@ -23,24 +24,21 @@ import { AuditLog } from './AuditLog';
  * Initialize all database models
  */
 export const initializeAllModels = async (): Promise<void> => {
-  try {
-    initializeUserModel();
-    initializeSensorReadingModel();
-    initializeAlertModel();
-    initializeSmsLogModel();
-    initializeFeedingScheduleModel();
-    initializeFeedingCommandModel();
-    initializePredictionLogModel();
-    initializeDeviceModel();
-    initializeAuditLogModel();
-    initializeHardwareControlModels();
-    initializeWaterQualitySettingModel();
-    await ensureSensorReadingSchemaCompat();
-    await ensureUserSchemaCompat();
-    await ensureFeedingSchemaCompat();
-  } catch (error) {
-    throw error;
-  }
+  initializeUserModel();
+  initializeSensorReadingModel();
+  initializeAlertModel();
+  initializeSmsLogModel();
+  initializeFeedingScheduleModel();
+  initializeFeedingCommandModel();
+  initializePredictionLogModel();
+  initializeDeviceModel();
+  initializeAuditLogModel();
+  initializeHardwareControlModels();
+  initializeWaterQualitySettingModel();
+  initializeTanMeasurementModel();
+  await ensureSensorReadingSchemaCompat();
+  await ensureUserSchemaCompat();
+  await ensureFeedingSchemaCompat();
 };
 
 const ensureSensorReadingSchemaCompat = async (): Promise<void> => {
@@ -124,5 +122,6 @@ export { FeedingCommand, initializeFeedingCommandModel };
 export { PredictionLog, initializePredictionLogModel };
 export { Device, initializeDeviceModel };
 export { AuditLog, initializeAuditLogModel };
+export { TanMeasurement, initializeTanMeasurementModel };
 export { WaterQualitySetting, initializeWaterQualitySettingModel } from './WaterQualitySetting';
 import { getDatabase } from '../connection';

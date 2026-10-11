@@ -24,6 +24,35 @@ export interface WaterQualityReading {
   connectionState?: 'LIVE' | 'ERROR';
 }
 
+export type TanSource = 'test_kit' | 'laboratory' | 'external_sensor' | 'manual';
+
+export interface TanMeasurementRecord {
+  id: string;
+  deviceId: string;
+  enteredByUserId: string;
+  value: number;
+  unit: 'mg/L as N';
+  source: TanSource;
+  sampleCollectedAt: string | Date;
+  enteredAt: string | Date;
+  validationEvidence: string;
+  validationStatus: 'USER_ATTESTED';
+  speciationStatus: 'AVAILABLE' | 'UNAVAILABLE';
+  speciationReason: string;
+  nh3Fraction: number | null;
+  nh3N: number | null;
+  environmentalReadingId: string | null;
+}
+
+export interface TanMeasurementEntry {
+  deviceId: string;
+  value: number;
+  source: TanSource;
+  sampleCollectedAt: string;
+  validationEvidence: string;
+  attestMeasurement: true;
+}
+
 export interface WaterQualityStats {
   timestamp: Date;
   stale?: boolean;
@@ -34,6 +63,12 @@ export interface WaterQualityStats {
     max: number | null;
   };
   ph: {
+    current: number | null;
+    average: number | null;
+    min: number | null;
+    max: number | null;
+  };
+  orp: {
     current: number | null;
     average: number | null;
     min: number | null;
@@ -96,6 +131,8 @@ export interface PredictiveAnalyticsResult {
   generatedAt: string;
   modelVersion: string;
   horizonMinutes: number;
+  modelStatus: 'READY' | 'DEGRADED' | 'UNAVAILABLE';
+  validationStatus: 'VALIDATED' | 'NOT_COMMISSIONED';
   analysisStatus?: 'AVAILABLE' | 'INSUFFICIENT_VALID_SENSOR_DATA';
   riskScore: number|null;
   riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | 'UNAVAILABLE';

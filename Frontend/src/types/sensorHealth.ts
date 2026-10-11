@@ -12,4 +12,5 @@ export interface SensorHealth {
 }
 export type HealthSummary = Record<SensorName, SensorHealth>;
 
-export interface Speciation {status:string; percent:number|null; fraction:number|null; pKa:number|null; nh3N:number|null; tan:{value:number;unit:string}|null; reason:string; waterType:string; }
+export interface TanMeasurement { value:number; unit:'mg/L as N'; source:'test_kit'|'laboratory'|'external_sensor'|'manual'; validated:true; timestamp:string|number; validationEvidence?:string; validationStatus?:'USER_ATTESTED'; enteredAt?:string|number; }
+export interface Speciation {status:string; percent:number|null; fraction:number|null; pKa:number|null; nh3N:number|null; tan:TanMeasurement|null; reason:string; waterType:string; }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
+import { DeviceManagement } from '../../components/WaterQuality/DeviceManagement';
 import { DashboardProfile, getDashboardProfile, saveDashboardProfile } from '../../components/WaterQuality/dashboardProfile';
 
 const inputClass = 'w-full rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400';
@@ -27,7 +28,7 @@ const DashboardSettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-2.5 lg:h-full lg:min-h-0">
+    <div className="flex flex-col gap-2.5">
       <header className="shrink-0 flex items-center gap-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-3">
         <div className="bg-violet-50 p-2 rounded-lg flex-shrink-0">
           <span className="text-violet-600"><DashboardIcon name="settings" /></span>
@@ -38,7 +39,9 @@ const DashboardSettingsPage: React.FC = () => {
         </div>
       </header>
 
-      <form onSubmit={handleSubmit} className="lg:flex-1 lg:min-h-0 grid grid-cols-1 gap-2.5 xl:grid-cols-[1.3fr_0.7fr]">
+      <DeviceManagement />
+
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-2.5 xl:grid-cols-[1.3fr_0.7fr]">
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-3 flex flex-col">
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">

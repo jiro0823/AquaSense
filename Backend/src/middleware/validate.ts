@@ -54,6 +54,13 @@ export const feedingManualSchema = z.object({
 // Sensor diagnostics intentionally preserve malformed non-numeric values for the
 // health pipeline; numeric NaN/Infinity are rejected at the transport boundary.
 const finiteSensorValue = z.any().refine((value) => typeof value !== 'number' || Number.isFinite(value), 'numeric values must be finite').optional();
+const tanMeasurementSchema = z.object({
+  value: z.number().finite().nonnegative(),
+  unit: z.literal('mg/L as N'),
+  source: z.enum(['test_kit', 'laboratory', 'external_sensor', 'manual']),
+  validated: z.literal(true),
+  timestamp: z.union([z.string().datetime({ offset: true }), z.number().finite()]),
+}).strict();
 const diagnosticPayload = z.object({
   deviceId: z.string().trim().min(1).max(120).optional(),
   location: z.string().trim().max(255).optional(),
@@ -66,12 +73,26 @@ const diagnosticPayload = z.object({
   acquiredAt: z.union([z.string().datetime({ offset: true }), z.number().finite()]).optional(),
   sampleAgeMs: z.number().finite().min(0).max(86_400_000).optional(),
   bootId: z.string().trim().min(1).max(64).optional(), sequence: z.number().int().nonnegative().optional(),
-  tan: finiteSensorValue, waterType: z.string().trim().max(32).optional(),
+  tan: tanMeasurementSchema.optional(), waterType: z.string().trim().max(32).optional(),
   sensorTimestamps: z.record(z.union([z.string().datetime({ offset: true }), z.number().finite()])).optional(),
   sensors: z.record(z.object({ sampleAgeMs: z.number().finite().min(0).max(86_400_000).optional() }).passthrough()).optional(),
 }).passthrough();
 export const sensorIngestSchema = diagnosticPayload.extend({deviceId:z.string().trim().min(1).max(120)});
 export const waterReadingSchema = diagnosticPayload;
+
+export const tanMeasurementEntrySchema = z.object({
+  deviceId: z.string().trim().min(1).max(120),
+  value: z.number().finite().nonnegative(),
+  source: z.enum(['test_kit', 'laboratory', 'external_sensor', 'manual']),
+  sampleCollectedAt: z.string().datetime({ offset: true }),
+  validationEvidence: z.string().trim().min(8).max(2000),
+  attestMeasurement: z.literal(true),
+}).strict();
+
+export const tanMeasurementQuerySchema = z.object({
+  deviceId: z.string().trim().min(1).max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
 
 export const registerDeviceSchema = z.object({
   deviceId: z.string().trim().min(3).max(120),

@@ -4,6 +4,8 @@ export interface PredictiveAnalyticsResult {
   generatedAt: string;
   modelVersion: string;
   horizonMinutes: number;
+  modelStatus: 'READY' | 'DEGRADED' | 'UNAVAILABLE';
+  validationStatus: 'VALIDATED' | 'NOT_COMMISSIONED';
   analysisStatus: 'AVAILABLE' | 'INSUFFICIENT_VALID_SENSOR_DATA';
   calibration: 'REQUIRED';
   riskScore: number | null;
@@ -43,6 +45,8 @@ class PredictiveAnalyticsService {
     return {
       generatedAt:new Date().toISOString(),
       modelVersion:'unavailable-no-validated-model',
+      modelStatus:'UNAVAILABLE',
+      validationStatus:'NOT_COMMISSIONED',
       horizonMinutes,
       analysisStatus:'INSUFFICIENT_VALID_SENSOR_DATA',
       calibration:'REQUIRED',

@@ -109,7 +109,9 @@ class SensorReadingService {
       qualityStates.some(state=>state==='UNAVAILABLE' || state==='CALIBRATION REQUIRED' || state.startsWith('UNKNOWN'))?'unavailable':'normal';
     return {id:reading.id,deviceId:reading.deviceId,temperature:sensorHealth.temperature.valid?sensorHealth.temperature.value:null,
       ph:sensorHealth.ph.valid?sensorHealth.ph.value:null,turbidity:sensorHealth.turbidity.valid?sensorHealth.turbidity.value:null,
-      orp:sensorHealth.orp.valid?sensorHealth.orp.value:null,do:null,
+      // Keep the device-reported ORP sample visible for diagnostics and trends;
+      // sensorHealth remains the authority for whether it is calibrated/usable.
+      orp:sensorHealth.orp.value,do:null,
       doMeasured:false,ammonia:speciation.nh3N,sensorHealth,speciation,waterQuality,status,turbidityUnit:reading.turbidityUnit||'unknown',
       location:reading.location,timestamp:reading.timestamp,createdAt:reading.createdAt,updatedAt:reading.updatedAt};
   }

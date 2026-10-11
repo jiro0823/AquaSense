@@ -33,7 +33,7 @@ const ContactSection: React.FC = () => {
       setSubmitStatus('success');
       setFormData({ name: '', email: '', subject: '', message: '' });
       setTimeout(() => setSubmitStatus('idle'), 5000);
-    } catch (_error) {
+    } catch {
       setSubmitStatus('error');
       setTimeout(() => setSubmitStatus('idle'), 5000);
     }

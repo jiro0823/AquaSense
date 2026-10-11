@@ -15,8 +15,10 @@ import {
   getIngestStatus,
   getPredictiveWarning,
   getPredictionHistory,
+  createTanMeasurement,
+  getTanMeasurements,
 } from './controllers/waterController';
-import { validateBody, validateQuery, waterReadingSchema, thresholdPatchSchema, timeRangeQuerySchema, limitQuerySchema } from '../../middleware/validate';
+import { validateBody, validateQuery, waterReadingSchema, thresholdPatchSchema, timeRangeQuerySchema, limitQuerySchema, tanMeasurementEntrySchema, tanMeasurementQuerySchema } from '../../middleware/validate';
 import { authenticateDevice } from '../../middleware/deviceAuthMiddleware';
 import { authenticateToken, requireRole } from '../../middleware/authMiddleware';
 
@@ -31,6 +33,8 @@ const router = Router();
 router.post('/readings', validateBody(waterReadingSchema), authenticateDevice, addReading); // Add new reading
 router.get('/readings/latest', authenticateToken, requireRole(['admin', 'farmer', 'guest']), getLatestReading); // Get latest
 router.get('/readings', authenticateToken, requireRole(['admin', 'farmer', 'guest']), validateQuery(timeRangeQuerySchema), getReadingsByTimeRange); // Get by time range
+router.post('/tan-measurements', authenticateToken, requireRole(['admin', 'farmer']), validateBody(tanMeasurementEntrySchema), createTanMeasurement);
+router.get('/tan-measurements', authenticateToken, requireRole(['admin', 'farmer']), validateQuery(tanMeasurementQuerySchema), getTanMeasurements);
 router.get('/ingest-status', authenticateToken, requireRole(['admin', 'farmer']), getIngestStatus); // ESP32 ingest status
 
 // Statistics endpoint

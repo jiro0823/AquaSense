@@ -44,6 +44,7 @@ export class MQTTService {
     orp?: unknown;
   } = {};
   private latestTurbidityUnit: 'raw_adc' | 'NTU' = 'raw_adc';
+  private latestRawTurbidity: number | null = null;
   private latestDeviceId = 'mqtt-device';
   private pendingBatchFlags = {
     temperature: false,
@@ -275,29 +276,42 @@ export class MQTTService {
   private handleAquasenseTopicValue(topic: string, payload: string): void {
     const topicSuffix = topic.split('/').pop();
     const parsed = numeric(payload);
+    const value = parsed;
 
-    const value = parsed === null ? payload : parsed;
-
-    if(topicSuffix) this.sensorTimestamps[topicSuffix]=new Date().toISOString();
+    if (topicSuffix) this.sensorTimestamps[topicSuffix] = new Date().toISOString();
     switch (topicSuffix) {
       case 'device-id':
         if (payload.trim()) this.latestDeviceId = payload.trim();
         return;
       case 'temperature':
-        this.latestSensorPayload.temperature = value;
+        this.latestSensorPayload.temperature = value ?? undefined;
         this.pendingBatchFlags.temperature = true;
         break;
       case 'ph':
-        this.latestSensorPayload.ph = value;
+        this.latestSensorPayload.ph = value ?? undefined;
         this.pendingBatchFlags.ph = true;
         break;
-      case 'turbidity':
-        this.latestSensorPayload.turbidity = value;
-        this.latestTurbidityUnit = 'raw_adc';
-        this.pendingBatchFlags.turbidity = true;
+      case 'turbidity': {
+        if (value === null) {
+          this.latestRawTurbidity = null;
+          this.latestSensorPayload.turbidity = undefined;
+          this.pendingBatchFlags.turbidity = false;
+          break;
+        }
+        this.latestRawTurbidity = value;
+        // The firmware publishes raw ADC and reported NTU separately. Keep ADC
+        // as diagnostic metadata when an NTU sample is also arriving; it must
+        // not replace that sample or create a second mixed-unit frame.
+        const ntuAt = Date.parse(this.sensorTimestamps['turbidity-ntu'] ?? '');
+        if (!Number.isFinite(ntuAt) || Date.now() - ntuAt > 15000) {
+          this.latestSensorPayload.turbidity = value;
+          this.latestTurbidityUnit = 'raw_adc';
+          this.pendingBatchFlags.turbidity = true;
+        }
         break;
+      }
       case 'turbidity-ntu':
-        this.latestSensorPayload.turbidity = value;
+        this.latestSensorPayload.turbidity = value ?? undefined;
         this.latestTurbidityUnit = 'NTU';
         this.pendingBatchFlags.turbidity = true;
         break;
@@ -319,13 +333,19 @@ export class MQTTService {
         return;
     }
 
+    const requiredTimestamps = ['temperature', 'ph', this.latestTurbidityUnit === 'NTU' ? 'turbidity-ntu' : 'turbidity'];
+    const frameFresh = requiredTimestamps.every(name => {
+      const at = Date.parse(this.sensorTimestamps[name] ?? '');
+      return Number.isFinite(at) && Date.now() - at <= 15000;
+    });
     if (
-      (parsed === null || (this.pendingBatchFlags.temperature &&
+      (this.pendingBatchFlags.temperature &&
       this.pendingBatchFlags.ph &&
       this.pendingBatchFlags.turbidity &&
+      frameFresh &&
       this.latestSensorPayload.temperature !== undefined &&
       this.latestSensorPayload.ph !== undefined &&
-      this.latestSensorPayload.turbidity !== undefined))
+      this.latestSensorPayload.turbidity !== undefined)
     ) {
       const normalizedPayload = {
         deviceId: this.latestDeviceId,
@@ -334,8 +354,14 @@ export class MQTTService {
         do: Date.now() - this.latestDoReceivedAt <= 15000 ? this.latestSensorPayload.do : undefined,
         turbidity: this.latestSensorPayload.turbidity,
         turbidityUnit: this.latestTurbidityUnit,
+        sensors: this.latestTurbidityUnit === 'NTU' && this.latestRawTurbidity !== null && Date.now() - Date.parse(this.sensorTimestamps.turbidity ?? '') <= 15000
+          ? { turbidity: { rawAdc: this.latestRawTurbidity } }
+          : undefined,
         orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
-        sensorTimestamps: {...this.sensorTimestamps},
+        sensorTimestamps: {
+          ...this.sensorTimestamps,
+          turbidity: this.sensorTimestamps[this.latestTurbidityUnit === 'NTU' ? 'turbidity-ntu' : 'turbidity'],
+        },
         location: 'ESP32-MQTT',
         timestamp: new Date().toISOString(),
       };
@@ -345,6 +371,9 @@ export class MQTTService {
         ph: false,
         turbidity: false,
       };
+      this.latestSensorPayload.temperature = undefined;
+      this.latestSensorPayload.ph = undefined;
+      this.latestSensorPayload.turbidity = undefined;
 
       this.handleSensorReading(JSON.stringify(normalizedPayload));
     }

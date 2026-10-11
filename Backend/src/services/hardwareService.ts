@@ -83,7 +83,7 @@ export const hardwareService = {
   },
 
   async acceptMqttAck(userId: string, ack: SignedHardwareAck): Promise<boolean> {
-    const { signature: _signature, v: _version, reportedAt, id, source, action, result, deviceId, state } = ack;
+    const { reportedAt, id, source, action, result, deviceId, state } = ack;
     if (source === 'hardware') {
       const command = await HardwareCommand.findOne({ where: { id, userId, deviceId } });
       if (!command || command.action !== action) return false;

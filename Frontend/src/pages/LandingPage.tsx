@@ -48,7 +48,7 @@ const LandingPage: React.FC = () => {
         const data: HealthResponse = await response.json();
         const hasUptime = typeof data.data?.uptime === 'number';
         setIsConnected(data.success === true && data.statusCode === 200 && hasUptime);
-      } catch (_err) {
+      } catch {
         setIsConnected(false);
       } finally {
         setLoading(false);

@@ -7,26 +7,38 @@ for(const extension of ['.ts','.tsx']) require.extensions[extension]=(module,fil
 const React=require('react');
 const {renderToStaticMarkup}=require('react-dom/server');
 const {SensorHealthPanel,AmmoniaSpeciationCard}=require('../src/components/WaterQuality/SensorHealthPanel.tsx');
-const {refreshDisplayReading}=require('../src/components/WaterQuality/sensorDisplay.ts');
-const render=(Component,reading)=>renderToStaticMarkup(React.createElement(Component,{reading}));
+const {refreshDisplayReading,currentWaterSensorValue}=require('../src/components/WaterQuality/sensorDisplay.ts');
+const render=(Component,value)=>renderToStaticMarkup(React.createElement(Component,Component===AmmoniaSpeciationCard?{measurement:value}:{reading:value}));
+const tanRecord=(overrides={})=>({id:'tan-1',deviceId:'tank-1',enteredByUserId:'user-1',value:1,unit:'mg/L as N',source:'test_kit',sampleCollectedAt:'2026-10-01T02:00:00.000Z',enteredAt:'2026-10-01T02:05:00.000Z',validationEvidence:'Kit lot 42, expiry 2027-04',validationStatus:'USER_ATTESTED',speciationStatus:'AVAILABLE',speciationReason:'Calculated from measured TAN and aligned pH and temperature',nh3Fraction:0.053842,nh3N:0.053842,environmentalReadingId:'water-1',...overrides});
 test('missing sensors visibly show missing and calibration required',()=>{
  const html=render(SensorHealthPanel,null); assert.match(html,/MISSING/);assert.match(html,/Calibration REQUIRED/);assert.match(html,/ORP/);assert.doesNotMatch(html,/ACCURATE/);
 });
-test('missing TAN never renders an ammonia concentration',()=>{
- const html=render(AmmoniaSpeciationCard,{speciation:{percent:5.384213,nh3N:null,tan:null,reason:'Fraction only'}});
- assert.match(html,/5.38%/);assert.match(html,/NOT CALCULATED/);assert.match(html,/TAN measurement/);assert.doesNotMatch(html,/Safe|Critical|0\.05 mg/);
+test('missing TAN keeps both TAN and NH3-N unavailable',()=>{
+ const html=render(AmmoniaSpeciationCard,null);
+ assert.match(html,/UNAVAILABLE/);assert.match(html,/TAN: NOT AVAILABLE/);assert.match(html,/NH3-N: NOT CALCULATED/);assert.match(html,/TAN measurement/);assert.doesNotMatch(html,/Safe|Critical|0\.05 mg/);
 });
-test('measured TAN uses NH3-N and mg/L as N',()=>{
- const html=render(AmmoniaSpeciationCard,{speciation:{percent:5.384213,nh3N:0.053842,tan:{value:1},reason:'TAN measured'}});
- assert.match(html,/Actual NH3-N/);assert.match(html,/0.05384 mg\/L as N/);assert.match(html,/PRELIMINARY/);
+test('measured TAN displays NH3 fraction, NH3-N and provenance',()=>{
+ const html=render(AmmoniaSpeciationCard,tanRecord());
+ assert.match(html,/5\.38%/);assert.match(html,/TAN: 1 mg\/L as N/);assert.match(html,/0\.05384 mg\/L as N/);assert.match(html,/user attested/);assert.match(html,/Kit lot 42/);
 });
 test('stale speciation renders unavailable',()=>{
- const html=render(AmmoniaSpeciationCard,{speciation:{percent:null,nh3N:null,tan:null,reason:'Valid fresh pH and temperature required'}});
- assert.match(html,/UNAVAILABLE/);assert.match(html,/Valid fresh/);
+ const html=render(AmmoniaSpeciationCard,tanRecord({speciationStatus:'UNAVAILABLE',speciationReason:'Valid fresh pH and temperature required',nh3Fraction:null,nh3N:null}));
+ assert.match(html,/UNAVAILABLE/);assert.match(html,/Valid fresh/);assert.match(html,/TAN: 1 mg\/L as N/);assert.match(html,/NH3-N: NOT CALCULATED/);
 });
 test('invalid diagnostic value is not displayed as a measurement',()=>{
  const html=render(SensorHealthPanel,{sensorHealth:{temperature:{valid:false,value:-127,health:'SENSOR_ERROR',stability:'COLLECTING',reason:'DS18B20 disconnected',window:{}}}});
  assert.match(html,/SENSOR_ERROR/);assert.match(html,/DS18B20 disconnected/);assert.doesNotMatch(html,/-127/);
+});
+test('reported uncalibrated ORP stays clearly diagnostic while health remains missing',()=>{
+ const health={valid:false,value:494.7,unit:'mV',health:'MISSING',calibration:'REQUIRED',stability:'COLLECTING',reason:'ORP engineering conversion/calibration is not commissioned by the backend',window:{}};
+ const html=render(SensorHealthPanel,{orp:494.7,sensorHealth:{orp:health}});
+ assert.match(html,/--.*MISSING/);assert.match(html,/Device-reported diagnostic: 494\.70 mV/);assert.match(html,/uncalibrated, not a validated measurement/);
+});
+test('parameter current sensor values follow the same latest reading, not stale statistics',()=>{
+ const reading={temperature:25,ph:7.5,orp:494.7,turbidity:346};
+ assert.equal(currentWaterSensorValue(reading,'turbidity'),346);
+ assert.equal(currentWaterSensorValue(reading,'orp'),494.7);
+ assert.equal(currentWaterSensorValue(null,'turbidity'),null);
 });
 test('source freshness expires even while the enclosing frame is fresh',()=>{
  const now=Date.now(), timestamp=new Date(now).toISOString();

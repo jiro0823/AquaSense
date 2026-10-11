@@ -16,6 +16,8 @@ import { alertService } from '../../../services/alert.service';
 import { waterAlertNotificationService } from '../../../services/waterAlertNotification.service';
 import type { AuthenticatedRequest } from '../../../middleware/authMiddleware';
 import { deviceService } from '../../../services/device.service';
+import { TanMeasurementInputError, tanMeasurementService } from '../../../services/tanMeasurement.service';
+import { auditLogService } from '../../../services/auditLog.service';
 
 const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStats> => {
   const dbStats = await sensorReadingService.getStatistics(minutes);
@@ -67,6 +69,58 @@ const ingestMeta: IngestMeta = {
   lastReceivedAt: null,
   lastSourceIp: null,
   lastLocation: null,
+};
+
+export const createTanMeasurement = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.userId) { sendError(res, 401, 'Unauthorized'); return; }
+    const { deviceId, value, source, sampleCollectedAt, validationEvidence } = req.body;
+    const activeDevice = req.userRole === 'admin'
+      ? await deviceService.getActiveDevice(deviceId)
+      : await deviceService.verifyOwnership(req.userId, deviceId);
+    if (!activeDevice) { sendError(res, 403, 'Device must be active and registered to the authenticated user'); return; }
+
+    const measurement = await tanMeasurementService.record(req.userId, { deviceId, value, source, sampleCollectedAt, validationEvidence });
+    await auditLogService.createLog({
+      userId: req.userId,
+      deviceId,
+      action: 'TAN_MEASUREMENT_CREATE',
+      status: 'SUCCESS',
+      ipAddress: req.ip,
+      metadata: { measurementId: measurement.id, source, sampleCollectedAt: measurement.sampleCollectedAt.toISOString() },
+    });
+    sendSuccess(res, 201, 'TAN measurement recorded', measurement);
+  } catch (error) {
+    logger.error('Failed to record TAN measurement', error);
+    if (error instanceof TanMeasurementInputError) {
+      sendError(res, 400, error.message);
+      return;
+    }
+    sendError(res, 500, 'Failed to record TAN measurement');
+  }
+};
+
+export const getTanMeasurements = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.userId) { sendError(res, 401, 'Unauthorized'); return; }
+    const requestedDevice = typeof req.query.deviceId === 'string' ? req.query.deviceId : undefined;
+    let deviceIds: string[] | null = null;
+    if (requestedDevice) {
+      const allowed = req.userRole === 'admin'
+        ? await deviceService.getActiveDevice(requestedDevice)
+        : await deviceService.verifyOwnership(req.userId, requestedDevice);
+      if (!allowed) { sendError(res, 403, 'Device must be active and available to the authenticated user'); return; }
+      deviceIds = [requestedDevice];
+    } else if (req.userRole !== 'admin') {
+      deviceIds = (await deviceService.listByUser(req.userId)).filter((device) => device.isActive).map((device) => device.deviceId);
+    }
+    const limit = typeof req.query.limit === 'number' ? req.query.limit : Number(req.query.limit ?? 30);
+    const measurements = await tanMeasurementService.list(deviceIds, limit);
+    sendSuccess(res, 200, 'TAN measurements retrieved', measurements);
+  } catch (error) {
+    logger.error('Failed to retrieve TAN measurements', error);
+    sendError(res, 500, 'Failed to retrieve TAN measurements');
+  }
 };
 
 /**

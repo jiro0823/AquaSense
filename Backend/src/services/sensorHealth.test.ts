@@ -67,6 +67,24 @@ test('reference equation and measured TAN concentration',()=>{
   assert.ok(Math.abs(s.pKa!-9.2448)<0.001);assert.ok(Math.abs(s.fraction!-0.05384)<0.0001);
   assert.ok(Math.abs(s.percent!-5.384)<0.01);assert.equal(s.nh3N,s.fraction);assert.equal(s.concentrationUnit,'mg/L as N');
 });
+test('NH3-N requires TAN, pH and temperature acquisition times to align',()=>{
+  const staleTan={...tan,timestamp:stamp(now-16000)};
+  const s=ammoniaSpeciation(calibratedSummary(),staleTan,'freshwater',now);
+  assert.equal(s.status,'AVAILABLE');
+  assert.equal(s.tan?.value,1);
+  assert.equal(s.nh3N,null);
+  assert.match(s.concentrationReason,/within 15 seconds/);
+  const boundaryTan={...tan,timestamp:stamp(now-15000)};
+  const aligned=ammoniaSpeciation(calibratedSummary(),boundaryTan,'freshwater',now);
+  assert.ok(aligned.nh3N!==null);
+  const pairwiseHealth=calibratedSummary();
+  pairwiseHealth.temperature={...pairwiseHealth.temperature,timestamp:stamp(now-30000)};
+  pairwiseHealth.ph={...pairwiseHealth.ph,timestamp:stamp(now)};
+  const betweenSensorTimes={...tan,timestamp:stamp(now-15000)};
+  const unaligned=ammoniaSpeciation(pairwiseHealth,betweenSensorTimes,'freshwater',now);
+  assert.equal(unaligned.tan?.value,1);
+  assert.equal(unaligned.nh3N,null);
+});
 check('wrong TAN units rejected','mg/L NH3',null,()=>ammoniaSpeciation(calibratedSummary(),{...tan,unit:'mg/L NH3'},'freshwater',now).nh3N);
 check('unvalidated TAN rejected',false,null,()=>ammoniaSpeciation(calibratedSummary(),{...tan,validated:false},'freshwater',now).nh3N);
 check('stale TAN rejected','over one hour old',null,()=>ammoniaSpeciation(calibratedSummary(),{...tan,timestamp:stamp(now-3600001)},'freshwater',now).nh3N);

@@ -30,7 +30,7 @@ const SignupPage: React.FC = () => {
     const hasUpperCase = /[A-Z]/.test(pwd);
     const hasLowerCase = /[a-z]/.test(pwd);
     const hasNumbers = /\d/.test(pwd);
-    const hasSpecialChars = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd);
+    const hasSpecialChars = [...pwd].some((character) => "!@#$%^&*()_+-=[]{};':\"\\|,.<>/?".includes(character));
 
     let score = 0;
     if (pwd.length > 0) score += 1;

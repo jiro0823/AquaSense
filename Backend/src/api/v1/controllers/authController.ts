@@ -3,6 +3,7 @@
  * Handles signup and login logic
  */
 import { Request, Response } from 'express';
+import type { ParamsDictionary } from 'express-serve-static-core';
 import { userService } from '../../../services/userService';
 import { tokenService } from '../../../utils/tokenService';
 import { sendSuccess, sendError } from '../../../utils/response';
@@ -69,7 +70,7 @@ const clearAuthCookie = (res: Response): void => {
  * Sign up a new user
  * POST /api/v1/auth/signup
  */
-export const signup = async (req: Request<{}, {}, SignupRequest>, res: Response): Promise<void> => {
+export const signup = async (req: Request<ParamsDictionary, unknown, SignupRequest>, res: Response): Promise<void> => {
   try {
     const { fullName, email, password } = req.body;
 
@@ -133,7 +134,7 @@ export const signup = async (req: Request<{}, {}, SignupRequest>, res: Response)
  * Login user
  * POST /api/v1/auth/login
  */
-export const login = async (req: Request<{}, {}, LoginRequest>, res: Response): Promise<void> => {
+export const login = async (req: Request<ParamsDictionary, unknown, LoginRequest>, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
 

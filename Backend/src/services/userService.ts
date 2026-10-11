@@ -130,8 +130,9 @@ class UserService {
    * Get user without password hash
    */
   getPublicUser(user: User): Omit<User, 'passwordHash'> {
-    const { passwordHash, ...publicUser } = user;
-    return publicUser;
+    const publicUser: Partial<User> = { ...user };
+    delete publicUser.passwordHash;
+    return publicUser as Omit<User, 'passwordHash'>;
   }
 
   /**

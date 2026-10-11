@@ -4,8 +4,10 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
 import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
 import type { WaterQualityStats } from '../../types/water';
+import { TanMeasurementEntryForm } from '../../components/WaterQuality/TanMeasurementEntryForm';
+import { currentWaterSensorValue } from '../../components/WaterQuality/sensorDisplay';
 
-type ParameterKey = 'temperature' | 'ph' | 'do' | 'turbidity' | 'ammonia';
+type ParameterKey = 'temperature' | 'ph' | 'orp' | 'turbidity' | 'ammonia';
 
 type CardStats = { current: number|null; average: number|null; min: number|null; max: number|null };
 
@@ -20,21 +22,25 @@ type CardConfig = {
 };
 
 const parameterCards: CardConfig[] = [
-  { key: 'temperature', label: 'Temperature', unit: 'C', color: '#f59e0b', normal: (value) => value >= 24 && value <= 32, normalLabel: 'Normal', warnLabel: 'Needs attention' },
-  { key: 'ph', label: 'pH Level', unit: '', color: '#3b82f6', normal: (value) => value >= 6.5 && value <= 8.5, normalLabel: 'Normal', warnLabel: 'Needs attention' },
-  { key: 'do', label: 'Dissolved Oxygen (not measured)', unit: 'mg/L', color: '#22c55e', normal: (value) => value >= 5, normalLabel: 'Normal', warnLabel: 'Needs attention' },
-  { key: 'turbidity', label: 'Turbidity', unit: 'NTU', color: '#a855f7', normal: (value) => value < 25, normalLabel: 'Normal', warnLabel: 'Needs attention' },
+  { key: 'temperature', label: 'Temperature (growth guidance 26-29 °C)', unit: 'C', color: '#f59e0b', normal: (value) => value >= 26 && value <= 29, normalLabel: 'Within guidance', warnLabel: 'Outside guidance' },
+  { key: 'ph', label: 'pH Level (culture guidance 7-8.5)', unit: '', color: '#3b82f6', normal: (value) => value >= 7 && value <= 8.5, normalLabel: 'Within guidance', warnLabel: 'Outside guidance' },
+  { key: 'orp', label: 'ORP / Redox (reported; uncalibrated)', unit: 'mV', color: '#22c55e', normal: () => false, normalLabel: 'Not classified', warnLabel: 'Not classified' },
+  { key: 'turbidity', label: 'Turbidity', unit: 'NTU', color: '#a855f7', normal: () => false, normalLabel: 'Unclassified', warnLabel: 'Unclassified' },
   { key: 'ammonia', label: 'NH3 fraction of TAN', unit: '%', color: '#ef4444', normal: () => false, normalLabel: 'Preliminary', warnLabel: 'TAN required' },
-  { key: 'riskScore', label: 'Preliminary Water Quality Risk Score', unit: '', color: '#ef4444', normal: (value) => value < 25, normalLabel: 'LOW', warnLabel: 'MODERATE or higher' },
+  { key: 'riskScore', label: 'Risk Model Status', unit: '', color: '#6b7280', normal: () => false, normalLabel: 'Unavailable', warnLabel: 'Unavailable' },
 ];
 
 const formatValue = (value: number|null, unit: string) => value === null ? '--' : `${value.toFixed(unit === '' ? 2 : 1)}${unit ? ` ${unit}` : ''}`;
 
 const DashboardParametersPage: React.FC = () => {
-  const { statistics, chartData, predictiveWarning, latestReading, error } = useDashboardData();
+  const { statistics, chartData, predictiveWarning, latestReading, error, latestTanMeasurement, tanLoading, tanError, addTanMeasurement } = useDashboardData();
 
-  const currentRiskScore = predictiveWarning?.riskScore ?? null;
-  const currentRiskLevel = predictiveWarning?.warningCard?.riskLevel ?? null;
+  const riskModelValidated = predictiveWarning?.modelStatus === 'READY'
+    && predictiveWarning.validationStatus === 'VALIDATED'
+    && predictiveWarning.analysisStatus === 'AVAILABLE'
+    && Number.isFinite(predictiveWarning.riskScore);
+  const currentRiskScore = riskModelValidated ? predictiveWarning?.riskScore ?? null : null;
+  const currentRiskLevel = riskModelValidated ? predictiveWarning?.warningCard?.riskLevel ?? 'UNAVAILABLE' : 'UNAVAILABLE';
 
   return (
     <div className="flex flex-col gap-3 lg:h-full lg:min-h-0">
@@ -49,42 +55,44 @@ const DashboardParametersPage: React.FC = () => {
       </header>
 
       {error && <div className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Connection state: {error}</div>}
+      {tanLoading && !latestTanMeasurement && <div role="status" className="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">Loading TAN history…</div>}
+      {tanError && <div role="alert" className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">TAN history unavailable: {tanError}</div>}
       <SensorHealthPanel reading={latestReading} />
+      <TanMeasurementEntryForm onSaved={addTanMeasurement} />
       {statistics ? (
         <section className="lg:flex-1 lg:min-h-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2 gap-2.5">
           {parameterCards.map((item) => {
             const isRisk = item.key === 'riskScore';
-            if(item.key==='ammonia') return <AmmoniaSpeciationCard key={item.key} reading={latestReading} />;
+            if(item.key==='ammonia') return <AmmoniaSpeciationCard key={item.key} measurement={latestTanMeasurement} />;
             if (isRisk) {
               return (
                 <div key={item.key} className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col gap-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">{item.label}</h3>
-                  <span className="text-xl font-bold text-gray-900">{currentRiskScore === null ? '--' : `${currentRiskScore.toFixed(2)} / 100`}</span>
+                  <span className="text-xl font-bold text-gray-900">{currentRiskLevel}</span>
                   <p className="text-xs text-gray-500">
                     {currentRiskScore === null
-                      ? 'Insufficient valid sensor data'
-                      : `Preliminary classification: ${currentRiskLevel ?? 'Unavailable'}. Calibration required.`}
+                      ? 'No validated, commissioned risk model; no score is available.'
+                      : `Validated model index: ${currentRiskScore.toFixed(2)} / 100.`}
                   </p>
                 </div>
               );
             }
             if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidityUnit==='raw_adc' ? `${latestReading.turbidity ?? '--'} raw ADC. NTU conversion requires formal calibration.` : 'Unit unavailable; turbidity value is not interpreted or charted.'}</div>;
-            if (item.key === 'do') {
-              return <div key={item.key} className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
-                <h3 className="font-semibold text-gray-900">Dissolved Oxygen (not measured)</h3>
-                <p className="mt-2">AquaSense has no physical dissolved-oxygen probe. ORP is a separate redox measurement and is not converted to dissolved oxygen.</p>
-              </div>;
-            }
-            const stats: CardStats = statistics[item.key as ParameterKey] as WaterQualityStats[ParameterKey];
-            const sensorName = item.key === 'temperature' || item.key === 'ph' ? item.key : null;
+            const sensorStats: WaterQualityStats[ParameterKey] = statistics[item.key as ParameterKey];
+            const stats: CardStats = { ...sensorStats, current: currentWaterSensorValue(latestReading, item.key as 'temperature'|'ph'|'orp'|'turbidity') };
+            const sensorName = item.key === 'temperature' || item.key === 'ph' || item.key === 'orp' || item.key === 'turbidity' ? item.key : null;
             const health = sensorName ? latestReading?.sensorHealth?.[sensorName] : null;
             const isNormal = stats.current!==null && item.normal(stats.current);
-            const statusLabel = statistics.stale ? 'STALE' : !latestReading ? 'UNAVAILABLE' : !health ? 'UNKNOWN' :
+            const sensorStatus = statistics.stale ? 'STALE' : !latestReading ? 'UNAVAILABLE' : !health ? 'UNKNOWN' :
               !health.valid || health.measurementValid===false ? (health.health==='STALE' ? 'STALE' : 'UNAVAILABLE') :
               health.health==='UNSTABLE' || health.stability==='UNSTABLE' ? 'UNSTABLE' :
               health.calibration!=='CALIBRATED' ? 'CALIBRATION REQUIRED' : isNormal ? item.normalLabel : item.warnLabel;
-            const statusQualified = !['STALE','UNAVAILABLE','UNKNOWN','UNSTABLE','CALIBRATION REQUIRED'].includes(statusLabel);
+            const statusLabel = item.key==='turbidity' && sensorStatus===item.normalLabel ? 'UNCLASSIFIED · NO SPECIES NTU LIMIT' : sensorStatus;
+            const statusQualified = !['STALE','UNAVAILABLE','UNKNOWN','UNSTABLE','CALIBRATION REQUIRED'].includes(statusLabel) && !statusLabel.startsWith('UNCLASSIFIED');
             const chart = chartData.filter(point=>item.key!=='turbidity' || point.turbidityUnit===latestReading?.turbidityUnit).slice(-20);
+            const currentLabel = item.key==='orp' && stats.current!==null && health?.valid!==true
+              ? `Reported ${formatValue(stats.current, item.unit)} · unverified`
+              : formatValue(stats.current, item.unit);
 
             return (
               <div key={item.key} className="rounded-xl border border-gray-200 bg-white shadow-sm p-2 flex flex-col min-h-[180px] lg:min-h-0">
@@ -93,7 +101,7 @@ const DashboardParametersPage: React.FC = () => {
                     <span className="inline-block h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                     <span className="truncate">{item.label}</span>
                   </h3>
-                  <span className="text-xs font-bold text-gray-900 shrink-0">{formatValue(stats.current, item.unit)}</span>
+                  <span className="text-xs font-bold text-gray-900 shrink-0">{currentLabel}</span>
                 </div>
 
                 <div className="mt-0.5 flex items-center justify-between gap-2 shrink-0">

@@ -1,4 +1,10 @@
 import type {WaterQualityReading} from '../../types/water';
+export type CurrentWaterSensor='temperature'|'ph'|'orp'|'turbidity';
+// A dashboard's current value must come from its selected latest reading, not
+// from the independently refreshed statistics stream.
+export function currentWaterSensorValue(reading:WaterQualityReading|null, sensor:CurrentWaterSensor):number|null {
+  return reading?.[sensor] ?? null;
+}
 // Age each acquisition locally even if the backend or WebSocket stops responding.
 export function refreshDisplayReading(reading:WaterQualityReading|null,now=Date.now(),staleMs=15000):WaterQualityReading|null {
   if(!reading) return null;

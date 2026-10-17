@@ -4,6 +4,13 @@
 #include <esp_adc_cal.h>
 #include "models/SensorReadings.h"
 
+namespace SensorSampleValidity {
+// Current-sample validity is independent of the debounced connection indicator.
+constexpr bool current(bool, bool acquisitionValid, bool convertedValueFinite) {
+    return acquisitionValid && convertedValueFinite;
+}
+}
+
 class SensorManager {
 public:
     SensorManager();

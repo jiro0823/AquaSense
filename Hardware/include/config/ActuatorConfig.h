@@ -2,8 +2,10 @@
 #include <stdint.h>
 
 namespace ActuatorConfig {
-// Commissioning gate: do not infer relay polarity from the module's 5 V supply.
-constexpr int RELAY_ACTIVE_LEVEL = -1; // Set to 0 (LOW) or 1 (HIGH) after testing.
+// Active-LOW relay configuration. Keep outputs inhibited until electrical
+// trigger and startup behavior have been verified on the installed module.
+constexpr int RELAY_ACTIVE_LEVEL = 0;
+constexpr bool RELAY_OUTPUTS_ENABLED = false;
 // Commission each pump independently using measured flow at the installed head.
 // Zero values intentionally keep all water-pump operations disabled.
 constexpr uint32_t DRAIN_TARGET_RUNTIME_MS = 0;

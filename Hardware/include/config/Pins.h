@@ -10,7 +10,7 @@ constexpr int I2C_SDA = 21;
 constexpr int I2C_SCL = 22;
 
 // Diagram signal order follows relay IN1..IN4: pump 1, pump 2, aerator, spare.
-// Relay writes remain inhibited until RELAY_ACTIVE_LEVEL is commissioned.
+// Relay writes remain inhibited until the output commissioning gate is enabled.
 constexpr int FILL_RELAY_GPIO = 25;
 constexpr int DRAIN_RELAY_GPIO = 26;
 constexpr int AERATOR_RELAY_GPIO = 27;

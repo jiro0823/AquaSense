@@ -5,12 +5,13 @@
 #include "controllers/ControlSafety.h"
 
 void RelayController::writeRelay(int pin, bool on) {
-    digitalWrite(pin, on ? ActuatorConfig::RELAY_ACTIVE_LEVEL : 1 - ActuatorConfig::RELAY_ACTIVE_LEVEL);
+    digitalWrite(pin, ControlSafety::relayOutputLevel(on, ActuatorConfig::RELAY_ACTIVE_LEVEL));
 }
 void RelayController::begin() {
-    ready = ControlSafety::relayConfiguration(Pins::FILL_RELAY_GPIO,
+    const bool configurationValid = ControlSafety::relayConfiguration(Pins::FILL_RELAY_GPIO,
         Pins::DRAIN_RELAY_GPIO, Pins::AERATOR_RELAY_GPIO, ActuatorConfig::RELAY_ACTIVE_LEVEL);
-    if (!ready) { Serial.println("Relays disabled: verify active level and safe OFF behavior."); return; }
+    ready = ControlSafety::relayOutputsReady(configurationValid, ActuatorConfig::RELAY_OUTPUTS_ENABLED);
+    if (!ready) { Serial.println("Relays disabled: commissioning gate is closed or configuration is invalid."); return; }
     for (int pin : {Pins::FILL_RELAY_GPIO, Pins::DRAIN_RELAY_GPIO, Pins::AERATOR_RELAY_GPIO}) {
         writeRelay(pin, false); // Set output latch to OFF before switching direction.
         pinMode(pin, OUTPUT);

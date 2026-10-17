@@ -5,6 +5,7 @@
 #include "config/ActuatorConfig.h"
 #include <stdint.h>
 #include "controllers/ControlSafety.h"
+#include "sensors/SensorManager.h"
 
 static_assert(!ControlSafety::relayConfiguration(25, 26, 27, -1), "Unknown polarity disables relay initialization");
 static_assert(!ControlSafety::relayConfiguration(-1, 26, 27, 0), "Unknown channel disables relay initialization");
@@ -18,13 +19,19 @@ static_assert(Pins::Diagram::SERVO == 13 && Pins::Diagram::BUZZER == 18 &&
               "Preserve explicitly supplied actuator GPIO group");
 static_assert(Pins::FILL_RELAY_GPIO == 25 && Pins::DRAIN_RELAY_GPIO == 26 &&
               Pins::AERATOR_RELAY_GPIO == 27 &&
-              !ControlSafety::relayConfiguration(Pins::FILL_RELAY_GPIO, Pins::DRAIN_RELAY_GPIO,
+              ControlSafety::relayConfiguration(Pins::FILL_RELAY_GPIO, Pins::DRAIN_RELAY_GPIO,
                                                  Pins::AERATOR_RELAY_GPIO, ActuatorConfig::RELAY_ACTIVE_LEVEL),
-              "Map diagram load channels while keeping unknown relay polarity disabled");
+              "Preserve diagram load channels with configured active-LOW polarity");
+static_assert(ControlSafety::relayOutputLevel(true, 0) == 0 && ControlSafety::relayOutputLevel(false, 0) == 1,
+              "Active-LOW relay ON is LOW and OFF is HIGH");
+static_assert(!ActuatorConfig::RELAY_OUTPUTS_ENABLED &&
+              !ControlSafety::relayOutputsReady(true, ActuatorConfig::RELAY_OUTPUTS_ENABLED) &&
+              !ControlSafety::relayOutputsReady(false, true),
+              "Relay outputs stay inhibited unless configuration and commissioning gate are both valid");
 static_assert(!ControlSafety::pumpCombination(true, true), "Fill and drain may never run together");
 static_assert(ControlSafety::pumpCombination(false, false) && ControlSafety::pumpCombination(true, false) && ControlSafety::pumpCombination(false, true), "Stop and individual pump states are allowed");
 static_assert(!ControlSafety::durationAllowed(1000, 0) && !ControlSafety::durationAllowed(0, 5000), "Unset timing inhibits pumping");
-static_assert(ControlSafety::durationAllowed(4999, 5000) && ControlSafety::durationAllowed(5000, 5000), "The configured hard limit is a valid maximum command duration");
+static_assert(ControlSafety::durationAllowed(4999, 5000) && !ControlSafety::durationAllowed(5000, 5000), "Command duration must remain strictly below the hard timeout");
 static_assert(!ControlSafety::durationAllowed(1000, 300001), "Hard limits cannot exceed five minutes");
 static_assert(ActuatorConfig::DRAIN_TARGET_RUNTIME_MS == 0 && ActuatorConfig::DRAIN_MAX_RUNTIME_MS == 0 &&
               ActuatorConfig::FILL_TARGET_RUNTIME_MS == 0 && ActuatorConfig::FILL_MAX_RUNTIME_MS == 0 &&
@@ -47,6 +54,18 @@ static_assert(near(SensorConversions::orpFromVoltage(2.0f), 666.66f), "ORP suppl
 static_assert(near(SensorConversions::turbidityFromAdc(3000), 0.0f), "Clear water reference is zero NTU");
 static_assert(near(SensorConversions::turbidityFromAdc(500), 1000.0f), "Dirty water reference is 1000 NTU");
 static_assert(!SensorConversions::adcUsable(0) && !SensorConversions::adcUsable(4095), "ADC rails must be invalid");
+static_assert(!SensorSampleValidity::current(true, false, true) &&
+              SensorSampleValidity::current(true, true, true),
+              "pH invalid sample clears validity while debounced connected; next good sample recovers");
+static_assert(!SensorSampleValidity::current(true, false, true) &&
+              SensorSampleValidity::current(true, true, true),
+              "Temperature invalid sample clears validity while debounced connected; next good sample recovers");
+static_assert(!SensorSampleValidity::current(true, false, true) &&
+              SensorSampleValidity::current(true, true, true),
+              "Turbidity invalid sample clears validity while debounced connected; next good sample recovers");
+static_assert(!SensorSampleValidity::current(true, false, true) &&
+              SensorSampleValidity::current(true, true, true),
+              "ORP invalid sample clears validity while debounced connected; next good sample recovers");
 static_assert(!SensorConversions::temperaturePlausible(-127.0f), "Disconnected DS18B20 is invalid");
 static_assert(!SensorConversions::phPlausible(14.1f), "Reject impossible pH");
 static_assert(uint32_t(uint32_t(15) - uint32_t(0xfffffff0)) == 31, "Elapsed timing must survive millis rollover");

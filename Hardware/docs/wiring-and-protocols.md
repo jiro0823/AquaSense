@@ -12,14 +12,16 @@ the integrated servo to GPIO13 (older integrated code used GPIO19) and passive
 buzzer to GPIO18.
 
 The diagram routes GPIO25, GPIO26, GPIO27 and GPIO33 to relay IN1..IN4 in order.
-IN1 drives pump 1 (fill), IN2 drives pump 2 (drain), IN3 drives the aerator, and
-IN4 is unused. The code maps the first three signals accordingly. Relay polarity
-is not marked in the diagram, so `RELAY_ACTIVE_LEVEL` remains unknown and relay
-initialization stays disabled until the actual board's trigger level and OFF
-behavior are measured. The relay module has a separate 5 V supply and shares
-ground with ESP32. Verify the module's input bias holds the relay OFF while ESP32
-GPIOs are high-impedance during reset; firmware cannot drive outputs during reset.
-There are no float switches.
+It labels IN1 as fill, IN2 as drain, IN3 as aerator, and IN4 as unused; source
+uses the same assignments. The reported module assignment (K3 refill, K4 drain)
+conflicts with that diagram if K3/K4 refer to board output channels. No physical
+wiring evidence currently resolves the conflict, so do not change GPIO roles.
+Firmware polarity is configured active-LOW from the reported intent, while the
+output commissioning gate remains false. Measure the actual board trigger level,
+channel continuity, and safe OFF behavior before enabling outputs. The relay
+module has a separate 5 V supply and shares ground with ESP32. Verify its input
+bias holds the relay OFF while ESP32 GPIOs are high-impedance during reset;
+firmware cannot drive outputs during reset. There are no float switches.
 
 Sensors publish retained values/status under `aquasense/`; actuator commands
 use signed, non-retained, device-scoped MQTT messages after authenticated API
@@ -57,18 +59,20 @@ sensor-specific wiring against its manufacturer's documentation.
 - The original cycle is 25 degrees / 800 ms, 140 degrees / 1000 ms, then
   25 degrees / 800 ms. Startup sets the servo to the off position.
 
-## Preserved four-sensor JSON target
+## Preserved water-quality JSON target
 
 Default broker is `broker.hivemq.com:1883`. Configuration retains:
 
 - Readings: `capstone2026/water/esp32/readings`.
 - Status: `capstone2026/water/esp32/status`.
-- JSON fields: `temperature`, `ph`, `do`, `turbidity`, `location`, `uptimeMs`.
+- JSON includes `temperature`, `ph`, `turbidity`, `turbidityUnit`, device/frame
+  identity and sensor diagnostics. It does not publish a DO measurement.
 
 This target is isolated from the modular water-monitor. It subscribes to no
-command topics. Its analog pH, DO and turbidity output remains null until its
-calibration gate is enabled in source; its temperature channel reports null when
-the DS18B20 is disconnected.
+command topics. It reports pH as null and includes raw pH ADC only as a
+diagnostic; turbidity is explicitly `raw_adc`. Temperature reports null when
+the DS18B20 is disconnected. The current sketch does not acquire DO or apply a
+calibration conversion to pH or turbidity.
 
 The backend's default JSON subscription is `water/esp32/readings`; configure
 `MQTT_TOPIC_READINGS` to match this target's actual topic and use the same broker.

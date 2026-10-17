@@ -110,10 +110,12 @@ software limits, not proof that a runtime is safe for a particular tank.
 Stops bypass a full hardware queue, but remote stops depend on network and MQTT
 delivery and are not physical emergency stops. ALL_OFF leaves faults latched.
 
-Relay operation remains disabled while trigger polarity is unknown. The MCU
-cannot control relay inputs while held in reset, so verify the module's hardware
-OFF bias before connecting pump power. Loss of Wi-Fi or MQTT stops
-relay-controlled loads; rejected commands also force those outputs off.
+Firmware relay polarity is configured active-LOW from the reported module
+intent, but the output commissioning gate remains false pending electrical
+verification. The MCU cannot control relay inputs while held in reset, so verify
+the module's hardware OFF bias and GPIO-to-channel wiring before connecting pump
+power. Loss of Wi-Fi or MQTT stops relay-controlled loads; rejected commands
+also force those outputs off.
 
 Automatic water exchange is disabled by default. Set
 `DRAIN_TARGET_RUNTIME_MS`, `DRAIN_MAX_RUNTIME_MS`, `FILL_TARGET_RUNTIME_MS`,

@@ -48,10 +48,6 @@ void publishSensorData();
 float readTemperature();
 float readTurbidity();
 
-// The legacy analog equations are estimates only. Keep them unavailable until
-// the installed probes have been calibrated against reference solutions.
-constexpr bool ANALOG_CALIBRATION_VERIFIED = false;
-
 void setup() {
   Serial.begin(115200);
   delay(2000);

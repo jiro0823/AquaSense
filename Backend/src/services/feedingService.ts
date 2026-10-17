@@ -161,8 +161,8 @@ export const feedingService = {
     lastCommand: FeedingCommand | null;
   }> {
     const [scheduleCount, enabledCount, pendingCommands, lastCommand] = await Promise.all([
-      FeedingSchedule.count({ where: { userId, enabled: true } }),
       FeedingSchedule.count({ where: { userId } }),
+      FeedingSchedule.count({ where: { userId, enabled: true } }),
       FeedingCommand.count({ where: { userId, deviceId, status: 'PENDING' } }),
       FeedingCommand.findOne({
         where: { userId, deviceId, status: { [Op.in]: ['PENDING', 'ACKED'] } },

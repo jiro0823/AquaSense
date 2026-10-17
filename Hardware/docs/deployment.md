@@ -3,10 +3,12 @@
 ## Integrated water-monitor
 
 Follow [backend/device setup](backend-control.md) first. The configuration still
-contains an example API address, empty device key, diagram-backed relay load
-assignments and unknown relay polarity. The initial per-pump hard caps are 60
-seconds, but their suitability still needs supervised flow-rate calibration.
-Unknown polarity keeps relay control disabled.
+contains an example API address, empty device key, and diagram-backed relay load
+assignments. Firmware polarity is configured active-LOW from the reported module
+intent, but physical polarity and channel mapping remain unverified; the relay
+output commissioning gate is false. Pump target/max runtimes and cooldown
+are zero, so pump operation remains disabled. Commission bounded timings only
+after supervised flow-rate and physical safety checks.
 
 From the repository root in a PlatformIO terminal:
 
@@ -19,8 +21,8 @@ pio device monitor -d Hardware -e water-monitor --port COM5 --baud 115200
 
 Replace COM5 with the verified port. Close an existing serial monitor before
 upload. Confirm the board matches classic esp32dev with 4 MB flash. Keep relay
-loads unpowered until polarity and reset/OFF state are measured and the initial
-60-second cap is confirmed suitable for the tank and pump flow.
+loads unpowered until polarity and reset/OFF state are measured and safe,
+supervised timing limits are commissioned for the tank and pump flow.
 The integrated servo initializes to its configured HOME position on GPIO13.
 
 Private credentials belong in include/secrets/Secrets.h, which replaces the whole

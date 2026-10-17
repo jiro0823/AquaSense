@@ -4,7 +4,9 @@ ESP32 Arduino firmware built with PlatformIO in VS Code. The integrated
 `water-monitor` handles sensors, LCD, DS3231, servo feeder, buzzer and relay
 control. The supplied wiring diagram maps relay IN1/IN2/IN3 to GPIO25/26/27 for
 fill, drain and aerator; GPIO33 connects to unused IN4. Relay control remains
-disabled until trigger polarity and safe OFF behavior are physically verified.
+disabled by a closed commissioning gate. Firmware polarity is configured
+active-LOW from the reported module intent, but physical trigger behavior,
+channel mapping and safe OFF behavior remain unverified.
 
 ## Layout
 
@@ -25,7 +27,8 @@ Hardware/
     display/                  LcdManager
     services/                 TimeManager (NTP + DS3231)
     feeder/                   Preserved standalone feeder
-    water-quality/            Preserved DO firmware
+    water-quality/            Preserved JSON sketch; pH is diagnostic-only,
+                              turbidity is raw ADC, and DO is not acquired
     water-quality-legacy/     Preserved three-sensor firmware
   lib/                        Future independently reusable project libraries
   test/                       Compile-time checks and acceptance guide
@@ -45,7 +48,7 @@ workers and main.
 | --- | --- | --- |
 | `water-monitor` | Integrated ORP monitoring and hardware control | `include/config/`, `include/secrets/` |
 | `feeder` | Original HTTP/NTP servo feeder | `src/feeder/` |
-| `water-quality` | Original temperature/pH/DO/turbidity JSON | `src/water-quality/` |
+| `water-quality` | JSON telemetry: temperature, raw turbidity and raw pH diagnostic; no DO | `src/water-quality/` |
 | `water-quality-legacy` | Original temperature/pH/raw turbidity | `src/water-quality-legacy/` |
 
 Open/add Hardware in PlatformIO IDE for VS Code. Run from the repository root:
@@ -80,9 +83,10 @@ ready for operating hardware. Follow [backend commissioning](docs/backend-contro
 
 ## Behavior
 
-The integrated water-monitor uses the supplied per-sensor ADC connection
-windows and calibrations. It reports pH, temperature, calibrated turbidity in
-**NTU**, and signed **ORP mV**; ORP does not replace dissolved oxygen. It sends
+The integrated water-monitor uses configured per-sensor ADC connection windows
+and conversion settings. It reports pH, temperature, a configured turbidity
+estimate labelled **NTU**, and signed **ORP mV**; ORP does not replace dissolved
+oxygen. The analog conversions have not been physically verified. It sends
 retained per-sensor MQTT values and connection states under `aquasense/`, with
 turbidity on `aquasense/turbidity-ntu` so the backend keeps NTU separate from
 legacy raw ADC. Validate the supplied coefficients against reference solutions
@@ -93,12 +97,14 @@ progress, then continuously displays four sensor readings on a 20x4 module at
 0x27. It does not rotate to an actuator/network status page. An earlier wiring
 diagram labels a 16x2 module, so verify the installed display dimensions.
 
-Pump runs are timed, mutually exclusive and capped at an initial 60 seconds per
-phase by a local hard deadline. Relay outputs stop on Wi-Fi/MQTT loss or rejected
-commands; physical reset/OFF bias must be verified on the relay module.
-There are **no float switches or inferred level measurements**. Automatic water
-exchange and temperature-based aeration require policy setup and runtime enable
-commands; both start disabled after reboot.
+Pump timing, mutual-exclusion and local deadline logic exists, but pump runs are
+currently inhibited: relay outputs are gated off and configured run limits are
+zero. The software active-LOW setting is not electrical verification. Physical
+reset/OFF bias and the reported K3 refill/K4 drain assignment must be checked
+against the board before changing GPIO roles. There is no
+JSN-SR04T, float-switch, or inferred level measurement; water exchange is timed,
+not level-confirmed. Automatic water exchange and temperature-based aeration
+remain disabled until their policies and hardware are commissioned.
 
 Feeding supports existing manual commands and up to 20 enabled user schedules.
 The servo closes at startup, manual ON is limited to ten seconds, and NVS stores

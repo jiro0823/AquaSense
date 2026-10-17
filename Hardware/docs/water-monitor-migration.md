@@ -52,10 +52,12 @@ and a combined backend client instead of separate hardware/feeding HTTP workers.
 
 Loads connect to relay output terminals; ESP32 signals control module inputs only.
 The module has a separate 5 V supply and common ground. The diagram provides the
-relay signal order and load assignment. Relay polarity is not shown, so
-`RELAY_ACTIVE_LEVEL` remains unknown and the relay controller keeps all channels
-disabled until trigger level and OFF behavior are measured. The user removed
-float switches; no float logic exists.
+documented relay signal order and load assignment, but the reported K3 refill / K4
+drain assignment conflicts with it if K3/K4 denote output channels. Firmware is
+configured active-LOW from reported intent, and its separate output gate remains
+false pending physical trigger, channel, and OFF-state measurements. Do not infer
+physical mapping from source or diagram alone. The user removed float switches;
+no float logic exists.
 
 ## Behavior changes
 
@@ -88,9 +90,11 @@ float switches; no float logic exists.
 The supplied calibration values have not been physically verified on hardware.
 Compare each channel against reference solutions and the installed voltage
 dividers/front ends before unattended use. ORP is not a dissolved-oxygen
-measurement. Relay pin mapping follows the wiring diagram. Unknown polarity
-keeps relay starts disabled; initial pump limits are 60 seconds per phase.
-Water automation gates remain unchanged.
+measurement. Relay pin mapping in source follows the wiring diagram, but the
+physical K3/K4 assignment is unresolved. Active-LOW polarity is configured in
+software; the separate commissioning gate and zero pump timing values keep relay
+starts disabled pending electrical verification. Water automation gates remain
+unchanged.
 
 ## Runtime limits
 

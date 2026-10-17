@@ -24,17 +24,17 @@ int scheduleCount = 0;
 String firedKeys[20]; // per schedule anti-repeat cache (id + date + time + minute)
 
 unsigned long lastSyncMs = 0;
+unsigned long lastWiFiAttemptMs = 0;
+const unsigned long WIFI_RETRY_INTERVAL_MS = 5000;
+bool wifiAttemptStarted = false;
+bool wasWiFiConnected = false;
+bool initialServerSyncPending = true;
 
 void connectWiFi() {
-  Serial.print("Connecting WiFi");
+  Serial.println("Starting WiFi connection");
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
+  lastWiFiAttemptMs = millis();
+  wifiAttemptStarted = true;
 }
 
 void syncNtpTime() {
@@ -237,22 +237,35 @@ void setup() {
   setMotorOff();
 
   connectWiFi();
-  syncNtpTime();
-  syncFromServer();
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
-    syncNtpTime();
+  const unsigned long now = millis();
+  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+  if (wifiConnected) {
+    if (!wasWiFiConnected) {
+      wasWiFiConnected = true;
+      Serial.println("WiFi connected");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+      syncNtpTime();
+      if (initialServerSyncPending) {
+        syncFromServer();
+        initialServerSyncPending = false;
+      }
+    }
+  } else {
+    wasWiFiConnected = false;
+    if (!wifiAttemptStarted || now - lastWiFiAttemptMs >= WIFI_RETRY_INTERVAL_MS) {
+      connectWiFi();
+    }
   }
 
-  unsigned long now = millis();
-  if (now - lastSyncMs > SYNC_INTERVAL_MS) {
+  if (wifiConnected && now - lastSyncMs > SYNC_INTERVAL_MS) {
     lastSyncMs = now;
     syncFromServer();
   }
 
-  checkScheduledFeeding();
+  if (wifiConnected) checkScheduledFeeding();
   delay(500);
 }

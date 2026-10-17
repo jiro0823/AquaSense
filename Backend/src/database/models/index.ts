@@ -19,6 +19,7 @@ import { FeedingCommand } from './FeedingCommand';
 import { PredictionLog } from './PredictionLog';
 import { Device } from './Device';
 import { AuditLog } from './AuditLog';
+import { getDatabase } from '../connection';
 
 /**
  * Initialize all database models
@@ -36,6 +37,10 @@ export const initializeAllModels = async (): Promise<void> => {
   initializeHardwareControlModels();
   initializeWaterQualitySettingModel();
   initializeTanMeasurementModel();
+};
+
+/** Apply compatibility changes after Sequelize has created missing model tables. */
+export const ensureDatabaseSchemaCompat = async (): Promise<void> => {
   await ensureSensorReadingSchemaCompat();
   await ensureUserSchemaCompat();
   await ensureFeedingSchemaCompat();
@@ -124,4 +129,3 @@ export { Device, initializeDeviceModel };
 export { AuditLog, initializeAuditLogModel };
 export { TanMeasurement, initializeTanMeasurementModel };
 export { WaterQualitySetting, initializeWaterQualitySettingModel } from './WaterQualitySetting';
-import { getDatabase } from '../connection';

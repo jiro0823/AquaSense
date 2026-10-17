@@ -126,6 +126,7 @@ void postAckCommand(const String& commandId, const String& resultText) {
   if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
+  http.setTimeout(5000);
   String url = String(API_BASE_URL) + "/feeding/device/ack";
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
@@ -164,6 +165,7 @@ void syncFromServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
+  http.setTimeout(5000);
   String url = String(API_BASE_URL) + "/feeding/device/sync";
   http.begin(url);
   http.addHeader("Content-Type", "application/json");

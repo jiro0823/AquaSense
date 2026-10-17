@@ -14,7 +14,7 @@ import { ApiResponse } from './types';
 import { WaterQualityWebSocketServer } from './websocket/waterQualityWS';
 import { initializeDatabase, closeDatabase, syncDatabase } from './database/connection';
 import { runMigrations } from './database/migrations';
-import { initializeAllModels } from './database/models';
+import { ensureDatabaseSchemaCompat, initializeAllModels } from './database/models';
 import { mqttService } from './services/mqttService';
 import { smsLogService } from './services/smsLogService';
 import { waterQualityService } from './iot/water/services/waterQualityService';
@@ -171,6 +171,8 @@ const startServer = async (): Promise<void> => {
     await initializeAllModels();
     logger.info('Synchronizing database schema...');
     await syncDatabase();
+    logger.info('Applying database schema compatibility updates...');
+    await ensureDatabaseSchemaCompat();
     await waterQualityService.loadThresholds();
     const refreshSmsStatus = (): void => {
       void smsLogService.reconcilePending().catch(() => logger.warn('Unable to refresh pending SMS status'));

@@ -17,6 +17,18 @@ function check(name:string,input:unknown,expected:unknown,actual:()=>unknown) {
   test(name,()=> { const result=actual(); console.log(`Test: ${name}\nInput: ${JSON.stringify(input)}\nExpected: ${JSON.stringify(expected)}\nActual: ${JSON.stringify(result)}\n${JSON.stringify(result)===JSON.stringify(expected)?'PASS':'FAIL'}`); assert.deepEqual(result,expected); });
 }
 check('normal temperature',25,'VALID',()=>validate('temperature',25).health);
+test('connection remains distinct from measurement validity and calibration',()=>{
+  const validator=new SensorValidator();
+  const unverified=validator.validate('connection','ph',null,stamp(),{connected:true,rawAdc:1800},now);
+  assert.equal(unverified.connection,'CONNECTED');
+  assert.equal(unverified.health,'MISSING');
+  assert.equal(unverified.measurementValid,false);
+  assert.equal(unverified.calibration,'REQUIRED');
+  const disconnected=validator.validate('connection','ph',null,stamp(),{connected:false},now);
+  assert.equal(disconnected.connection,'DISCONNECTED');
+  const legacy=validator.validate('connection','ph',null,stamp(),{},now);
+  assert.equal(legacy.connection,'UNKNOWN');
+});
 check('DS18B20 error',-127,'SENSOR_ERROR',()=>validate('temperature',-127).health);
 check('temperature outside capability',126,'INVALID',()=>validate('temperature',126).health);
 check('normal pH',7,'VALID',()=>validate('ph',7).health);

@@ -1,6 +1,7 @@
 #include "SensorManager.h"
 #include <Arduino.h>
 #include <math.h>
+#include <stdio.h>
 #include "SensorConversions.h"
 #include "config/DeviceConfig.h"
 #include "config/Pins.h"
@@ -47,10 +48,40 @@ const SensorReadings& SensorManager::getReadings() const { return readings; }
 
 void SensorManager::printReadings() const {
     Serial.println("===== SENSOR DATA =====");
-    Serial.printf("Temp: %.2f C [%s]\n", readings.temperatureC, readings.temperatureValid ? "valid" : "invalid");
-    Serial.printf("Turbidity: %.2f NTU [%s]\n", readings.turbidityRaw, readings.turbidityValid ? "valid" : "invalid");
-    Serial.printf("pH: %.2f [%s]\n", readings.ph, readings.phValid ? "valid" : "invalid");
-    Serial.printf("ORP: %.2f mV [%s]\n", readings.orpMv, readings.orpValid ? "valid" : "invalid");
+    if (DeviceConfig::OFFLINE_CALIBRATION_MODE) {
+        const char* status = readings.temperatureValid ? "VALID" :
+            readings.temperatureConnected ? "SENSOR_ERROR" : "DISCONNECTED";
+        Serial.printf("DS18B20: %.2f C [%s]; reference calibration pending\n",
+            readings.temperatureC, status);
+    } else {
+        Serial.printf("Temp: %.2f C [%s]\n", readings.temperatureC, readings.temperatureValid ? "valid" : "invalid");
+    }
+    if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED && !DeviceConfig::OFFLINE_CALIBRATION_MODE) {
+        Serial.printf("Turbidity: %.2f NTU [%s]\n", readings.turbidityRaw, readings.turbidityValid ? "valid" : "invalid");
+        Serial.printf("pH: %.2f [%s]\n", readings.ph, readings.phValid ? "valid" : "invalid");
+        Serial.printf("ORP: %.2f mV [%s]\n", readings.orpMv, readings.orpValid ? "valid" : "invalid");
+    } else {
+        if (readings.turbidityValid) {
+            Serial.printf("UNVERIFIED turbidity estimate: %.2f NTU; raw ADC=%.1f\n",
+                readings.turbidityRaw, readings.turbidityDiagnostics.rawAdc);
+        } else {
+            Serial.printf("UNVERIFIED turbidity estimate unavailable; raw ADC=%.1f\n", readings.turbidityDiagnostics.rawAdc);
+        }
+        if (readings.phValid) {
+            Serial.printf("UNVERIFIED pH estimate: %.2f; ADC=%.1f pin voltage=%.3f V\n",
+                readings.ph, readings.phDiagnostics.rawAdc, readings.phDiagnostics.voltage);
+        } else {
+            Serial.printf("UNVERIFIED pH estimate unavailable; ADC=%.1f pin voltage=%.3f V\n",
+                readings.phDiagnostics.rawAdc, readings.phDiagnostics.voltage);
+        }
+        if (readings.orpValid) {
+            Serial.printf("UNVERIFIED ORP estimate: %.2f mV; ADC=%.1f pin voltage=%.3f V\n",
+                readings.orpMv, readings.orpDiagnostics.rawAdc, readings.orpDiagnostics.voltage);
+        } else {
+            Serial.printf("UNVERIFIED ORP estimate unavailable; ADC=%.1f pin voltage=%.3f V\n",
+                readings.orpDiagnostics.rawAdc, readings.orpDiagnostics.voltage);
+        }
+    }
     Serial.printf("ADC pH raw=%.1f range=%u..%u V=%.3f; turbidity raw=%.1f range=%u..%u; ORP raw=%.1f range=%u..%u\n",
         readings.phDiagnostics.rawAdc, readings.phDiagnostics.minimum, readings.phDiagnostics.maximum,
         readings.phDiagnostics.voltage, readings.turbidityDiagnostics.rawAdc,
@@ -118,8 +149,8 @@ void SensorManager::update(uint32_t nowMs) {
         burst.sampledAtMs = nowMs;
         if (phase == Phase::PhVoltage) {
             const float ph = SensorConversions::phFromVoltage(burst.voltage);
-            if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED &&
-                SensorSampleValidity::current(pending.phConnected, true,
+            if (SensorSampleValidity::analog(DeviceConfig::OFFLINE_CALIBRATION_MODE,
+                    CalibrationConfig::ANALOG_CONVERSION_VERIFIED, true,
                     isfinite(ph) && SensorConversions::phPlausible(ph))) {
                 pending.ph = constrain(ph, 0.0f, 14.0f);
                 pending.phValid = true;
@@ -132,8 +163,8 @@ void SensorManager::update(uint32_t nowMs) {
             startSampling(Phase::Turbidity, nowMs);
         } else {
             const float orp = SensorConversions::orpFromVoltage(burst.voltage);
-            if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED &&
-                SensorSampleValidity::current(pending.orpConnected, true, isfinite(orp))) {
+            if (SensorSampleValidity::analog(DeviceConfig::OFFLINE_CALIBRATION_MODE,
+                    CalibrationConfig::ANALOG_CONVERSION_VERIFIED, true, isfinite(orp))) {
                 pending.orpMv = orp;
                 pending.orpValid = true;
             } else {
@@ -175,9 +206,13 @@ void SensorManager::update(uint32_t nowMs) {
         pending.turbidityConnected = updateConnection(connected, pending.turbidityConnected,
             turbidityConnectCount, turbidityDisconnectCount, "TURB");
         const float turbidity = connected ? SensorConversions::turbidityFromAdc(raw) : NAN;
-        if (SensorSampleValidity::current(pending.turbidityConnected, connected, isfinite(turbidity))) {
+        if (SensorSampleValidity::analog(DeviceConfig::OFFLINE_CALIBRATION_MODE,
+                CalibrationConfig::ANALOG_CONVERSION_VERIFIED, connected, isfinite(turbidity))) {
             pending.turbidityRaw = turbidity;
             pending.turbidityValid = true;
+        } else {
+            pending.turbidityRaw = NAN;
+            pending.turbidityValid = false;
         }
         delayMicroseconds(200);
         startSampling(Phase::Orp, nowMs);
@@ -190,7 +225,7 @@ void SensorManager::update(uint32_t nowMs) {
         pending.phValid = false;
         pending.phConnected = updateConnection(connected, pending.phConnected,
             phConnectCount, phDisconnectCount, "pH");
-        if (connected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
+        if (connected) {
             startVoltageSampling(Phase::PhVoltage);
         } else {
             startSampling(Phase::Turbidity, nowMs);
@@ -204,7 +239,7 @@ void SensorManager::update(uint32_t nowMs) {
         pending.orpValid = false;
         pending.orpConnected = updateConnection(connected, pending.orpConnected,
             orpConnectCount, orpDisconnectCount, "ORP");
-        if (connected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
+        if (connected) {
             startVoltageSampling(Phase::OrpVoltage);
         } else {
             temperatureSensor.requestTemperatures();
@@ -215,6 +250,7 @@ void SensorManager::update(uint32_t nowMs) {
 }
 
 void SensorManager::finishSample(uint32_t nowMs) {
+    pending.calibrated = CalibrationConfig::ANALOG_CONVERSION_VERIFIED && !DeviceConfig::OFFLINE_CALIBRATION_MODE;
     pending.sampledAtMs = nowMs;
     pending.sequence = readings.sequence + 1;
     readings = pending; // Only expose a complete acquisition to consumers.

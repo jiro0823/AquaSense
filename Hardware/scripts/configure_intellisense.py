@@ -13,7 +13,11 @@ import sys
 
 HARDWARE = Path(__file__).resolve().parents[1]
 ROOT = HARDWARE.parent
-ENVIRONMENTS = ("water-monitor", "feeder", "water-quality", "water-quality-legacy")
+ENVIRONMENTS = ("water-monitor", "feeder", "water-quality", "water-quality-legacy",
+                "water-monitor-calibration")
+# Avoid making ordinary IntelliSense setup depend on production configuration.
+if os.environ.get("AQUASENSE_INCLUDE_SECURE_INTELLISENSE") == "1":
+    ENVIRONMENTS += ("water-monitor-secure",)
 CONFIG_NAME = "AquaSense ESP32 (PlatformIO)"
 
 

@@ -9,6 +9,12 @@ commands.
 
 ## Connect
 
+0. Copy `include/config/device_config.local.example.h` to
+   `include/config/device_config.local.h` and set the actual device ID, reachable
+   backend HTTPS base URL, and trusted root CA. The local file is ignored by Git.
+   Its example values intentionally fail closed; do not commit credentials or CA
+   material. Include `/api/v1` in the base URL and include a port only when the
+   TLS endpoint does not use its default port.
 1. Register the device to the intended farmer/admin through existing
    POST /api/v1/devices (deviceId, name). Confirm it is active. Match
    DeviceConfig::DEVICE_ID. Only one board may consume that ID.
@@ -16,10 +22,13 @@ commands.
    DEVICE_KEYS=esp32-feeder-1:YOUR_RANDOM_DEVICE_KEY.
    Multiple entries are comma-separated deviceId:key pairs; keys cannot contain
    commas or colons. Match ignored Secrets::DEVICE_KEY.
-3. Set BACKEND_API_BASE_URL to the server's reachable HTTPS host and actual port,
-   ending /api/v1. The committed URL is an invalid placeholder and intentionally
-   cannot connect. ESP32 localhost is not the backend computer. Confirm LAN
-   binding, firewall access, and that the configured certificate covers this host.
+3. `BACKEND_API_BASE_URL` must be reachable from the ESP32's Wi-Fi network and
+   end in `/api/v1`. Do not use `localhost`, `127.0.0.1`, or a placeholder host.
+   Backend listens on HTTP at its configured `HOST` and `PORT`; production HTTPS
+   must terminate at a TLS reverse proxy that forwards `X-Forwarded-Proto: https`.
+   For a private development LAN, bind the backend only as needed on that trusted
+   network and protect access with the host firewall and an HTTPS endpoint.
+   Confirm the certificate covers the exact URL host.
 4. HTTPS with certificate verification is the default and requires the trusted
    PEM root certificate in DeviceConfig::BACKEND_ROOT_CA as a C++ raw string.
    Certificate verification is mandatory and needs valid system time. Plain HTTP
@@ -29,8 +38,8 @@ commands.
    disabled when `NDEBUG` or `AQUASENSE_PRODUCTION_BUILD` is defined. Defining
    the production and insecure-HTTP flags together is a compile error. Do not
    enable this development opt-in for deployment: HTTP exposes the device key.
-   If the URL, CA, or transport policy is invalid, backend control remains
-   disconnected.
+   An absent CA or placeholder/loopback URL is rejected and backend control stays
+   disconnected. Configure a real URL and trust anchor; do not bypass TLS checks.
 5. Match broker credentials/topic with Backend MQTT_TOPIC_READINGS. Integrated
    default is water/esp32/readings. The retained public plaintext broker is for
    development; deployment needs private authenticated transport and a separate

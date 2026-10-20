@@ -7,6 +7,10 @@ import { predictionLogService } from './predictionLog.service';
 import { Alert as AlertModel } from '../database/models/Alert';
 import { alertService } from './alert.service';
 import { tokenService } from '../utils/tokenService';
+import { SensorReading as SensorReadingModel } from '../database/models/SensorReading';
+import { SmsLog as SmsLogModel } from '../database/models/SmsLog';
+import { sensorReadingService } from './sensorReadingService';
+import { smsLogService } from './smsLogService';
 
 afterEach(() => mock.restoreAll());
 
@@ -45,4 +49,55 @@ test('alert queries apply the caller device scope', async () => {
   await alertService.getAlerts(10, undefined, ['device-a']);
   assert.deepEqual((oneQuery?.where as Record<string, unknown>).deviceId, { [Op.in]: ['device-a'] });
   assert.ok(manyQuery?.where);
+});
+
+test('sensor reading lookups and statistics apply the caller device scope', async () => {
+  const queries: Array<Record<string, unknown>> = [];
+  mock.method(SensorReadingModel, 'findOne', async (options: Record<string, unknown>) => { queries.push(options); return null; });
+  mock.method(SensorReadingModel, 'findAll', async (options: Record<string, unknown>) => { queries.push(options); return []; });
+  await sensorReadingService.getLatestReading(['device-a']);
+  await sensorReadingService.getReadingsByTimeRange(60, ['device-a']);
+  await sensorReadingService.getStatistics(60, ['device-a']);
+  assert.deepEqual((queries[0].where as Record<string, unknown>).deviceId, { [Op.in]: ['device-a'] });
+  assert.deepEqual((queries[1].where as Record<string, unknown>).deviceId, { [Op.in]: ['device-a'] });
+  assert.deepEqual((queries[2].where as Record<string, unknown>).deviceId, { [Op.in]: ['device-a'] });
+  assert.deepEqual((queries[3].where as Record<string, unknown>).deviceId, { [Op.in]: ['device-a'] });
+});
+
+test('empty device scope returns no water readings, predictions, or SMS logs', async () => {
+  const readingQuery = mock.method(SensorReadingModel, 'findAll', async () => []);
+  const predictionQuery = mock.method(PredictionLogModel, 'findAll', async () => []);
+  const alertQuery = mock.method(AlertModel, 'findAll', async () => []);
+  const smsQuery = mock.method(SmsLogModel, 'findAll', async () => []);
+  assert.equal(await sensorReadingService.getLatestReading([]), null);
+  assert.deepEqual(await sensorReadingService.getReadingsByTimeRange(60, []), []);
+  assert.deepEqual(await predictionLogService.getRecentLogs(10, []), []);
+  assert.deepEqual(await smsLogService.getRecentLogs(10, []), []);
+  assert.equal(readingQuery.mock.callCount(), 0);
+  assert.equal(predictionQuery.mock.callCount(), 0);
+  assert.equal(alertQuery.mock.callCount(), 0);
+  assert.equal(smsQuery.mock.callCount(), 0);
+});
+
+test('prediction history only returns logs linked to alerts for scoped devices', async () => {
+  let alertOptions: Record<string, unknown> | undefined;
+  let predictionOptions: Record<string, unknown> | undefined;
+  mock.method(AlertModel, 'findAll', async (options: Record<string, unknown>) => {
+    alertOptions = options;
+    return [{ id: 'alert-a' }] as never[];
+  });
+  mock.method(PredictionLogModel, 'findAll', async (options: Record<string, unknown>) => {
+    predictionOptions = options;
+    return [];
+  });
+  await predictionLogService.getRecentLogs(10, ['device-a']);
+  assert.deepEqual((alertOptions?.where as Record<string, unknown>).deviceId, { [Op.in]: ['device-a'] });
+  assert.deepEqual((predictionOptions?.where as Record<string, unknown>).triggeredAlertId, { [Op.in]: ['alert-a'] });
+});
+
+test('SMS history applies the caller device scope', async () => {
+  let query: Record<string, unknown> | undefined;
+  mock.method(SmsLogModel, 'findAll', async (options: Record<string, unknown>) => { query = options; return []; });
+  await smsLogService.getRecentLogs(10, ['device-a']);
+  assert.deepEqual((query?.where as Record<string, unknown>).deviceId, { [Op.in]: ['device-a'] });
 });

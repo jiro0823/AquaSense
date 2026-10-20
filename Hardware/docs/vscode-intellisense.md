@@ -22,8 +22,13 @@ From the repository root, run with the Python interpreter that has PlatformIO:
 The script uses PlatformIO to generate one compilation database per firmware
 environment, plus its ESP32 include/compiler configuration. It writes ignored
 `.vscode/c_cpp_properties.json` files at the AquaSense and Hardware roots so both
-workspace layouts work. Existing root settings.json (including TypeScript settings)
-is preserved. Frontend, Backend and firmware runtime behavior are unaffected.
+workspace layouts work. By default, the generated databases cover the four
+default firmware targets and the offline calibration target. The secure release
+target is opt-in because its configuration guards require provisioned TLS,
+scoped-topic, and broker settings. After those settings are present, include it by
+setting `AQUASENSE_INCLUDE_SECURE_INTELLISENSE=1` before running the script.
+Existing root settings.json (including TypeScript settings) is preserved.
+Frontend, Backend and firmware runtime behavior are unaffected.
 
 Generated files contain machine-specific SDK paths and stay out of Git. Rerun
 after moving the repository, changing dependencies/source filters, adding source
@@ -42,8 +47,9 @@ of overwriting it; merge the generated Hardware configuration into it explicitly
 
 Compilation databases use actual per-source compiler commands. Headers without
 an associated translation unit fall back to the generated water-monitor settings,
-whose dependencies include those needed by the three preserved targets. The
-Arduino reference sketch remains excluded from firmware builds.
+whose dependencies include those needed by the four default targets and offline
+calibration target. The Arduino reference sketch remains excluded from firmware
+builds.
 
 References: [PlatformIO compilation databases](https://docs.platformio.org/en/latest/integration/compile_commands.html)
 and [VS Code C++ configuration](https://code.visualstudio.com/docs/cpp/customize-cpp-settings).

@@ -13,6 +13,9 @@
 
 bool BackendDeviceClient::begin() {
     if (task) return true;
+    if (!DeviceConfig::deviceIdIsConfigured(DeviceConfig::DEVICE_ID)) {
+        Serial.println("Backend control disabled: configure a unique registered DEVICE_ID."); return false;
+    }
     if (!Secrets::DEVICE_KEY[0]) { Serial.println("Backend control disabled: configure private DEVICE_KEY and API address."); return false; }
     if (!DeviceConfig::backendTransportConfigured(DeviceConfig::BACKEND_API_BASE_URL,
             DeviceConfig::BACKEND_ROOT_CA, DeviceConfig::ALLOW_INSECURE_BACKEND_HTTP)) {

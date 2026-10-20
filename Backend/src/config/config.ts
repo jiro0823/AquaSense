@@ -102,6 +102,8 @@ export const config = {
     brokerUrl: getEnv('MQTT_BROKER_URL', 'mqtt://localhost:1883') || 'mqtt://localhost:1883',
     username: getOptionalCredential('MQTT_USERNAME'),
     password: getOptionalCredential('MQTT_PASSWORD'),
+    caCertificate: getOptionalCredential('MQTT_CA_CERT'),
+    deviceScopedTopics: getEnv('MQTT_DEVICE_SCOPED_TOPICS', 'false') === 'true',
     topics: {
       readings: getEnv('MQTT_TOPIC_READINGS', 'water/esp32/readings') || 'water/esp32/readings',
       sensorWildcard: getEnv('MQTT_TOPIC_SENSOR_WILDCARD', 'aquasense/+') || 'aquasense/+',
@@ -150,6 +152,8 @@ const configSchema = z.object({
     brokerUrl: z.string().url('MQTT_BROKER_URL must be a valid URL'),
     username: z.string().min(1).optional(),
     password: z.string().min(1).optional(),
+    caCertificate: z.string().min(1).optional(),
+    deviceScopedTopics: z.boolean(),
     topics: z.object({
       readings: z.string().min(1),
       sensorWildcard: z.string().min(1),
@@ -175,6 +179,13 @@ export const validateConfiguration = (candidate: unknown, environment: string = 
   if (candidateConfig.database?.password && /<[^>]+>|replace-with|changeme|your_database_password|your-local-database-password/i.test(candidateConfig.database.password)) {
     issues.push('DB_PASSWORD must use the actual local database password');
   }
+  if (Boolean(candidateConfig.mqtt?.username) !== Boolean(candidateConfig.mqtt?.password)) {
+    issues.push('MQTT_USERNAME and MQTT_PASSWORD must be configured together');
+  }
+  try {
+    const parsedBroker = new URL(candidateConfig.mqtt?.brokerUrl);
+    if (parsedBroker.username || parsedBroker.password) issues.push('MQTT credentials must use MQTT_USERNAME and MQTT_PASSWORD, not URL userinfo');
+  } catch { /* schema reports malformed URLs */ }
 
   if (environment === 'production') {
     const productionConfig = candidateConfig;
@@ -189,6 +200,16 @@ export const validateConfiguration = (candidate: unknown, environment: string = 
     }
     if (productionConfig.authCookie?.secure !== true || productionConfig.authCookie?.sameSite !== 'none') {
       issues.push('AUTH_COOKIE_SECURE=true and AUTH_COOKIE_SAMESITE=none are required in production');
+    }
+    const brokerUrl = productionConfig.mqtt?.brokerUrl;
+    let mqttTls = false;
+    try { mqttTls = ['mqtts:', 'wss:'].includes(new URL(brokerUrl).protocol); } catch { /* schema reports malformed URLs */ }
+    if (!mqttTls) issues.push('MQTT_BROKER_URL must use mqtts:// or wss:// in production');
+    if (!productionConfig.mqtt?.username || !productionConfig.mqtt?.password) {
+      issues.push('MQTT_USERNAME and MQTT_PASSWORD are required in production');
+    }
+    if (!productionConfig.mqtt?.deviceScopedTopics) {
+      issues.push('MQTT_DEVICE_SCOPED_TOPICS=true is required in production');
     }
     if (productionConfig.cors && Array.isArray(productionConfig.cors.origin) && productionConfig.cors.origin.some((origin) => origin.includes('localhost'))) {
       issues.push('CORS_ORIGIN must not use localhost in production');

@@ -71,8 +71,20 @@ if (-not (Test-Path Hardware/include/secrets/Secrets.h)) {
 }
 ```
 
+Per-install backend URL, device identity, and trusted CA belong in the ignored
+`include/config/device_config.local.h`. Copy
+`include/config/device_config.local.example.h` as a starting point. Placeholder
+or loopback backend URLs, an empty CA, and placeholder device IDs keep backend
+control disabled. The actual host, TLS port, CA, device key, and active backend
+registration must be supplied for the ESP32's network; this repository does not
+guess or provision them.
+
+MQTT TLS/authentication and device-scoped topic migration are documented in
+[`docs/mqtt-security.md`](docs/mqtt-security.md). The secure build target is
+opt-in and requires local broker trust and credentials.
+
 - Secrets.h: WiFi/MQTT credentials and backend DEVICE_KEY.
-- DeviceConfig.h: device ID, API URL, HTTPS root CA, device-ID-derived MQTT client ID, broker and timing.
+- DeviceConfig.h: safe defaults and network behavior; local endpoint/ID/CA overrides are in `device_config.local.h`.
 - Pins.h: diagram-backed relay signal assignments and sensor GPIOs.
 - ActuatorConfig.h: tested polarity, measured pump limits, servo/buzzer behavior and automation gates.
 - CalibrationConfig.h: pH/ORP conversions and smoothing.
@@ -105,6 +117,16 @@ against the board before changing GPIO roles. There is no
 JSN-SR04T, float-switch, or inferred level measurement; water exchange is timed,
 not level-confirmed. Automatic water exchange and temperature-based aeration
 remain disabled until their policies and hardware are commissioned.
+
+Before calibration or relay commissioning, physically isolate the feeder
+mechanism and disconnect the pump and aerator loads from the relay contacts;
+software inhibition does not isolate attached hardware. With loads isolated,
+measure the relay output/contact state at power-on and after reset, including
+boot and restart transitions, and verify that each load output remains OFF.
+Do not reconnect a load until its channel mapping, inactive level, and reset
+behavior have been measured and recorded. The offline calibration firmware
+drives relay signal GPIOs to their configured inactive level but does not
+replace this physical OFF/reset verification.
 
 Feeding supports existing manual commands and up to 20 enabled user schedules.
 The servo closes at startup, manual ON is limited to ten seconds, and NVS stores

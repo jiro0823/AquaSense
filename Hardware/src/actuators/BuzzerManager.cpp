@@ -2,8 +2,14 @@
 #include <Arduino.h>
 #include "config/Pins.h"
 #include "config/ActuatorConfig.h"
+#include "config/DeviceConfig.h"
 
 void BuzzerManager::begin() {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) {
+        manualRequested = false;
+        sounding = false;
+        return;
+    }
     pinMode(Pins::Diagram::BUZZER, OUTPUT);
     digitalWrite(Pins::Diagram::BUZZER, LOW);
     ledcSetup(ActuatorConfig::BUZZER_CHANNEL, ActuatorConfig::BUZZER_FREQUENCY_HZ, 8);
@@ -13,6 +19,7 @@ void BuzzerManager::begin() {
     sounding = false;
 }
 void BuzzerManager::update(bool criticalSensorReading, uint32_t nowMs) {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return;
     // Safety alarms take priority; manual requests use the same bounded pattern.
     if (!criticalSensorReading && !manualRequested) {
         sounding = false;

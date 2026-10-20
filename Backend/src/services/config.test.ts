@@ -41,3 +41,35 @@ test('production authentication configuration remains strict without exposing se
   assert.ok(issues.some((issue) => issue.includes('DEVICE_KEYS')));
   assert.equal(issues.some((issue) => issue.includes(secret)), false);
 });
+
+test('production MQTT requires TLS, paired broker credentials, and device-scoped topics', () => {
+  const common = {
+    ...config,
+    jwt: { ...config.jwt, secret: 'a'.repeat(48) },
+    device: { ...config.device, keys: { board: 'device-key-value' } },
+    authCookie: { ...config.authCookie, secure: true, sameSite: 'none' as const },
+    cors: { ...config.cors, origin: ['https://aquasense.example'] },
+  };
+  const valid = validateConfiguration({
+    ...common,
+    mqtt: { ...config.mqtt, brokerUrl: 'mqtts://broker.example:8883', username: 'device-service', password: 'broker-secret', deviceScopedTopics: true },
+  }, 'production');
+  assert.equal(valid.some(issue => issue.startsWith('MQTT_')), false);
+
+  const insecure = validateConfiguration({
+    ...common,
+    mqtt: { ...config.mqtt, brokerUrl: 'mqtt://broker.example:1883', username: undefined, password: undefined, deviceScopedTopics: false },
+  }, 'production');
+  assert.ok(insecure.some(issue => issue.includes('mqtts:// or wss://')));
+  assert.ok(insecure.some(issue => issue.includes('MQTT_USERNAME and MQTT_PASSWORD')));
+  assert.ok(insecure.some(issue => issue.includes('MQTT_DEVICE_SCOPED_TOPICS')));
+});
+
+test('MQTT broker credentials cannot be embedded in the URL', () => {
+  const issues = validateConfiguration({
+    ...config,
+    mqtt: { ...config.mqtt, brokerUrl: 'mqtts://user:secret@broker.example:8883' },
+  }, 'development');
+  assert.ok(issues.some(issue => issue.includes('not URL userinfo')));
+  assert.equal(issues.some(issue => issue.includes('secret')), false);
+});

@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, UniqueConstraintError } from 'sequelize';
 import { HardwareCommand, HardwareDeviceState } from '../database/models/HardwareControl';
 import { FeedingCommand } from '../database/models/FeedingCommand';
 import { feedingService } from './feedingService';
@@ -8,6 +8,24 @@ import type { Transaction } from 'sequelize';
 
 const WATER_START_ACTIONS: HardwareAction[] = ['FILL', 'DRAIN', 'WATER_EXCHANGE', 'AUTOMATION_ON'];
 const ALL_START_ACTIONS: HardwareAction[] = [...WATER_START_ACTIONS, 'AERATOR_ON', 'AERATOR_AUTO', 'BUZZER_ON'];
+
+/** Persist only newer ACK state. The conditional UPDATE is atomic in the database;
+ * creating the first state row handles the empty case, with unique-key races retried. */
+const persistNewerDeviceState = async (deviceId: string, state: HardwareState, receivedAt: Date): Promise<void> => {
+  const updateIfNewer = () => HardwareDeviceState.update({ state, receivedAt }, {
+    where: { deviceId, receivedAt: { [Op.lt]: receivedAt } },
+  });
+  if (await HardwareDeviceState.findByPk(deviceId)) {
+    await updateIfNewer();
+    return;
+  }
+  try {
+    await HardwareDeviceState.create({ deviceId, state, receivedAt });
+  } catch (error) {
+    if (!(error instanceof UniqueConstraintError)) throw error;
+    await updateIfNewer();
+  }
+};
 
 const acknowledgeInTransaction = async (userId: string, deviceId: string, receipt: CommandReceipt,
   transaction: Transaction): Promise<boolean> => {
@@ -84,17 +102,24 @@ export const hardwareService = {
 
   async acceptMqttAck(userId: string, ack: SignedHardwareAck): Promise<boolean> {
     const { reportedAt, id, source, action, result, deviceId, state } = ack;
+    const ackTime = new Date(reportedAt);
+    if (!Number.isFinite(ackTime.getTime()) || ackTime.getTime() > Date.now() + 30_000) return false;
     if (source === 'hardware') {
       const command = await HardwareCommand.findOne({ where: { id, userId, deviceId } });
       if (!command || command.action !== action) return false;
+      if (command.status === 'EXPIRED' ||
+          (command.createdAt && ackTime < command.createdAt) ||
+          (command.expiresAt && ackTime > command.expiresAt)) return false;
       if (command.status === 'PENDING') await command.update({ status: 'ACKED', result });
     } else {
       const command = await FeedingCommand.findOne({ where: { id, userId, deviceId } });
       if (!command || command.action !== action || command.source !== 'MANUAL') return false;
+      if (ackTime < command.createdAt || ackTime.getTime() > command.createdAt.getTime() + COMMAND_TTL_MS ||
+          (command.metadata as { deviceResult?: string } | null)?.deviceResult === 'expired_before_delivery') return false;
       if (command.status === 'PENDING') await feedingService.ackCommand(userId, deviceId, id,
         { deviceResult: result, reportedAt: new Date(reportedAt).toISOString() });
     }
-    await HardwareDeviceState.upsert({ deviceId, state, receivedAt: new Date(reportedAt) });
+    await persistNewerDeviceState(deviceId, state, ackTime);
     return true;
   },
 

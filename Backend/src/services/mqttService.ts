@@ -21,6 +21,8 @@ interface MQTTConfig {
   brokerUrl: string;
   username?: string;
   password?: string;
+  caCertificate?: string;
+  deviceScopedTopics: boolean;
   clientId?: string;
   topics: {
     readings: string;
@@ -30,33 +32,37 @@ interface MQTTConfig {
   };
 }
 
+interface TelemetryAssembly {
+  latestSensorPayload: { temperature?: unknown; ph?: unknown; turbidity?: unknown; do?: unknown; ammonia?: unknown; orp?: unknown };
+  latestTurbidityUnit: 'raw_adc' | 'NTU';
+  latestRawTurbidity: number | null;
+  pendingBatchFlags: { temperature: boolean; ph: boolean; turbidity: boolean };
+  sensorTimestamps: Record<string, string>;
+  latestDoReceivedAt: number;
+  latestOrpReceivedAt: number;
+}
+
+const newTelemetryAssembly = (): TelemetryAssembly => ({
+  latestSensorPayload: {}, latestTurbidityUnit: 'raw_adc', latestRawTurbidity: null,
+  pendingBatchFlags: { temperature: false, ph: false, turbidity: false },
+  sensorTimestamps: {}, latestDoReceivedAt: 0, latestOrpReceivedAt: 0,
+});
+
+const safeBrokerUrl = (value: string): string => {
+  try { const url = new URL(value); url.username = ''; url.password = ''; url.search = ''; url.hash = ''; return url.toString(); }
+  catch { return '[invalid MQTT URL]'; }
+};
+
 export class MQTTService {
   private client: MqttClient | null = null;
   private config: MQTTConfig;
   private isConnected = false;
   private reconnectInterval: NodeJS.Timeout | null = null;
-  private latestSensorPayload: {
-    temperature?: unknown;
-    ph?: unknown;
-    turbidity?: unknown;
-    do?: unknown;
-    ammonia?: unknown;
-    orp?: unknown;
-  } = {};
-  private latestTurbidityUnit: 'raw_adc' | 'NTU' = 'raw_adc';
-  private latestRawTurbidity: number | null = null;
-  private latestDeviceId = 'mqtt-device';
-  private pendingBatchFlags = {
-    temperature: false,
-    ph: false,
-    turbidity: false,
-  };
+  private readonly telemetryByDevice = new Map<string, TelemetryAssembly>();
+  private latestLegacyDeviceId = 'mqtt-device';
   private onReadingReceived?: (reading: WaterQualityReading) => void;
   private onStatsUpdated?: (stats: WaterQualityStats) => void;
   private lastConnectionWarningAt = 0;
-  private sensorTimestamps: Record<string,string> = {};
-  private latestDoReceivedAt = 0;
-  private latestOrpReceivedAt = 0;
   private actuatorRedeliveryInterval: NodeJS.Timeout | null = null;
 
   constructor(config?: Partial<MQTTConfig>) {
@@ -64,6 +70,8 @@ export class MQTTService {
       brokerUrl: config?.brokerUrl || appConfig.mqtt.brokerUrl,
       username: config?.username || appConfig.mqtt.username,
       password: config?.password || appConfig.mqtt.password,
+      caCertificate: config?.caCertificate || appConfig.mqtt.caCertificate,
+      deviceScopedTopics: config?.deviceScopedTopics ?? appConfig.mqtt.deviceScopedTopics,
       clientId: config?.clientId || `aquasense-backend-${Date.now()}`,
       topics: {
         readings: config?.topics?.readings || appConfig.mqtt.topics.readings,
@@ -86,9 +94,18 @@ export class MQTTService {
         reconnectPeriod: 5000,
         username: this.config.username,
         password: this.config.password,
+        rejectUnauthorized: true,
+        ...(this.config.caCertificate ? { ca: this.config.caCertificate } : {}),
       };
 
-      logger.info(`Connecting to MQTT Broker: ${this.config.brokerUrl}`);
+      const broker = new URL(this.config.brokerUrl);
+      if (broker.username || broker.password) {
+        throw new Error('MQTT credentials must be supplied separately from the broker URL');
+      }
+      if (Boolean(this.config.username) !== Boolean(this.config.password)) {
+        throw new Error('MQTT username and password must be configured together');
+      }
+      logger.info(`Connecting to MQTT Broker: ${safeBrokerUrl(this.config.brokerUrl)}`);
       this.client = mqtt.connect(this.config.brokerUrl, options);
 
       // Connection established
@@ -117,7 +134,21 @@ export class MQTTService {
       // Disconnection
       this.client.on('disconnect', () => {
         this.isConnected = false;
+        this.telemetryByDevice.clear();
+        this.latestLegacyDeviceId = 'mqtt-device';
         logger.warn('MQTT disconnected, attempting to reconnect...');
+      });
+
+      this.client.on('offline', () => {
+        this.isConnected = false;
+        this.telemetryByDevice.clear();
+        this.latestLegacyDeviceId = 'mqtt-device';
+      });
+
+      this.client.on('close', () => {
+        this.isConnected = false;
+        this.telemetryByDevice.clear();
+        this.latestLegacyDeviceId = 'mqtt-device';
       });
 
       // MQTT is optional for local development; REST sensor ingestion remains online
@@ -127,7 +158,7 @@ export class MQTTService {
         if (now - this.lastConnectionWarningAt > 30000) {
           this.lastConnectionWarningAt = now;
           logger.warn('MQTT broker unavailable; backend is still running without MQTT data', {
-            brokerUrl: this.config.brokerUrl,
+            brokerUrl: safeBrokerUrl(this.config.brokerUrl),
             message: error.message || 'Connection failed',
           });
         }
@@ -150,13 +181,14 @@ export class MQTTService {
     if (!this.client) return;
 
     try {
-      this.client.subscribe([this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'], (err) => {
+      const subscriptions = this.config.deviceScopedTopics
+        ? ['aquasense/+/telemetry/+', 'aquasense/+/state']
+        : [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'];
+      this.client.subscribe(subscriptions, (err) => {
         if (err) {
           logger.error('MQTT subscription error:', err.message);
         } else {
-          logger.info(
-            `âœ“ Subscribed to topics: ${this.config.topics.readings}, ${this.config.topics.sensorWildcard}, ${this.config.topics.commands}`
-          );
+          logger.info('MQTT subscriptions restored');
         }
       });
     } catch (error) {
@@ -172,10 +204,12 @@ export class MQTTService {
       const message = payload.toString();
       logger.debug(`[MQTT] Received on ${topic}: ${message.substring(0, 100)}`);
 
-      if (topic === this.config.topics.readings) {
+      if (!this.config.deviceScopedTopics && topic === this.config.topics.readings) {
         this.handleSensorReading(message);
       } else if (/^aquasense\/[^/]+\/state$/.test(topic)) {
         void this.handleActuatorAck(topic, message);
+      } else if (this.config.deviceScopedTopics) {
+        this.handleScopedTelemetryTopic(topic, message);
       } else if (this.isAquasenseSensorTopic(topic)) {
         this.handleAquasenseTopicValue(topic, message);
       } else if (topic.startsWith('water/commands/')) {
@@ -189,7 +223,8 @@ export class MQTTService {
   /** Publish one non-retained, signed actuator command. Publishing means queued, never confirmed. */
   async dispatchHardwareCommand(input: { id: string; deviceId: string; source: 'hardware' | 'feeding'; action: string; durationMs?: number; expiresAt: Date }): Promise<boolean> {
     if (!this.client || !this.isConnected) return false;
-    const key = appConfig.device.keys[input.deviceId];
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(input.deviceId)) return false;
+    const key = Object.prototype.hasOwnProperty.call(appConfig.device.keys, input.deviceId) ? appConfig.device.keys[input.deviceId] : undefined;
     if (!key) return false;
     const unsigned = { v: 1 as const, deviceId: input.deviceId, id: input.id, source: input.source,
       action: input.action, durationMs: input.durationMs ?? 0, expiresAt: input.expiresAt.getTime() };
@@ -229,8 +264,8 @@ export class MQTTService {
   private async handleActuatorAck(topic: string, payload: string): Promise<void> {
     const ack = parseSignedAck(payload);
     const topicDeviceId = topic.split('/')[1];
-    if (!ack || ack.deviceId !== topicDeviceId) { logger.warn('Rejected malformed actuator state/ack', { topic }); return; }
-    const key = appConfig.device.keys[ack.deviceId];
+    if (!ack || ack.deviceId !== topicDeviceId || !/^[A-Za-z0-9_-]{1,64}$/.test(topicDeviceId)) { logger.warn('Rejected malformed actuator state/ack', { topic }); return; }
+    const key = Object.prototype.hasOwnProperty.call(appConfig.device.keys, ack.deviceId) ? appConfig.device.keys[ack.deviceId] : undefined;
     if (!key || !verifyCanonical(ackCanonical(ack), ack.signature, key)) {
       logger.warn('Rejected actuator state/ack with invalid signature', { deviceId: ack.deviceId, commandId: ack.id }); return;
     }
@@ -246,12 +281,18 @@ export class MQTTService {
    * Process sensor reading from ESP32
    * Expected format: {temperature, ph, do, turbidity, location?, timestamp?}
    */
-  private async handleSensorReading(payload: string): Promise<void> {
+  private async handleSensorReading(payload: string, topicDeviceId?: string): Promise<void> {
     try {
       const data = JSON.parse(payload);
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
-      const deviceId = typeof data.deviceId === 'string' ? data.deviceId : 'mqtt-device';
-      const reading = await sensorReadingService.ingest(deviceId, data);
+      // JSON telemetry has no signed publisher identity. It is accepted only by
+      // the legacy development contract; production uses ACL-scoped topic IDs.
+      if (this.config.deviceScopedTopics && (!topicDeviceId || !Object.prototype.hasOwnProperty.call(appConfig.device.keys, topicDeviceId))) return;
+      const deviceId = this.config.deviceScopedTopics
+        ? topicDeviceId!
+        : (typeof data.deviceId === 'string' ? data.deviceId : 'mqtt-device');
+      if (this.config.deviceScopedTopics && !(await deviceService.getActiveDevice(deviceId))) return;
+      const reading = await sensorReadingService.ingest(deviceId, { ...data, deviceId });
       this.onReadingReceived?.(reading);
       await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured}).catch(error=>logger.error('Post-ingestion notification failed', {deviceId, readingId:reading.id, error:String(error)}));
       const stats = await sensorReadingService.getStatistics(60);
@@ -268,119 +309,145 @@ export class MQTTService {
   }
 
   /**
-   * Handle topic-per-parameter payloads, e.g.:
-   * aquasense/temperature => 26.4
-   * aquasense/ph => 7.19
-   * aquasense/turbidity => 324
+   * In migration mode the topic is the device identity. The legacy flat
+   * contract remains development-only and isolates its claimed IDs in memory.
    */
+  private handleScopedTelemetryTopic(topic: string, payload: string): void {
+    const match = /^aquasense\/([A-Za-z0-9_-]{1,64})\/telemetry\/(temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)(?:\/status)?$/.exec(topic);
+    if (!match || topic.endsWith('/status')) return;
+    const [, deviceId, suffix] = match;
+    if (!Object.prototype.hasOwnProperty.call(appConfig.device.keys, deviceId)) return;
+    this.handleTelemetryValue(deviceId, suffix, payload);
+  }
+
   private handleAquasenseTopicValue(topic: string, payload: string): void {
-    const topicSuffix = topic.split('/').pop();
+    const match = /^aquasense\/(device-id|temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)$/.exec(topic);
+    if (!match) return;
+    const topicSuffix = match[1];
+    if (topicSuffix === 'device-id') {
+      const claimedId = payload.trim();
+      if (/^[A-Za-z0-9_-]{1,64}$/.test(claimedId)) this.latestLegacyDeviceId = claimedId;
+      return;
+    }
+    this.handleTelemetryValue(this.latestLegacyDeviceId, topicSuffix, payload);
+  }
+
+  private telemetryAssembly(deviceId: string): TelemetryAssembly | undefined {
+    let assembly = this.telemetryByDevice.get(deviceId);
+    if (assembly) return assembly;
+    // Hard cap protects development legacy mode from arbitrary claimed IDs.
+    if (this.telemetryByDevice.size >= 256) this.telemetryByDevice.delete(this.telemetryByDevice.keys().next().value!);
+    assembly = newTelemetryAssembly();
+    this.telemetryByDevice.set(deviceId, assembly);
+    return assembly;
+  }
+
+  private handleTelemetryValue(deviceId: string, topicSuffix: string, payload: string): void {
+    const assembly = this.telemetryAssembly(deviceId);
+    if (!assembly) return;
     const parsed = numeric(payload);
     const value = parsed;
 
-    if (topicSuffix) this.sensorTimestamps[topicSuffix] = new Date().toISOString();
+    assembly.sensorTimestamps[topicSuffix] = new Date().toISOString();
     switch (topicSuffix) {
-      case 'device-id':
-        if (payload.trim()) this.latestDeviceId = payload.trim();
-        return;
       case 'temperature':
-        this.latestSensorPayload.temperature = value ?? undefined;
-        this.pendingBatchFlags.temperature = true;
+        assembly.latestSensorPayload.temperature = value ?? undefined;
+        assembly.pendingBatchFlags.temperature = true;
         break;
       case 'ph':
-        this.latestSensorPayload.ph = value ?? undefined;
-        this.pendingBatchFlags.ph = true;
+        assembly.latestSensorPayload.ph = value ?? undefined;
+        assembly.pendingBatchFlags.ph = true;
         break;
       case 'turbidity': {
         if (value === null) {
-          this.latestRawTurbidity = null;
-          this.latestSensorPayload.turbidity = undefined;
-          this.pendingBatchFlags.turbidity = false;
+          assembly.latestRawTurbidity = null;
+          assembly.latestSensorPayload.turbidity = undefined;
+          assembly.pendingBatchFlags.turbidity = false;
           break;
         }
-        this.latestRawTurbidity = value;
+        assembly.latestRawTurbidity = value;
         // The firmware publishes raw ADC and reported NTU separately. Keep ADC
         // as diagnostic metadata when an NTU sample is also arriving; it must
         // not replace that sample or create a second mixed-unit frame.
-        const ntuAt = Date.parse(this.sensorTimestamps['turbidity-ntu'] ?? '');
+        const ntuAt = Date.parse(assembly.sensorTimestamps['turbidity-ntu'] ?? '');
         if (!Number.isFinite(ntuAt) || Date.now() - ntuAt > 15000) {
-          this.latestSensorPayload.turbidity = value;
-          this.latestTurbidityUnit = 'raw_adc';
-          this.pendingBatchFlags.turbidity = true;
+          assembly.latestSensorPayload.turbidity = value;
+          assembly.latestTurbidityUnit = 'raw_adc';
+          assembly.pendingBatchFlags.turbidity = true;
         }
         break;
       }
       case 'turbidity-ntu':
-        this.latestSensorPayload.turbidity = value ?? undefined;
-        this.latestTurbidityUnit = 'NTU';
-        this.pendingBatchFlags.turbidity = true;
+        assembly.latestSensorPayload.turbidity = value ?? undefined;
+        assembly.latestTurbidityUnit = 'NTU';
+        assembly.pendingBatchFlags.turbidity = true;
         break;
       case 'orp':
-        this.latestSensorPayload.orp = value;
-        this.latestOrpReceivedAt = Date.now();
+        assembly.latestSensorPayload.orp = value;
+        assembly.latestOrpReceivedAt = Date.now();
         break;
       case 'do':
       case 'dissolved-oxygen':
-        this.latestSensorPayload.do = value;
-        this.latestDoReceivedAt = Date.now();
+        assembly.latestSensorPayload.do = value;
+        assembly.latestDoReceivedAt = Date.now();
         break;
       case 'ammonia':
       case 'nh3':
-        this.latestSensorPayload.ammonia = value;
+        assembly.latestSensorPayload.ammonia = value;
         break;
       default:
         logger.debug(`[MQTT] Unsupported aquasense topic suffix: ${topicSuffix}`);
         return;
     }
 
-    const requiredTimestamps = ['temperature', 'ph', this.latestTurbidityUnit === 'NTU' ? 'turbidity-ntu' : 'turbidity'];
+    const requiredTimestamps = ['temperature', 'ph', assembly.latestTurbidityUnit === 'NTU' ? 'turbidity-ntu' : 'turbidity'];
     const frameFresh = requiredTimestamps.every(name => {
-      const at = Date.parse(this.sensorTimestamps[name] ?? '');
+      const at = Date.parse(assembly.sensorTimestamps[name] ?? '');
       return Number.isFinite(at) && Date.now() - at <= 15000;
     });
     if (
-      (this.pendingBatchFlags.temperature &&
-      this.pendingBatchFlags.ph &&
-      this.pendingBatchFlags.turbidity &&
+      (assembly.pendingBatchFlags.temperature &&
+      assembly.pendingBatchFlags.ph &&
+      assembly.pendingBatchFlags.turbidity &&
       frameFresh &&
-      this.latestSensorPayload.temperature !== undefined &&
-      this.latestSensorPayload.ph !== undefined &&
-      this.latestSensorPayload.turbidity !== undefined)
+      assembly.latestSensorPayload.temperature !== undefined &&
+      assembly.latestSensorPayload.ph !== undefined &&
+      assembly.latestSensorPayload.turbidity !== undefined)
     ) {
       const normalizedPayload = {
-        deviceId: this.latestDeviceId,
-        temperature: this.latestSensorPayload.temperature,
-        ph: this.latestSensorPayload.ph,
-        do: Date.now() - this.latestDoReceivedAt <= 15000 ? this.latestSensorPayload.do : undefined,
-        turbidity: this.latestSensorPayload.turbidity,
-        turbidityUnit: this.latestTurbidityUnit,
-        sensors: this.latestTurbidityUnit === 'NTU' && this.latestRawTurbidity !== null && Date.now() - Date.parse(this.sensorTimestamps.turbidity ?? '') <= 15000
-          ? { turbidity: { rawAdc: this.latestRawTurbidity } }
+        deviceId,
+        temperature: assembly.latestSensorPayload.temperature,
+        ph: assembly.latestSensorPayload.ph,
+        do: Date.now() - assembly.latestDoReceivedAt <= 15000 ? assembly.latestSensorPayload.do : undefined,
+        turbidity: assembly.latestSensorPayload.turbidity,
+        turbidityUnit: assembly.latestTurbidityUnit,
+        sensors: assembly.latestTurbidityUnit === 'NTU' && assembly.latestRawTurbidity !== null && Date.now() - Date.parse(assembly.sensorTimestamps.turbidity ?? '') <= 15000
+          ? { turbidity: { rawAdc: assembly.latestRawTurbidity } }
           : undefined,
-        orp: Date.now() - this.latestOrpReceivedAt <= 15000 ? this.latestSensorPayload.orp ?? null : null,
+        orp: Date.now() - assembly.latestOrpReceivedAt <= 15000 ? assembly.latestSensorPayload.orp ?? null : null,
         sensorTimestamps: {
-          ...this.sensorTimestamps,
-          turbidity: this.sensorTimestamps[this.latestTurbidityUnit === 'NTU' ? 'turbidity-ntu' : 'turbidity'],
+          ...assembly.sensorTimestamps,
+          turbidity: assembly.sensorTimestamps[assembly.latestTurbidityUnit === 'NTU' ? 'turbidity-ntu' : 'turbidity'],
         },
         location: 'ESP32-MQTT',
         timestamp: new Date().toISOString(),
       };
 
-      this.pendingBatchFlags = {
+      assembly.pendingBatchFlags = {
         temperature: false,
         ph: false,
         turbidity: false,
       };
-      this.latestSensorPayload.temperature = undefined;
-      this.latestSensorPayload.ph = undefined;
-      this.latestSensorPayload.turbidity = undefined;
+      assembly.latestSensorPayload.temperature = undefined;
+      assembly.latestSensorPayload.ph = undefined;
+      assembly.latestSensorPayload.turbidity = undefined;
 
-      this.handleSensorReading(JSON.stringify(normalizedPayload));
+      void this.handleSensorReading(JSON.stringify(normalizedPayload), this.config.deviceScopedTopics ? deviceId : undefined);
     }
   }
 
   private isAquasenseSensorTopic(topic: string): boolean {
-    return topic.startsWith('aquasense/');
+    return /^aquasense\/(device-id|temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)$/.test(topic);
   }
 
   /**
@@ -461,8 +528,10 @@ export class MQTTService {
   } {
     return {
       connected: this.isConnected,
-      brokerUrl: this.config.brokerUrl,
-      subscribedTopics: [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands],
+      brokerUrl: safeBrokerUrl(this.config.brokerUrl),
+      subscribedTopics: this.config.deviceScopedTopics
+        ? ['aquasense/+/telemetry/+', 'aquasense/+/state']
+        : [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'],
     };
   }
 }

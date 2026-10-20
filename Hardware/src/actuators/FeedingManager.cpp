@@ -2,10 +2,17 @@
 #include <Arduino.h>
 #include <string.h>
 #include "config/ActuatorConfig.h"
+#include "config/DeviceConfig.h"
 #include "config/Pins.h"
 #include "controllers/ControlSafety.h"
 
 void FeedingManager::begin() {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED || !DeviceConfig::SCHEDULE_PERSISTENCE_ENABLED) {
+        ready = false;
+        storageReady = false;
+        schedules = FeedingSchedules{};
+        return;
+    }
     storageReady = storage.begin("aq-feeding", false);
     if (storageReady) {
         if (storage.getBytesLength("schedules") == sizeof(schedules)) storage.getBytes("schedules", &schedules, sizeof(schedules));
@@ -18,6 +25,7 @@ void FeedingManager::begin() {
     stop();
 }
 void FeedingManager::stop() {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return;
     if (ready) servo.write(ActuatorConfig::FEEDER_CLOSED_DEGREES);
     phase = Phase::Idle;
     manualMinute = timeManager.localMinute();
@@ -27,6 +35,7 @@ void FeedingManager::start(uint32_t nowMs) {
     phase = Phase::Closing; phaseStartedMs = nowMs;
 }
 const char* FeedingManager::request(CommandAction action, uint32_t nowMs) {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return "offline_calibration_mode";
     manualMinute = timeManager.localMinute();
     if (!ready) return "feeder_disabled";
     if (action == CommandAction::FeedOff) { stop(); return "accepted"; }
@@ -39,6 +48,7 @@ const char* FeedingManager::request(CommandAction action, uint32_t nowMs) {
     return "invalid_action";
 }
 void FeedingManager::setSchedules(const FeedingSchedules& next) {
+    if (!DeviceConfig::SCHEDULE_PERSISTENCE_ENABLED) return;
     if (!storageReady || next.count > MAX_FEEDING_SCHEDULES) return;
     bool same = next.count == schedules.count;
     for (uint8_t i = 0; same && i < next.count; ++i) {
@@ -66,6 +76,7 @@ bool FeedingManager::markSchedule(const char* id, int64_t minute) {
     return storage.putBytes("fired", fired, sizeof(fired)) == sizeof(fired);
 }
 void FeedingManager::update(uint32_t nowMs) {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED || !DeviceConfig::SCHEDULE_PERSISTENCE_ENABLED) return;
     if (!ready) return;
     if (phase == Phase::Closing && ControlSafety::elapsed(nowMs, phaseStartedMs, ActuatorConfig::FEEDER_CLOSE_MS)) {
         servo.write(ActuatorConfig::FEEDER_OPEN_DEGREES); phase = Phase::Opening; phaseStartedMs = nowMs;

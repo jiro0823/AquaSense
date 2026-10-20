@@ -13,25 +13,30 @@
 #include "controllers/SystemController.h"
 
 namespace {
+#if !defined(AQUASENSE_OFFLINE_CALIBRATION_MODE)
 enum class AppState { Boot, WifiConnecting, MqttConnecting, Running };
+#endif
 SensorManager sensors;
+#if !defined(AQUASENSE_OFFLINE_CALIBRATION_MODE)
+RelayController relays;
+BuzzerManager buzzer;
 WifiManager wifi;
 MqttManager mqtt;
 BackendDeviceClient backend;
 LcdManager lcd;
 TimeManager timeManager;
-RelayController relays;
 WaterManager water(relays);
 AeratorManager aerator(relays);
 FeedingManager feeder(timeManager);
-BuzzerManager buzzer;
 SystemController control(relays, water, aerator, feeder, buzzer);
 SystemState state;
-uint32_t lastLoggedSequence = 0;
 AppState appState = AppState::Boot;
 uint32_t connectionSuccessStartedMs = 0;
 bool connectionSuccessHoldActive = false;
+#endif
+uint32_t lastLoggedSequence = 0;
 
+#if !defined(AQUASENSE_OFFLINE_CALIBRATION_MODE)
 void updateAppState(uint32_t nowMs) {
     const bool wifiConnected = wifi.isConnected();
     const bool mqttConnected = mqtt.isConnected();
@@ -86,9 +91,16 @@ void updateAppState(uint32_t nowMs) {
         }
     }
 }
+#endif
 }
 void setup() {
     Serial.begin(DeviceConfig::SERIAL_BAUD);
+#if defined(AQUASENSE_OFFLINE_CALIBRATION_MODE)
+    Serial.println("OFFLINE CALIBRATION MODE: network, commands, schedules, and actuators disabled.");
+    Wire.begin(Pins::I2C_SDA, Pins::I2C_SCL);
+    Wire.setTimeOut(DeviceConfig::I2C_TIMEOUT_MS);
+    sensors.begin();
+#else
     relays.begin();
     feeder.begin();
     buzzer.begin();
@@ -97,8 +109,19 @@ void setup() {
     Wire.setTimeOut(DeviceConfig::I2C_TIMEOUT_MS);
     lcd.begin(); timeManager.begin(); sensors.begin();
     wifi.begin(); mqtt.begin(); backend.begin();
+#endif
 }
 void loop() {
+#if defined(AQUASENSE_OFFLINE_CALIBRATION_MODE)
+    const uint32_t nowMs = millis();
+    sensors.update(nowMs);
+    const SensorReadings& readings = sensors.getReadings();
+    if (readings.sequence != lastLoggedSequence) {
+        lastLoggedSequence = readings.sequence;
+        sensors.printReadings();
+    }
+    vTaskDelay(DeviceConfig::MAIN_LOOP_IDLE_TICKS);
+#else
     const uint32_t nowMs = millis();
     MqttActuatorCommand mqttCommand{};
     CommandReceipt mqttReceipt{};
@@ -125,4 +148,5 @@ void loop() {
         lastLoggedSequence = readings.sequence; timeManager.printCurrentTime(); sensors.printReadings();
     }
     vTaskDelay(DeviceConfig::MAIN_LOOP_IDLE_TICKS);
+#endif
 }

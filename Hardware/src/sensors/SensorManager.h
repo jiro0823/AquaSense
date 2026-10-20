@@ -9,6 +9,11 @@ namespace SensorSampleValidity {
 constexpr bool current(bool, bool acquisitionValid, bool convertedValueFinite) {
     return acquisitionValid && convertedValueFinite;
 }
+constexpr bool analog(bool offlineCalibrationMode, bool conversionVerified,
+                      bool acquisitionValid, bool convertedValueFinite) {
+    return acquisitionValid && convertedValueFinite &&
+        (conversionVerified || offlineCalibrationMode);
+}
 }
 
 class SensorManager {

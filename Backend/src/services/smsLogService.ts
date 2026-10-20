@@ -90,8 +90,10 @@ class SmsLogService {
     return logs.map((log) => this.mapLog(log));
   }
 
-  async getRecentLogs(limit: number = 30): Promise<SmsLogEntry[]> {
+  async getRecentLogs(limit: number = 30, deviceIds?: string[]): Promise<SmsLogEntry[]> {
+    if (deviceIds?.length === 0) return [];
     const logs = await SmsLogModel.findAll({
+      where: deviceIds ? { deviceId: { [Op.in]: deviceIds } } : undefined,
       order: [['sentAt', 'DESC']],
       limit,
     });

@@ -4,7 +4,11 @@
 #include <WiFi.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "config/DeviceConfig.h"
+#include "config/CalibrationConfig.h"
+#include "config/Thresholds.h"
+#include "../sensors/SensorConversions.h"
 #if __has_include("secrets/Secrets.h")
 #include "secrets/Secrets.h"
 #else
@@ -68,6 +72,75 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
     const bool fresh = readings.sequence != 0 &&
         uint32_t(nowMs - readings.sampledAtMs) <= DeviceConfig::TELEMETRY_MAX_AGE_MS;
     char row[32];
+#if AQUASENSE_LCD_ANALOG_DIAGNOSTIC_MODE
+    const bool hasSample = readings.sequence != 0;
+    const auto freshAt = [nowMs](uint32_t sampledAtMs) {
+        return sampledAtMs != 0 && uint32_t(nowMs - sampledAtMs) <= DeviceConfig::TELEMETRY_MAX_AGE_MS;
+    };
+    const auto usableAdc = [](const AnalogDiagnostics& diagnostics, int minimum, int maximum) {
+        const int raw = int(diagnostics.rawAdc);
+        const int spread = int(diagnostics.maximum) - int(diagnostics.minimum);
+        return raw >= minimum && raw <= maximum && spread <= CalibrationConfig::STABILITY_MAX_DEV &&
+            diagnostics.clipped == 0 && SensorConversions::adcUsable(raw);
+    };
+    if (!hasSample) {
+        writeRow(0, "pH: NO DATA");
+    } else if (!freshAt(readings.phDiagnostics.sampledAtMs)) {
+        writeRow(0, "pH: STALE");
+    } else if (!usableAdc(readings.phDiagnostics, CalibrationConfig::PH_CONNECT_MIN,
+                          CalibrationConfig::PH_CONNECT_MAX)) {
+        snprintf(row, sizeof(row), "pH ADC %.0f FAIL", double(readings.phDiagnostics.rawAdc));
+        writeRow(0, row);
+    } else if (!CalibrationConfig::ANALOG_CONVERSION_VERIFIED && !readings.calibrated) {
+        const float phEstimate = SensorConversions::phFromVoltage(readings.phDiagnostics.voltage);
+        if (isfinite(phEstimate) && SensorConversions::phPlausible(phEstimate))
+            snprintf(row, sizeof(row), "pH: %.2f PRE-CAL", double(phEstimate));
+        else
+            snprintf(row, sizeof(row), "pH: INVALID");
+        writeRow(0, row);
+    } else if (fresh && readings.phValid) {
+        snprintf(row, sizeof(row), "pH: %.2f", double(readings.ph));
+        writeRow(0, row);
+    } else {
+        writeRow(0, readings.phConnected ? "pH: INVALID" : "pH: DISCONNECTED");
+    }
+    if (readings.sequence == 0) {
+        writeRow(1, "Temp: NO DATA");
+    } else if (!freshAt(readings.temperatureSampledAtMs)) {
+        writeRow(1, "Temp: STALE");
+    } else if (!readings.temperatureConnected) {
+        writeRow(1, "Temp: DISCONNECTED");
+    } else if (!readings.temperatureValid) {
+        writeRow(1, "Temp: INVALID");
+    } else {
+        snprintf(row, sizeof(row), "Temp: %.2f C", double(readings.temperatureC));
+        writeRow(1, row);
+    }
+    if (!hasSample) {
+        writeRow(2, "Turb: NO DATA");
+    } else if (!freshAt(readings.turbidityDiagnostics.sampledAtMs)) {
+        writeRow(2, "Turb: STALE");
+    } else if (!usableAdc(readings.turbidityDiagnostics, CalibrationConfig::TURBIDITY_CONNECT_MIN,
+                          CalibrationConfig::TURBIDITY_CONNECT_MAX)) {
+        snprintf(row, sizeof(row), "Turb ADC %.0f FAIL", double(readings.turbidityDiagnostics.rawAdc));
+        writeRow(2, row);
+    } else {
+        snprintf(row, sizeof(row), "Turb: ADC %.0f", double(readings.turbidityDiagnostics.rawAdc));
+        writeRow(2, row);
+    }
+    if (!hasSample) {
+        writeRow(3, "ORP: NO DATA");
+    } else if (!freshAt(readings.orpDiagnostics.sampledAtMs)) {
+        writeRow(3, "ORP: STALE");
+    } else if (!usableAdc(readings.orpDiagnostics, CalibrationConfig::ORP_CONNECT_MIN,
+                          CalibrationConfig::ORP_CONNECT_MAX)) {
+        snprintf(row, sizeof(row), "ORP ADC %.0f FAIL", double(readings.orpDiagnostics.rawAdc));
+        writeRow(3, row);
+    } else {
+        snprintf(row, sizeof(row), "ORP: ADC %.0f", double(readings.orpDiagnostics.rawAdc));
+        writeRow(3, row);
+    }
+#else
     if (fresh && readings.phValid) snprintf(row, sizeof(row), "pH: %.2f", double(readings.ph));
     else snprintf(row, sizeof(row), "pH: DISCONNECTED");
     writeRow(0, row);
@@ -80,6 +153,7 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
     if (fresh && readings.orpValid) snprintf(row, sizeof(row), "ORP: %.1f mV", double(readings.orpMv));
     else snprintf(row, sizeof(row), "ORP: DISCONNECTED");
     writeRow(3, row);
+#endif
 }
 
 void LcdManager::update(const SensorReadings& reading, const SystemState& state, uint32_t nowMs) {

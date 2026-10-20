@@ -63,16 +63,18 @@ class SensorReadingService {
     void do_value; void doMeasured;
     return this.ingest(deviceId,{temperature,ph,turbidity,location,timestamp:timestamp.toISOString(),orp});
   }
-  async getLatestReading(): Promise<SensorReading|null> {
-    const reading=await SensorReadingModel.findOne({order:[['createdAt','DESC']]});
+  async getLatestReading(deviceIds?: string[]): Promise<SensorReading|null> {
+    if (deviceIds?.length === 0) return null;
+    const reading=await SensorReadingModel.findOne({where:deviceIds?{deviceId:{[Op.in]:deviceIds}}:undefined,order:[['createdAt','DESC']]});
     return reading?this.mapSensorModel(reading,true):null;
   }
-  async getReadingsByTimeRange(minutes=60): Promise<SensorReading[]> {
-    const readings=await SensorReadingModel.findAll({where:{timestamp:{[Op.gte]:new Date(Date.now()-minutes*60000)}},order:[['timestamp','DESC']]});
+  async getReadingsByTimeRange(minutes=60, deviceIds?: string[]): Promise<SensorReading[]> {
+    if (deviceIds?.length === 0) return [];
+    const readings=await SensorReadingModel.findAll({where:{timestamp:{[Op.gte]:new Date(Date.now()-minutes*60000)},...(deviceIds?{deviceId:{[Op.in]:deviceIds}}:{})},order:[['timestamp','DESC']]});
     return readings.map(r=>this.mapSensorModel(r));
   }
-  async getStatistics(minutes=60) {
-    const readings=await this.getReadingsByTimeRange(minutes), latest=await this.getLatestReading();
+  async getStatistics(minutes=60, deviceIds?: string[]) {
+    const readings=await this.getReadingsByTimeRange(minutes,deviceIds), latest=await this.getLatestReading(deviceIds);
     const stats=(name:'temperature'|'ph'|'do'|'turbidity'|'orp'|'ammonia'):SensorStatistics=>{
       const values=readings.filter(r=>(!latest || r.deviceId===latest.deviceId) && (name!=='turbidity' || r.turbidityUnit===latest?.turbidityUnit)).map(r=>r[name]).filter((v):v is number=>v!==null&&Number.isFinite(v));
       return {parameter:name,current:latest?.[name]??null,average:values.length?values.reduce((a,b)=>a+b,0)/values.length:null,

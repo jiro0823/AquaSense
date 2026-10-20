@@ -5,7 +5,7 @@
 namespace CalibrationConfig {
 // User-supplied hardware calibration profile. Validate against reference
 // solutions and the installed analog front ends during commissioning.
-constexpr bool ANALOG_CONVERSION_VERIFIED = true;
+constexpr bool ANALOG_CONVERSION_VERIFIED = false;
 constexpr const char* PROFILE_ID = "aquasense-user-calibration-v1";
 constexpr int ADC_MAX = 4095;
 constexpr float ADC_REFERENCE_VOLTS = 3.3f;

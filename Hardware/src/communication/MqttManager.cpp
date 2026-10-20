@@ -12,6 +12,16 @@
 #include "secrets/Secrets.example.h"
 #endif
 
+#if defined(AQUASENSE_PRODUCTION_BUILD)
+static_assert(DeviceConfig::mqttTlsConfigured(DeviceConfig::MQTT_TLS_ENABLED, DeviceConfig::MQTT_ROOT_CA,
+    Secrets::MQTT_USERNAME, Secrets::MQTT_PASSWORD),
+    "Production MQTT requires a trusted CA and unique broker credentials in local configuration.");
+static_assert(DeviceConfig::validMqttDeviceId(DeviceConfig::DEVICE_ID),
+    "Production MQTT requires a topic-safe device ID.");
+static_assert(DeviceConfig::mqttHostConfigured(DeviceConfig::MQTT_HOST),
+    "Production MQTT requires a real reachable broker host.");
+#endif
+
 namespace {
 constexpr size_t COMMAND_BUFFER_BYTES = 1024;
 constexpr size_t STATE_BUFFER_BYTES = 2048;
@@ -86,6 +96,20 @@ MqttManager::MqttManager() : client(transport) {}
 
 bool MqttManager::begin() {
     if (task != nullptr) return true;
+    if (!DeviceConfig::mqttCredentialsPaired(Secrets::MQTT_USERNAME, Secrets::MQTT_PASSWORD)) {
+        Serial.println("MQTT disabled: configure both broker username and password."); return false;
+    }
+    if (DeviceConfig::MQTT_TLS_ENABLED) {
+        if (!DeviceConfig::mqttHostConfigured(DeviceConfig::MQTT_HOST) || !DeviceConfig::MQTT_PORT ||
+            !DeviceConfig::mqttTlsConfigured(true, DeviceConfig::MQTT_ROOT_CA, Secrets::MQTT_USERNAME, Secrets::MQTT_PASSWORD)) {
+            Serial.println("MQTT disabled: TLS CA and unique broker credentials are required."); return false;
+        }
+        tlsTransport.setCACert(DeviceConfig::MQTT_ROOT_CA);
+        client.setClient(tlsTransport);
+    }
+    if (!DeviceConfig::deviceIdIsConfigured(DeviceConfig::DEVICE_ID) || !DeviceConfig::validMqttDeviceId(DeviceConfig::DEVICE_ID)) {
+        Serial.println("MQTT disabled: configure a unique device ID."); return false;
+    }
     if (!Secrets::DEVICE_KEY[0]) Serial.println("MQTT actuator commands disabled: DEVICE_KEY is empty; telemetry remains enabled.");
     client.setServer(DeviceConfig::MQTT_HOST, DeviceConfig::MQTT_PORT);
     client.setSocketTimeout(DeviceConfig::MQTT_SOCKET_TIMEOUT_SECONDS);
@@ -177,17 +201,23 @@ void MqttManager::onMessage(const char* topic, const uint8_t* payload, unsigned 
 
 bool MqttManager::publishReadings(const SensorReadings& reading) {
     const auto publishSensor = [&](const char* name, bool sensorConnected, bool valid, float value, uint8_t decimals) {
-        char topic[40], statusTopic[48], valueText[24];
-        snprintf(topic, sizeof(topic), "aquasense/%s", name);
-        snprintf(statusTopic, sizeof(statusTopic), "aquasense/%s/status", name);
+        char topic[160], statusTopic[176], valueText[24];
+        if (DeviceConfig::MQTT_DEVICE_SCOPED_TOPICS) {
+            snprintf(topic, sizeof(topic), "aquasense/%s/telemetry/%s", DeviceConfig::DEVICE_ID, name);
+            snprintf(statusTopic, sizeof(statusTopic), "aquasense/%s/telemetry/%s/status", DeviceConfig::DEVICE_ID, name);
+        } else {
+            snprintf(topic, sizeof(topic), "aquasense/%s", name);
+            snprintf(statusTopic, sizeof(statusTopic), "aquasense/%s/status", name);
+        }
         if (sensorConnected && valid) snprintf(valueText, sizeof(valueText), decimals == 1 ? "%.1f" : "%.2f", double(value));
-        else snprintf(valueText, sizeof(valueText), "DISCONNECTED");
-        const bool effectiveConnected = sensorConnected && valid;
+        else snprintf(valueText, sizeof(valueText), sensorConnected ? "UNVERIFIED" : "DISCONNECTED");
         const bool valuePublished = client.publish(topic, valueText, true);
-        const bool statusPublished = client.publish(statusTopic, effectiveConnected ? "CONNECTED" : "DISCONNECTED", true);
+        const bool statusPublished = client.publish(statusTopic, sensorConnected ? "CONNECTED" : "DISCONNECTED", true);
         return valuePublished && statusPublished;
     };
-    bool success = client.publish("aquasense/device-id", DeviceConfig::DEVICE_ID, true);
+    bool success = true;
+    if (!DeviceConfig::MQTT_DEVICE_SCOPED_TOPICS)
+        success = client.publish("aquasense/device-id", DeviceConfig::DEVICE_ID, true);
     success = publishSensor("orp", reading.orpConnected, reading.orpValid, reading.orpMv, 1) && success;
     success = publishSensor("temperature", reading.temperatureConnected, reading.temperatureValid, reading.temperatureC, 2) && success;
     success = publishSensor("ph", reading.phConnected, reading.phValid, reading.ph, 2) && success;
@@ -195,13 +225,21 @@ bool MqttManager::publishReadings(const SensorReadings& reading) {
     // `turbidity` as raw ADC and `turbidity-ntu` as calibrated NTU.
     success = publishSensor("turbidity-ntu", reading.turbidityConnected, reading.turbidityValid, reading.turbidityRaw, 1) && success;
     char valueText[24];
-    if (reading.turbidityConnected && reading.turbidityValid)
+    if (reading.turbidityConnected)
         snprintf(valueText, sizeof(valueText), "%.0f", double(reading.turbidityDiagnostics.rawAdc));
     else
         snprintf(valueText, sizeof(valueText), "DISCONNECTED");
-    const bool rawValuePublished = client.publish("aquasense/turbidity", valueText, true);
-    const bool rawStatusPublished = client.publish("aquasense/turbidity/status",
-        reading.turbidityConnected && reading.turbidityValid ? "CONNECTED" : "DISCONNECTED", true);
+    char rawTopic[160], rawStatusTopic[176];
+    if (DeviceConfig::MQTT_DEVICE_SCOPED_TOPICS) {
+        snprintf(rawTopic, sizeof(rawTopic), "aquasense/%s/telemetry/turbidity", DeviceConfig::DEVICE_ID);
+        snprintf(rawStatusTopic, sizeof(rawStatusTopic), "aquasense/%s/telemetry/turbidity/status", DeviceConfig::DEVICE_ID);
+    } else {
+        strlcpy(rawTopic, "aquasense/turbidity", sizeof(rawTopic));
+        strlcpy(rawStatusTopic, "aquasense/turbidity/status", sizeof(rawStatusTopic));
+    }
+    const bool rawValuePublished = client.publish(rawTopic, valueText, true);
+    const bool rawStatusPublished = client.publish(rawStatusTopic,
+        reading.turbidityConnected ? "CONNECTED" : "DISCONNECTED", true);
     success = rawValuePublished && rawStatusPublished && success;
     return success;
 }
@@ -245,12 +283,16 @@ void MqttManager::run() {
         if (xQueueReceive(snapshots, &latest, 0) == pdTRUE) { hasSnapshot = true; staleStatusPublished = false; }
         xQueueReceive(states, &latestState, 0);
         const uint32_t nowMs = millis();
-        if (WiFi.status() != WL_CONNECTED) { transport.stop(); connected.store(false); }
+        if (WiFi.status() != WL_CONNECTED) {
+            if (DeviceConfig::MQTT_TLS_ENABLED) tlsTransport.stop(); else transport.stop();
+            connected.store(false);
+        }
         else {
             if (!client.connected() && (!attemptedConnection || uint32_t(nowMs - lastReconnectMs) >= DeviceConfig::MQTT_RECONNECT_INTERVAL_MS)) {
                 attemptedConnection = true; connected.store(false);
-                const bool ok = Secrets::MQTT_USERNAME[0] == '\0' ? client.connect(DeviceConfig::MQTT_CLIENT_ID) :
-                    client.connect(DeviceConfig::MQTT_CLIENT_ID, Secrets::MQTT_USERNAME, Secrets::MQTT_PASSWORD);
+                const bool ok = Secrets::MQTT_USERNAME[0]
+                    ? client.connect(DeviceConfig::MQTT_CLIENT_ID, Secrets::MQTT_USERNAME, Secrets::MQTT_PASSWORD)
+                    : client.connect(DeviceConfig::MQTT_CLIENT_ID);
                 lastReconnectMs = millis();
                 if (ok) {
                     char topic[96]; snprintf(topic, sizeof(topic), "aquasense/%s/command", DeviceConfig::DEVICE_ID);

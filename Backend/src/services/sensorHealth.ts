@@ -2,10 +2,12 @@
 export const SENSOR_NAMES = ['temperature', 'ph', 'turbidity', 'orp'] as const;
 export type SensorName = typeof SENSOR_NAMES[number];
 export type HealthState = 'VALID' | 'INVALID' | 'SENSOR_ERROR' | 'MISSING' | 'STALE' | 'UNSTABLE' | 'SATURATED' | 'POSSIBLY_STUCK';
+export type ConnectionState = 'CONNECTED' | 'DISCONNECTED' | 'UNKNOWN';
 export interface SensorHealth {
   name: SensorName; value: number | null; rawAdc: number | null; voltage: number | null;
   adcMinimum: number|null; adcMaximum: number|null; adcLast: number|null; clippedSamples: number|null;
   unit: string; timestamp: string | null; health: HealthState; valid: boolean;
+  connection: ConnectionState;
   rawAvailable: boolean; measurementValid: boolean;
   stability: 'COLLECTING' | 'STABLE' | 'UNSTABLE'; calibration: 'REQUIRED' | 'CALIBRATED';
   reason: string; readyForCalibration: boolean; communication: boolean;
@@ -38,10 +40,13 @@ export class SensorValidator {
   validate(device: string, name: SensorName, input: unknown, timestamp: unknown, diagnostics: any = {}, now = Date.now(), unit?: string): SensorHealth {
     const value = numeric(input), at = timestampMs(timestamp);
     const rawAdc = numeric(diagnostics?.rawAdc), voltage = numeric(diagnostics?.voltage);
+    const connection: ConnectionState = typeof diagnostics?.connected === 'boolean'
+      ? diagnostics.connected ? 'CONNECTED' : 'DISCONNECTED'
+      : value !== null || rawAdc !== null ? 'CONNECTED' : 'UNKNOWN';
     const result: SensorHealth = { name, value, rawAdc, voltage, unit: unit || ({temperature:'C',ph:'pH',turbidity:'unknown',orp:'mV'}[name]),
       adcMinimum:numeric(diagnostics?.adcMinimum),adcMaximum:numeric(diagnostics?.adcMaximum),adcLast:numeric(diagnostics?.adcLast),clippedSamples:numeric(diagnostics?.clippedSamples),
       timestamp: Number.isFinite(at) ? new Date(at).toISOString() : null, health:'VALID', valid:true, rawAvailable:rawAdc!==null, measurementValid:value!==null,
-      stability:'COLLECTING', calibration:'REQUIRED', reason:'', readyForCalibration:false, communication:value !== null || rawAdc !== null,
+      stability:'COLLECTING', calibration:'REQUIRED', connection, reason:'', readyForCalibration:false, communication:connection === 'CONNECTED',
       adcRange:rawAdc === null ? 'UNKNOWN' : 'PASS', stuckDurationMs:0,
       window:{count:0,min:null,max:null,average:null,range:null,standardDeviation:null} };
     const fail = (health: HealthState, reason: string) => { result.health = health; result.valid = false; result.reason = reason; };

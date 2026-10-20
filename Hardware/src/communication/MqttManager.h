@@ -1,5 +1,6 @@
 #pragma once
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <atomic>
 #include <freertos/FreeRTOS.h>
@@ -42,6 +43,7 @@ private:
 
     // Only the worker touches network objects. PubSubClient callback only validates and queues.
     WiFiClient transport;
+    WiFiClientSecure tlsTransport;
     PubSubClient client;
     TaskHandle_t task = nullptr;
     StaticQueue_t queueStorage;

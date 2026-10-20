@@ -2,7 +2,7 @@ import test, { afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
-import { Op } from 'sequelize';
+import { Op, UniqueConstraintError } from 'sequelize';
 import type { AddressInfo } from 'node:net';
 import hardwareRoutes from '../api/v1/routes/hardware';
 import { ackCanonical, commandCanonical, hardwareCommandSchema, hardwareStateSchema, hardwareSyncSchema, parseSignedAck, parseSignedCommand, signCanonical, verifyCanonical, type HardwareState } from './hardwareProtocol';
@@ -237,15 +237,67 @@ test('signed actuator command and state ACK canonical strings verify HMAC-SHA256
 
 test('MQTT ACK persists its nested state and acknowledges only the matching scoped command', async () => {
   let status = 'PENDING';
-  const command = { action: 'DRAIN', status, async update(values: { status: string; result: string }) { status = values.status; } };
+  const command = { action: 'DRAIN', status, expiresAt: new Date(200_000), async update(values: { status: string; result: string }) { status = values.status; } };
   const find = mock.method(HardwareCommand, 'findOne', async () => command);
-  const upsert = mock.method(HardwareDeviceState, 'upsert', async () => [state, true]);
+  mock.method(HardwareDeviceState, 'findByPk', async () => null);
+  mock.method(HardwareDeviceState, 'update', async () => [0]);
+  const create = mock.method(HardwareDeviceState, 'create', async () => state as any);
   const ack = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'DRAIN', result: 'accepted',
     reportedAt: 123456, state, signature: 'verified-by-mqtt-listener' };
   assert.equal(await hardwareService.acceptMqttAck('owner', ack), true);
   assert.equal(status, 'ACKED');
   assert.deepEqual(find.mock.calls[0].arguments[0]?.where, { id, userId: 'owner', deviceId: 'board' });
-  assert.deepEqual(upsert.mock.calls[0].arguments[0], { deviceId: 'board', state, receivedAt: new Date(123456) });
+  assert.deepEqual(create.mock.calls[0].arguments[0], { deviceId: 'board', state, receivedAt: new Date(123456) });
+});
+
+test('MQTT ACK rejects expired commands and cannot roll device state backward', async () => {
+  const ack = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'DRAIN', result: 'accepted',
+    reportedAt: 123456, state, signature: 'already-verified' };
+  const expired = { action: 'DRAIN', status: 'EXPIRED', expiresAt: new Date(200_000) };
+  mock.method(HardwareCommand, 'findOne', async () => expired);
+  mock.method(HardwareDeviceState, 'update', async () => [0]);
+  const create = mock.method(HardwareDeviceState, 'create', async () => state as any);
+  assert.equal(await hardwareService.acceptMqttAck('owner', ack), false);
+  assert.equal(create.mock.callCount(), 0);
+
+  mock.restoreAll();
+  const pending = { action: 'DRAIN', status: 'PENDING', expiresAt: new Date(200_000), async update() { this.status = 'ACKED'; } };
+  mock.method(HardwareCommand, 'findOne', async () => pending);
+  const staleWrite = mock.method(HardwareDeviceState, 'update', async () => [0]);
+  mock.method(HardwareDeviceState, 'findByPk', async () => ({ receivedAt: new Date(200_000) }));
+  mock.method(HardwareDeviceState, 'create', async () => { throw new UniqueConstraintError({ errors: [] }); });
+  assert.equal(await hardwareService.acceptMqttAck('owner', ack), true);
+  assert.equal(staleWrite.mock.callCount(), 1);
+});
+
+test('concurrent ACK state writes use a database conditional update so older ACK cannot win last', async () => {
+  let receivedAt = new Date(100_000);
+  let currentState = state;
+  const writes: Date[] = [];
+  mock.method(HardwareCommand, 'findOne', async () => ({ action: 'DRAIN', status: 'ACKED', expiresAt: new Date(500_000) }));
+  mock.method(HardwareDeviceState, 'findByPk', async () => ({ receivedAt }));
+  mock.method(HardwareDeviceState, 'update', async (values: { state: typeof state; receivedAt: Date }, options: any) => {
+    assert.deepEqual(options.where.deviceId, 'board');
+    assert.ok(Object.getOwnPropertySymbols(options.where.receivedAt).length > 0);
+    // Simulate atomic UPDATE ... WHERE received_at < incoming timestamp.
+    if (values.receivedAt.getTime() === 200_000) await new Promise(resolve => setTimeout(resolve, 5));
+    if (values.state.drainPump) {
+      receivedAt = values.receivedAt;
+      currentState = values.state;
+      writes.push(values.receivedAt);
+      return [1];
+    }
+    return [0];
+  });
+  mock.method(HardwareDeviceState, 'create', async () => { throw new Error('conditional update unexpectedly missed an existing row'); });
+  const oldAck = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'DRAIN', result: 'accepted',
+    reportedAt: 200_000, state, signature: 'verified' };
+  const newerState = { ...state, drainPump: true };
+  const newAck = { ...oldAck, reportedAt: 300_000, state: newerState };
+  await Promise.all([hardwareService.acceptMqttAck('owner', oldAck), hardwareService.acceptMqttAck('owner', newAck)]);
+  assert.equal(receivedAt.getTime(), 300_000);
+  assert.deepEqual(currentState, newerState);
+  assert.deepEqual(writes.map(date => date.getTime()), [300_000]);
 });
 
 test('MQTT actuator publish signs command and explicitly disables retention', async () => {

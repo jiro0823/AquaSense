@@ -8,6 +8,7 @@ export function SensorHealthPanel({reading}:{reading:WaterQualityReading|null}) 
         const s=health?.[name];
         return <div key={name}>
           <strong>{name === 'ph' ? 'pH' : name.toUpperCase()}</strong>
+          <p>Connection: {s?.connection || (s?.communication ? 'CONNECTED' : 'UNKNOWN')}</p>
           <p>{s?.valid && s.value!==null ? `${s.value.toFixed(2)} ${s.unit} · ${s.calibration==='CALIBRATED' && s.stability==='STABLE' ? 'qualified' : 'reported; calibration required'}`:'--'} · {s?.health || 'MISSING'}</p>
           {name==='orp' && s?.health==='MISSING' && s.value!==null && s.reason.includes('not commissioned') &&
             <p className="text-amber-800">Device-reported diagnostic: {s.value.toFixed(2)} mV · uncalibrated, not a validated measurement</p>}

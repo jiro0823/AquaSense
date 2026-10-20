@@ -28,6 +28,10 @@ bool hasCriticalSensorReading(const SensorReadings& readings, uint32_t nowMs) {
 }
 
 void SystemController::begin() {
+    if (!DeviceConfig::COMMAND_CONTROL_ENABLED) {
+        storageReady = false;
+        return;
+    }
     storageReady = storage.begin("aq-commands", false);
     if (!storageReady) return;
     // Keep the prior single-ID key in the duplicate check across firmware upgrades.
@@ -60,6 +64,10 @@ bool SystemController::rememberHandled(const char* id) {
 
 CommandReceipt SystemController::handle(const Command& command, uint32_t nowMs) {
     CommandReceipt receipt{}; strlcpy(receipt.id, command.id, sizeof(receipt.id)); receipt.feedingSource = command.feedingSource;
+    if (!DeviceConfig::COMMAND_CONTROL_ENABLED || !DeviceConfig::ACTUATOR_CONTROL_ENABLED) {
+        strlcpy(receipt.result, "offline_calibration_mode", sizeof(receipt.result));
+        return receipt;
+    }
     const char* result;
     const bool knownAction = [&]() {
         switch (command.action) {
@@ -115,12 +123,14 @@ const char* SystemController::dispatch(const Command& command, uint32_t nowMs) {
     }
 }
 void SystemController::update(const SensorReadings& readings, uint32_t nowMs) {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return;
     water.update(readings, nowMs);
     aerator.update(readings, nowMs);
     feeder.update(nowMs);
     buzzer.update(hasCriticalSensorReading(readings, nowMs), nowMs);
 }
 void SystemController::stopRelayActuators(uint32_t nowMs) {
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return;
     water.setAutomatic(false, nowMs);
     aerator.setManual(false);
     relays.allOff();

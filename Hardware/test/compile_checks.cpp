@@ -1,4 +1,5 @@
 #include "sensors/SensorConversions.h"
+#include "config/CalibrationConfig.h"
 #include "config/ActuatorConfig.h"
 #include "config/Pins.h"
 #include "config/DeviceConfig.h"
@@ -66,24 +67,60 @@ static_assert(!SensorSampleValidity::current(true, false, true) &&
 static_assert(!SensorSampleValidity::current(true, false, true) &&
               SensorSampleValidity::current(true, true, true),
               "ORP invalid sample clears validity while debounced connected; next good sample recovers");
+static_assert(!SensorSampleValidity::analog(false, false, true, true) &&
+              SensorSampleValidity::analog(true, false, true, true) &&
+              SensorSampleValidity::analog(false, true, true, true) &&
+              !SensorSampleValidity::analog(true, false, false, true) &&
+              !SensorSampleValidity::analog(true, false, true, false),
+              "Unverified analog estimates are valid only in offline calibration mode and only for good acquisitions");
 static_assert(!SensorConversions::temperaturePlausible(-127.0f), "Disconnected DS18B20 is invalid");
 static_assert(!SensorConversions::phPlausible(14.1f), "Reject impossible pH");
 static_assert(uint32_t(uint32_t(15) - uint32_t(0xfffffff0)) == 31, "Elapsed timing must survive millis rollover");
 static_assert(Pins::PH == 35 && Pins::TURBIDITY == 34 && Pins::ORP == 32 && Pins::TEMPERATURE == 4,
               "Supplied water-monitor wiring regression");
+static_assert(!CalibrationConfig::ANALOG_CONVERSION_VERIFIED,
+              "Analog conversions must remain unverified until hardware calibration evidence exists");
+#if defined(AQUASENSE_OFFLINE_CALIBRATION_MODE)
+static_assert(DeviceConfig::OFFLINE_CALIBRATION_MODE, "Calibration firmware target must opt in explicitly");
+static_assert(!DeviceConfig::NETWORK_SERVICES_ENABLED, "Calibration firmware must keep network services disabled");
+static_assert(!DeviceConfig::ACTUATOR_CONTROL_ENABLED, "Calibration firmware must inhibit actuator APIs");
+static_assert(!DeviceConfig::COMMAND_CONTROL_ENABLED, "Calibration firmware must reject command control");
+static_assert(!DeviceConfig::SCHEDULE_PERSISTENCE_ENABLED, "Calibration firmware must not access persisted schedules");
+#else
+static_assert(!DeviceConfig::OFFLINE_CALIBRATION_MODE, "Networked firmware targets remain outside calibration mode");
+static_assert(DeviceConfig::NETWORK_SERVICES_ENABLED && DeviceConfig::ACTUATOR_CONTROL_ENABLED &&
+              DeviceConfig::COMMAND_CONTROL_ENABLED && DeviceConfig::SCHEDULE_PERSISTENCE_ENABLED,
+              "Normal firmware policy gates preserve existing service and actuator paths");
+#endif
 static_assert(DeviceConfig::ADC_SAMPLE_COUNT == 12, "Match reference ADC averaging sample count");
 static_assert(DeviceConfig::SENSOR_READ_INTERVAL_MS == 1000 && DeviceConfig::MQTT_PUBLISH_INTERVAL_MS == 5000,
               "Match reference sensor and MQTT intervals");
 static_assert(DeviceConfig::WIFI_RECONNECT_INTERVAL_MS == 3000 && DeviceConfig::WIFI_CHECK_INTERVAL_MS == 5000 &&
               DeviceConfig::MQTT_RECONNECT_INTERVAL_MS == 3000,
               "Match reference nonblocking connection retry/check intervals");
-static_assert(DeviceConfig::backendTransportConfigured("https://backend.example/api/v1", "trusted-ca", false),
+static_assert(DeviceConfig::backendTransportConfigured("https://aquasense-backend.internal/api/v1", "trusted-ca", false),
               "HTTPS requires a configured trusted CA");
-static_assert(!DeviceConfig::backendTransportConfigured("https://backend.example/api/v1", "", true),
+static_assert(!DeviceConfig::backendTransportConfigured("https://aquasense-backend.internal/api/v1", "", true),
               "A development HTTP opt-in cannot bypass the HTTPS CA requirement");
-static_assert(!DeviceConfig::backendTransportConfigured("http://backend.example/api/v1", "", false),
+static_assert(!DeviceConfig::backendTransportConfigured("http://aquasense-backend.internal/api/v1", "", false),
               "HTTP is disabled without the explicit development opt-in");
-static_assert(DeviceConfig::backendTransportConfigured("http://backend.example/api/v1", "", true),
+static_assert(DeviceConfig::backendTransportConfigured("http://aquasense-backend.internal/api/v1", "", true),
               "HTTP is permitted only when the caller supplies the development-only gate");
 static_assert(!DeviceConfig::backendTransportConfigured("https:///api/v1", "trusted-ca", false),
               "HTTPS configuration requires an authority");
+static_assert(!DeviceConfig::backendTransportConfigured("https://replace-with-backend/api/v1", "trusted-ca", false),
+              "Placeholder backend addresses must fail closed even when a CA is present");
+static_assert(!DeviceConfig::backendTransportConfigured("https://localhost:5001/api/v1", "trusted-ca", false),
+              "An ESP32 cannot reach a host-local loopback address");
+static_assert(!DeviceConfig::deviceIdIsConfigured("replace-with-registered-device-id"),
+              "Placeholder device IDs must not start backend control");
+static_assert(DeviceConfig::validMqttDeviceId("esp32-feeder-1") && !DeviceConfig::validMqttDeviceId("tank/one"),
+              "MQTT device IDs must be safe single topic segments");
+static_assert(DeviceConfig::mqttCredentialsPaired("", "") && !DeviceConfig::mqttCredentialsPaired("user", ""),
+              "MQTT credentials must be absent or configured as a pair");
+static_assert(DeviceConfig::mqttTlsConfigured(true, "trusted-ca", "user", "password") &&
+              !DeviceConfig::mqttTlsConfigured(true, "", "user", "password"),
+              "MQTT TLS requires a trusted CA and broker credentials");
+static_assert(DeviceConfig::mqttHostConfigured("mqtt.aquasense.internal") &&
+              !DeviceConfig::mqttHostConfigured("replace-with-private-mqtt-host"),
+              "Secure MQTT mode requires a configured broker host");

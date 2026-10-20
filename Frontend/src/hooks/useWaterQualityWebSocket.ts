@@ -63,6 +63,7 @@ export const useWaterQualityWebSocket = (options: UseWaterQualityWebSocketOption
     try {
       socketRef.current = io(url, {
         transports: ['websocket', 'polling'],
+        withCredentials: true,
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 10000,

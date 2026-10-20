@@ -94,7 +94,7 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
     } else if (!CalibrationConfig::ANALOG_CONVERSION_VERIFIED && !readings.calibrated) {
         const float phEstimate = SensorConversions::phFromVoltage(readings.phDiagnostics.voltage);
         if (isfinite(phEstimate) && SensorConversions::phPlausible(phEstimate))
-            snprintf(row, sizeof(row), "pH: %.2f PRE-CAL", double(phEstimate));
+            snprintf(row, sizeof(row), "PH: %.2f", double(phEstimate));
         else
             snprintf(row, sizeof(row), "pH: INVALID");
         writeRow(0, row);
@@ -125,7 +125,12 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
         snprintf(row, sizeof(row), "Turb ADC %.0f FAIL", double(readings.turbidityDiagnostics.rawAdc));
         writeRow(2, row);
     } else {
-        snprintf(row, sizeof(row), "Turb: ADC %.0f", double(readings.turbidityDiagnostics.rawAdc));
+        const float turbidityEstimate = SensorConversions::turbidityFromAdc(
+            int(readings.turbidityDiagnostics.rawAdc));
+        if (isfinite(turbidityEstimate))
+            snprintf(row, sizeof(row), "Turbidity: %.1f", double(turbidityEstimate));
+        else
+            snprintf(row, sizeof(row), "Turb: INVALID");
         writeRow(2, row);
     }
     if (!hasSample) {
@@ -137,7 +142,11 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
         snprintf(row, sizeof(row), "ORP ADC %.0f FAIL", double(readings.orpDiagnostics.rawAdc));
         writeRow(3, row);
     } else {
-        snprintf(row, sizeof(row), "ORP: ADC %.0f", double(readings.orpDiagnostics.rawAdc));
+        const float orpEstimate = SensorConversions::orpFromVoltage(readings.orpDiagnostics.voltage);
+        if (isfinite(orpEstimate))
+            snprintf(row, sizeof(row), "ORP: %.1f mV", double(orpEstimate));
+        else
+            snprintf(row, sizeof(row), "ORP: INVALID");
         writeRow(3, row);
     }
 #else

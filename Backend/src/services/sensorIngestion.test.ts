@@ -8,7 +8,8 @@ import {waterAlertNotificationService} from './waterAlertNotification.service';
 import {MQTTService} from './mqttService';
 import {logger} from '../utils/logger';
 import {waterReadingSchema,sensorIngestSchema} from '../middleware/validate';
-import {SensorValidator, timestampMs} from './sensorHealth';
+import {SensorValidator, timestampMs, parseProvisionalSensorValue} from './sensorHealth';
+import {config as appConfig} from '../config/config';
 afterEach(()=>mock.restoreAll());
 function storage() {
   const rows:any[]=[];
@@ -197,6 +198,53 @@ test('new frame after restart is ordered against persisted device history',async
 test('raw burst diagnostics survive production storage',async()=>{
   storage(); const r=await sensorReadingService.ingest('burst-storage',{ph:8,sensors:{ph:{rawAdc:3000,voltage:2.4,adcMinimum:2999,adcMaximum:3001,adcLast:3000,clippedSamples:0}}});
   assert.equal(r.sensorHealth.ph.adcMinimum,2999);assert.equal(r.sensorHealth.ph.adcMaximum,3001);assert.equal(r.sensorHealth.ph.adcLast,3000);
+});
+test('provisional diagnostics persist separately from validated values and never change eligibility',async()=>{
+  const original={...appConfig.mqtt};
+  Object.assign(appConfig.mqtt,{brokerUrl:'mqtt://broker.hivemq.com:1883',deviceScopedTopics:true,topicNamespace:'aquasense-dev',actuatorCommandsEnabled:false,username:undefined,password:undefined});
+  try {
+    storage();
+    const reading=await sensorReadingService.ingest('provisional-storage',{temperature:null,ph:null,turbidity:null,orp:null,
+      sensors:{ph:{sampleAgeMs:10,provisional:{value:7.65,unit:'pH',status:'UNVERIFIED'}},
+        turbidity:{sampleAgeMs:11,provisional:{value:120,unit:'NTU',status:'UNVERIFIED'}},
+        orp:{sampleAgeMs:12,provisional:{value:250,unit:'mV',status:'UNVERIFIED'}}}});
+    assert.equal(reading.ph,null);assert.equal(reading.turbidity,null);assert.equal(reading.orp,null);
+    assert.equal(reading.sensorHealth.ph.valid,false);assert.equal(reading.sensorHealth.ph.health,'MISSING');
+    assert.deepEqual(reading.sensorHealth.ph.provisional,{value:7.65,unit:'pH',status:'UNVERIFIED'});
+    assert.deepEqual(reading.sensorHealth.turbidity.provisional,{value:120,unit:'NTU',status:'UNVERIFIED'});
+    assert.deepEqual(reading.sensorHealth.orp.provisional,{value:250,unit:'mV',status:'UNVERIFIED'});
+    assert.equal(reading.waterQuality.ph,'UNAVAILABLE');
+    assert.equal(reading.status,'unavailable');
+    assert.equal(reading.ammonia,null);
+    assert.equal(reading.speciation.status,'UNAVAILABLE');
+    const latest=await sensorReadingService.getLatestReading();
+    assert.deepEqual(latest?.sensorHealth.ph.provisional,{value:7.65,unit:'pH',status:'UNVERIFIED'});
+  } finally { Object.assign(appConfig.mqtt,original); }
+});
+test('central ingestion rejects provisional diagnostics outside the non-production public dev profile',async()=>{
+  const mqttOriginal={...appConfig.mqtt}, nodeEnv=appConfig.server.nodeEnv;
+  Object.assign(appConfig.mqtt,{brokerUrl:'mqtt://broker.hivemq.com:1883',deviceScopedTopics:true,topicNamespace:'aquasense-dev',actuatorCommandsEnabled:false,username:undefined,password:undefined});
+  appConfig.server.nodeEnv='production';
+  try {
+    const rows=storage();
+    await assert.rejects(sensorReadingService.ingest('provisional-production',{temperature:null,ph:null,
+      sensors:{ph:{provisional:{value:7.65,unit:'pH',status:'UNVERIFIED'}}}}),/public development MQTT profile/);
+    assert.equal(rows.length,0);
+  } finally { Object.assign(appConfig.mqtt,mqttOriginal); appConfig.server.nodeEnv=nodeEnv; }
+});
+test('provisional diagnostics reject malformed values, units, status, and additional properties',()=>{
+  assert.deepEqual(parseProvisionalSensorValue({value:7.65,unit:'pH',status:'UNVERIFIED'},'pH'),
+    {value:7.65,unit:'pH',status:'UNVERIFIED'});
+  for(const invalid of [
+    {value:'7.65',unit:'pH',status:'UNVERIFIED'},
+    {value:Number.NaN,unit:'pH',status:'UNVERIFIED'},
+    {value:7.65,unit:'NTU',status:'UNVERIFIED'},
+    {value:7.65,unit:'pH',status:'VALID'},
+    {value:7.65,unit:'pH',status:'UNVERIFIED',valid:true},
+    [],
+  ]) assert.throws(()=>parseProvisionalSensorValue(invalid,'pH'),/Malformed provisional/);
+  assert.equal(parseProvisionalSensorValue(null,'pH'),null);
+  assert.equal(parseProvisionalSensorValue(undefined,'pH'),null);
 });
 test('ingestion uses the same timestamp normalization rules for ISO and millisecond epochs',async()=>{
   const rows=storage(), now=Date.now();

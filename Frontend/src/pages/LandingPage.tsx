@@ -102,12 +102,12 @@ const LandingPage: React.FC = () => {
             ) : isConnected ? (
               <div className="flex items-center gap-2 text-green-200 bg-green-900/50 badge">
                 <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                <span className="font-semibold">System Ready</span>
+                <span className="font-semibold">Backend API Online</span>
               </div>
             ) : (
               <div className="flex items-center gap-2 text-red-200 bg-red-900/50 badge">
                 <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse"></span>
-                <span className="font-semibold">System Offline</span>
+                <span className="font-semibold">Backend API Offline</span>
               </div>
             )}
           </div>

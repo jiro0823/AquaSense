@@ -2,13 +2,36 @@
 
 ## Integrated water-monitor
 
-Follow [backend/device setup](backend-control.md) first. The configuration still
-contains an example API address, empty device key, and diagram-backed relay load
-assignments. Firmware polarity is configured active-LOW from the reported module
-intent, but physical polarity and channel mapping remain unverified; the relay
-output commissioning gate is false. Pump target/max runtimes and cooldown
-are zero, so pump operation remains disabled. Commission bounded timings only
-after supervised flow-rate and physical safety checks.
+Follow [backend/device setup](backend-control.md) first. The example API address
+and empty device key are placeholders. Logical actuator GPIO roles are configured
+in source, but the physical relay input-to-K3/K4 wiring and active-LOW behavior
+remain unverified. The relay output gate defaults off and pump target/max runtimes
+and cooldown default to zero, so pump operation remains disabled. Do not enable
+the gate or supply runtime values before supervised electrical checks and measured
+flow/runtime limits.
+
+## Local actuator commissioning settings
+
+The gate is deliberate and local. Only after the user's approval for supervised
+testing and physical OFF/polarity/channel checks, edit the ignored
+`Hardware/include/config/device_config.local.h` (created from the example) with:
+
+```cpp
+#define AQUASENSE_RELAY_OUTPUTS_ENABLED 1
+#define AQUASENSE_FILL_TARGET_RUNTIME_MS <measured-fill-ms>
+#define AQUASENSE_FILL_MAX_RUNTIME_MS <measured-fill-limit-ms>
+#define AQUASENSE_DRAIN_TARGET_RUNTIME_MS <measured-drain-ms>
+#define AQUASENSE_DRAIN_MAX_RUNTIME_MS <measured-drain-limit-ms>
+#define AQUASENSE_WATER_EXCHANGE_SETTLING_MS <measured-settle-ms>
+#define AQUASENSE_PUMP_COOLDOWN_MS <measured-cooldown-ms>
+```
+
+Replace each placeholder with a positive measured integer; each target must be
+strictly below its corresponding maximum, each maximum is at most 300,000 ms,
+and settlement/cooldown must be positive for water exchange. The backend/UI
+manual request cap is 60,000 ms. Keep `WATER_POLICY_CONFIGURED` false until its
+separate policy requirements are commissioned. This repository change did not
+create that local file or enable the gate.
 
 From the repository root in a PlatformIO terminal:
 
@@ -23,7 +46,11 @@ Replace COM5 with the verified port. Close an existing serial monitor before
 upload. Confirm the board matches classic esp32dev with 4 MB flash. Keep relay
 loads unpowered until polarity and reset/OFF state are measured and safe,
 supervised timing limits are commissioned for the tank and pump flow.
-The integrated servo initializes to its configured HOME position on GPIO13.
+The integrated servo signal is GPIO18; firmware does not attach or move it at
+boot. A valid feed request attaches it and starts the configured cycle. Power the
+MG996R from a suitable external supply and connect that supply ground to ESP32
+ground; GPIO18 is signal only. Verify the servo signal and travel with the
+mechanism unloaded before attaching food or moving parts.
 
 Private credentials belong in include/secrets/Secrets.h, which replaces the whole
 example header. Keep firmware binaries private too: credentials are compiled in.

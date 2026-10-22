@@ -5,7 +5,7 @@
  */
 
 import mqtt, { MqttClient } from 'mqtt';
-import { numeric } from './sensorHealth';
+import { isPublicDevelopmentTelemetryProfile, numeric, parseProvisionalSensorValue } from './sensorHealth';
 import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
 import { waterAlertNotificationService } from './waterAlertNotification.service';
@@ -23,6 +23,8 @@ interface MQTTConfig {
   password?: string;
   caCertificate?: string;
   deviceScopedTopics: boolean;
+  topicNamespace: string;
+  actuatorCommandsEnabled: boolean;
   clientId?: string;
   topics: {
     readings: string;
@@ -40,12 +42,13 @@ interface TelemetryAssembly {
   sensorTimestamps: Record<string, string>;
   latestDoReceivedAt: number;
   latestOrpReceivedAt: number;
+  frameMode: boolean;
 }
 
 const newTelemetryAssembly = (): TelemetryAssembly => ({
   latestSensorPayload: {}, latestTurbidityUnit: 'raw_adc', latestRawTurbidity: null,
   pendingBatchFlags: { temperature: false, ph: false, turbidity: false },
-  sensorTimestamps: {}, latestDoReceivedAt: 0, latestOrpReceivedAt: 0,
+  sensorTimestamps: {}, latestDoReceivedAt: 0, latestOrpReceivedAt: 0, frameMode: false,
 });
 
 const safeBrokerUrl = (value: string): string => {
@@ -57,6 +60,8 @@ export class MQTTService {
   private client: MqttClient | null = null;
   private config: MQTTConfig;
   private isConnected = false;
+  private activeSubscribedTopics: string[] = [];
+  private subscriptionGeneration = 0;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private readonly telemetryByDevice = new Map<string, TelemetryAssembly>();
   private latestLegacyDeviceId = 'mqtt-device';
@@ -72,6 +77,8 @@ export class MQTTService {
       password: config?.password || appConfig.mqtt.password,
       caCertificate: config?.caCertificate || appConfig.mqtt.caCertificate,
       deviceScopedTopics: config?.deviceScopedTopics ?? appConfig.mqtt.deviceScopedTopics,
+      topicNamespace: config?.topicNamespace ?? appConfig.mqtt.topicNamespace,
+      actuatorCommandsEnabled: config?.actuatorCommandsEnabled ?? appConfig.mqtt.actuatorCommandsEnabled,
       clientId: config?.clientId || `aquasense-backend-${Date.now()}`,
       topics: {
         readings: config?.topics?.readings || appConfig.mqtt.topics.readings,
@@ -87,6 +94,9 @@ export class MQTTService {
    * Connect to MQTT broker and start listening
    */
   async connect(): Promise<void> {
+    // MQTT.js owns automatic reconnects; repeated calls reuse its client.
+    if (this.client) return;
+
     try {
       const options: mqtt.IClientOptions = {
         clientId: this.config.clientId,
@@ -110,9 +120,11 @@ export class MQTTService {
 
       // Connection established
       this.client.on('connect', () => {
+        const generation = ++this.subscriptionGeneration;
         this.isConnected = true;
+        this.activeSubscribedTopics = [];
         logger.info('âœ“ MQTT Connected successfully');
-        this.subscribe();
+        this.subscribe(generation);
         void this.redeliverPendingActuatorCommands();
         if (!this.actuatorRedeliveryInterval) this.actuatorRedeliveryInterval = setInterval(() => {
           void this.redeliverPendingActuatorCommands();
@@ -134,39 +146,43 @@ export class MQTTService {
       // Disconnection
       this.client.on('disconnect', () => {
         this.isConnected = false;
+        this.activeSubscribedTopics = [];
+        this.subscriptionGeneration++;
         this.telemetryByDevice.clear();
         this.latestLegacyDeviceId = 'mqtt-device';
-        logger.warn('MQTT disconnected, attempting to reconnect...');
+        this.logConnectionWarning('MQTT broker sent a disconnect packet');
       });
 
       this.client.on('offline', () => {
         this.isConnected = false;
+        this.activeSubscribedTopics = [];
+        this.subscriptionGeneration++;
         this.telemetryByDevice.clear();
         this.latestLegacyDeviceId = 'mqtt-device';
       });
 
       this.client.on('close', () => {
         this.isConnected = false;
+        this.activeSubscribedTopics = [];
+        this.subscriptionGeneration++;
         this.telemetryByDevice.clear();
         this.latestLegacyDeviceId = 'mqtt-device';
+        this.logConnectionWarning('MQTT transport closed before or after connection');
       });
 
       // MQTT is optional for local development; REST sensor ingestion remains online
       // even when the public broker is unreachable.
       this.client.on('error', (error: Error) => {
-        const now = Date.now();
-        if (now - this.lastConnectionWarningAt > 30000) {
-          this.lastConnectionWarningAt = now;
-          logger.warn('MQTT broker unavailable; backend is still running without MQTT data', {
-            brokerUrl: safeBrokerUrl(this.config.brokerUrl),
-            message: error.message || 'Connection failed',
-          });
-        }
+        this.logConnectionWarning('MQTT broker connection error', {
+          errorName: error.name,
+          errorCode: (error as NodeJS.ErrnoException).code,
+          message: error.message || 'Connection failed',
+        });
       });
 
       // Reconnection attempt
       this.client.on('reconnect', () => {
-        logger.info('MQTT attempting to reconnect...');
+        this.logConnectionWarning('MQTT attempting to reconnect');
       });
     } catch (error) {
       logger.error('Failed to initialize MQTT connection:', error);
@@ -174,25 +190,52 @@ export class MQTTService {
     }
   }
 
+  private logConnectionWarning(message: string, details: Record<string, unknown> = {}): void {
+    const now = Date.now();
+    if (now - this.lastConnectionWarningAt <= 30000) return;
+    this.lastConnectionWarningAt = now;
+    logger.warn(message, { brokerUrl: safeBrokerUrl(this.config.brokerUrl), ...details });
+  }
+
   /**
    * Subscribe to topics
    */
-  private subscribe(): void {
-    if (!this.client) return;
+  private subscribe(generation: number): void {
+    const client = this.client;
+    if (!client) return;
 
     try {
       const subscriptions = this.config.deviceScopedTopics
-        ? ['aquasense/+/telemetry/+', 'aquasense/+/state']
-        : [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'];
-      this.client.subscribe(subscriptions, (err) => {
+        ? [`${this.config.topicNamespace}/+/telemetry/+`, `${this.config.topicNamespace}/+/state`]
+        : [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, `${this.config.topicNamespace}/+/state`];
+      client.subscribe(subscriptions, (err, granted) => {
+        if (this.client !== client || !this.isConnected || generation !== this.subscriptionGeneration) return;
         if (err) {
-          logger.error('MQTT subscription error:', err.message);
+          this.activeSubscribedTopics = [];
+          this.logConnectionWarning('MQTT subscription error', {
+            errorName: err.name,
+            errorCode: (err as NodeJS.ErrnoException).code,
+          });
         } else {
-          logger.info('MQTT subscriptions restored');
+          // SUBACK QoS 128 means the broker denied the topic filter.
+          this.activeSubscribedTopics = (granted ?? [])
+            .filter((grant) => subscriptions.includes(grant.topic) && grant.qos !== 128)
+            .map((grant) => grant.topic);
+          if (this.activeSubscribedTopics.length === subscriptions.length) {
+            logger.info('MQTT subscriptions restored');
+          } else {
+            this.logConnectionWarning('MQTT broker denied one or more subscriptions', {
+              acceptedCount: this.activeSubscribedTopics.length,
+              requestedCount: subscriptions.length,
+            });
+          }
         }
       });
     } catch (error) {
-      logger.error('Failed to subscribe to MQTT topics:', error);
+      this.activeSubscribedTopics = [];
+      this.logConnectionWarning('Failed to subscribe to MQTT topics', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
     }
   }
 
@@ -206,13 +249,13 @@ export class MQTTService {
 
       if (!this.config.deviceScopedTopics && topic === this.config.topics.readings) {
         this.handleSensorReading(message);
-      } else if (/^aquasense\/[^/]+\/state$/.test(topic)) {
+      } else if (new RegExp(`^${this.config.topicNamespace}/[^/]+/state$`).test(topic)) {
         void this.handleActuatorAck(topic, message);
       } else if (this.config.deviceScopedTopics) {
         this.handleScopedTelemetryTopic(topic, message);
       } else if (this.isAquasenseSensorTopic(topic)) {
         this.handleAquasenseTopicValue(topic, message);
-      } else if (topic.startsWith('water/commands/')) {
+      } else if (topic.startsWith(`${this.config.topics.commands.replace(/#$/, '')}`)) {
         this.handleCommand(topic, message);
       }
     } catch (error) {
@@ -222,6 +265,7 @@ export class MQTTService {
 
   /** Publish one non-retained, signed actuator command. Publishing means queued, never confirmed. */
   async dispatchHardwareCommand(input: { id: string; deviceId: string; source: 'hardware' | 'feeding'; action: string; durationMs?: number; expiresAt: Date }): Promise<boolean> {
+    if (!this.config.actuatorCommandsEnabled) return false;
     if (!this.client || !this.isConnected) return false;
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(input.deviceId)) return false;
     const key = Object.prototype.hasOwnProperty.call(appConfig.device.keys, input.deviceId) ? appConfig.device.keys[input.deviceId] : undefined;
@@ -229,7 +273,7 @@ export class MQTTService {
     const unsigned = { v: 1 as const, deviceId: input.deviceId, id: input.id, source: input.source,
       action: input.action, durationMs: input.durationMs ?? 0, expiresAt: input.expiresAt.getTime() };
     const payload = JSON.stringify({ ...unsigned, signature: signCanonical(commandCanonical(unsigned), key) });
-    return new Promise((resolve) => this.client!.publish(`aquasense/${input.deviceId}/command`, payload,
+    return new Promise((resolve) => this.client!.publish(`${this.config.topicNamespace}/${input.deviceId}/command`, payload,
       { qos: 1, retain: false }, error => {
         if (error) { logger.warn('Actuator MQTT publish failed', { deviceId: input.deviceId, commandId: input.id, error: error.message }); resolve(false); }
         else resolve(true);
@@ -237,7 +281,7 @@ export class MQTTService {
   }
 
   private async redeliverPendingActuatorCommands(): Promise<void> {
-    if (!this.client || !this.isConnected) return;
+    if (!this.client || !this.isConnected || !this.config.actuatorCommandsEnabled) return;
     try {
       const [hardware, feeding] = await Promise.all([
         HardwareCommand.findAll({ where: { status: 'PENDING' }, order: [['createdAt', 'ASC']], limit: 100 }),
@@ -291,13 +335,30 @@ export class MQTTService {
       const deviceId = this.config.deviceScopedTopics
         ? topicDeviceId!
         : (typeof data.deviceId === 'string' ? data.deviceId : 'mqtt-device');
-      if (this.config.deviceScopedTopics && !(await deviceService.getActiveDevice(deviceId))) return;
+      if (this.config.deviceScopedTopics && !(await deviceService.getActiveDevice(deviceId))) {
+        logger.warn('Rejected MQTT telemetry for an inactive or unregistered device', { deviceId, topicDeviceId });
+        return;
+      }
       const reading = await sensorReadingService.ingest(deviceId, { ...data, deviceId });
+      logger.info('Persisted MQTT telemetry reading', {
+        deviceId, readingId: reading.id,
+        messageId: typeof data.messageId === 'string' ? data.messageId : undefined,
+        bootId: typeof data.bootId === 'string' ? data.bootId : undefined,
+        sequence: Number.isSafeInteger(data.sequence) ? data.sequence : undefined,
+        acquiredAt: data.timestamp ?? data.ts ?? null,
+        receivedAt: new Date().toISOString(),
+      });
       this.onReadingReceived?.(reading);
       await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured}).catch(error=>logger.error('Post-ingestion notification failed', {deviceId, readingId:reading.id, error:String(error)}));
       const stats = await sensorReadingService.getStatistics(60);
       this.onStatsUpdated?.({...stats,timestamp:new Date()});
-    } catch { logger.warn('Malformed sensor payload or ingestion failed'); }
+    } catch (error) {
+      logger.warn('MQTT sensor payload parsing or ingestion failed', {
+        deviceId: topicDeviceId,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        errorMessage: error instanceof Error ? error.message.slice(0, 240) : undefined,
+      });
+    }
   }
 
   setRealtimeHandlers(handlers: {
@@ -313,15 +374,78 @@ export class MQTTService {
    * contract remains development-only and isolates its claimed IDs in memory.
    */
   private handleScopedTelemetryTopic(topic: string, payload: string): void {
-    const match = /^aquasense\/([A-Za-z0-9_-]{1,64})\/telemetry\/(temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)(?:\/status)?$/.exec(topic);
+    const namespace = this.config.topicNamespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`^${namespace}/([A-Za-z0-9_-]{1,64})/telemetry/(frame|temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)(?:/status)?$`).exec(topic);
     if (!match || topic.endsWith('/status')) return;
     const [, deviceId, suffix] = match;
     if (!Object.prototype.hasOwnProperty.call(appConfig.device.keys, deviceId)) return;
+    if (suffix === 'frame') {
+      let frame: any;
+      try { frame = JSON.parse(payload); } catch { return; }
+      const validFrame = frame && typeof frame === 'object' && !Array.isArray(frame) && frame.v === 1 &&
+        frame.deviceId === deviceId && typeof frame.bootId === 'string' && /^[a-fA-F0-9]{16}$/.test(frame.bootId) &&
+        Number.isSafeInteger(frame.sequence) && frame.sequence >= 0 &&
+        ['temperature', 'ph', 'turbidity', 'orp'].every(name => frame[name] === null || (typeof frame[name] === 'number' && Number.isFinite(frame[name]))) &&
+        typeof frame.messageId === 'string' && frame.messageId === `${frame.bootId}-${frame.sequence}`;
+      if (!validFrame) { logger.warn('Rejected malformed device telemetry frame', { topic, deviceId }); return; }
+      const sensors = frame.sensors;
+      const provisionalFields = ['temperature', 'ph', 'turbidity', 'orp'].some(name =>
+        sensors && typeof sensors === 'object' && !Array.isArray(sensors) &&
+        sensors[name] && typeof sensors[name] === 'object' && Object.prototype.hasOwnProperty.call(sensors[name], 'provisional'));
+      if (provisionalFields) {
+        if (!this.isPublicDevelopmentTelemetryProfile()) {
+          logger.warn('Rejected provisional diagnostics outside the public development MQTT profile', { deviceId });
+          return;
+        }
+        try {
+          if (sensors?.temperature && typeof sensors.temperature === 'object' && !Array.isArray(sensors.temperature) &&
+              Object.prototype.hasOwnProperty.call(sensors.temperature, 'provisional')) throw new Error('Temperature cannot have a provisional diagnostic');
+          for (const [name, unit] of [['ph', 'pH'], ['turbidity', 'NTU'], ['orp', 'mV']] as const) {
+            const diagnostic = sensors?.[name];
+            if (diagnostic && typeof diagnostic === 'object' && !Array.isArray(diagnostic) &&
+                Object.prototype.hasOwnProperty.call(diagnostic, 'provisional')) {
+              parseProvisionalSensorValue(diagnostic.provisional, unit);
+            }
+          }
+        } catch {
+          logger.warn('Rejected malformed provisional sensor diagnostic', { deviceId });
+          return;
+        }
+      }
+      const assembly = this.telemetryAssembly(deviceId);
+      if (assembly) assembly.frameMode = true;
+      const sensorDiagnostics = Object.fromEntries(['temperature', 'ph', 'turbidity', 'orp'].map((name) => {
+        const diagnostic = sensors?.[name];
+        return [name, diagnostic && typeof diagnostic === 'object' && !Array.isArray(diagnostic) ? {
+          connected: typeof diagnostic.connected === 'boolean' ? diagnostic.connected : undefined,
+          valid: typeof diagnostic.valid === 'boolean' ? diagnostic.valid : undefined,
+          rawAdc: Number.isFinite(diagnostic.rawAdc) ? diagnostic.rawAdc : undefined,
+          provisional: diagnostic.provisional && typeof diagnostic.provisional === 'object' ? {
+            value: Number.isFinite(diagnostic.provisional.value) ? diagnostic.provisional.value : undefined,
+            unit: typeof diagnostic.provisional.unit === 'string' ? diagnostic.provisional.unit : undefined,
+            status: typeof diagnostic.provisional.status === 'string' ? diagnostic.provisional.status : undefined,
+          } : undefined,
+        } : undefined];
+      }));
+      logger.info('Received MQTT telemetry frame', {
+        topic, deviceId, bootId: frame.bootId, sequence: frame.sequence, messageId: frame.messageId,
+        deviceTimestamp: frame.timestamp ?? frame.ts ?? null, receivedAt: new Date().toISOString(), sensorDiagnostics,
+      });
+      void this.handleSensorReading(payload, deviceId);
+      return;
+    }
+    const assembly = this.telemetryByDevice.get(deviceId);
+    if (assembly?.frameMode) return;
     this.handleTelemetryValue(deviceId, suffix, payload);
   }
 
+  private isPublicDevelopmentTelemetryProfile(): boolean {
+    return isPublicDevelopmentTelemetryProfile(this.config, appConfig.server.nodeEnv);
+  }
+
   private handleAquasenseTopicValue(topic: string, payload: string): void {
-    const match = /^aquasense\/(device-id|temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)$/.exec(topic);
+    const namespace = this.config.topicNamespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`^${namespace}/(device-id|temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)$`).exec(topic);
     if (!match) return;
     const topicSuffix = match[1];
     if (topicSuffix === 'device-id') {
@@ -447,7 +571,8 @@ export class MQTTService {
   }
 
   private isAquasenseSensorTopic(topic: string): boolean {
-    return /^aquasense\/(device-id|temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)$/.test(topic);
+    const namespace = this.config.topicNamespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${namespace}/(device-id|temperature|ph|turbidity|turbidity-ntu|orp|do|dissolved-oxygen|ammonia|nh3)$`).test(topic);
   }
 
   /**
@@ -489,7 +614,8 @@ export class MQTTService {
       uptime: process.uptime(),
     });
 
-    this.client.publish(this.config.topics.status, message, { qos: 1, retain: true }, (err) => {
+    // The configured Mosquitto listener has retain_available=false.
+    this.client.publish(this.config.topics.status, message, { qos: 1, retain: false }, (err) => {
       if (err) {
         logger.error('Failed to publish status:', err.message);
       } else {
@@ -504,14 +630,18 @@ export class MQTTService {
   async disconnect(): Promise<void> {
     if (this.actuatorRedeliveryInterval) { clearInterval(this.actuatorRedeliveryInterval); this.actuatorRedeliveryInterval = null; }
     return new Promise((resolve) => {
-      if (!this.client) {
+      const client = this.client;
+      if (!client) {
         resolve();
         return;
       }
 
+      this.activeSubscribedTopics = [];
+      this.subscriptionGeneration++;
       this.publishStatus('offline');
-      this.client.end(false, () => {
+      client.end(false, () => {
         this.isConnected = false;
+        if (this.client === client) this.client = null;
         logger.info('âœ“ MQTT disconnected');
         resolve();
       });
@@ -529,9 +659,7 @@ export class MQTTService {
     return {
       connected: this.isConnected,
       brokerUrl: safeBrokerUrl(this.config.brokerUrl),
-      subscribedTopics: this.config.deviceScopedTopics
-        ? ['aquasense/+/telemetry/+', 'aquasense/+/state']
-        : [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'],
+      subscribedTopics: [...this.activeSubscribedTopics],
     };
   }
 }

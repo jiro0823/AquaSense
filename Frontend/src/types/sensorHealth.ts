@@ -2,6 +2,7 @@ export type SensorName = 'temperature'|'ph'|'turbidity'|'orp';
 export type HealthState = 'VALID' | 'INVALID' | 'SENSOR_ERROR' | 'MISSING' | 'STALE' | 'UNSTABLE' | 'SATURATED' | 'POSSIBLY_STUCK';
 export interface SensorHealth {
   name: SensorName; value: number | null; rawAdc: number | null; voltage: number | null;
+  provisional?: { value: number; unit: 'pH' | 'NTU' | 'mV'; status: 'UNVERIFIED' } | null;
   adcMinimum:number|null; adcMaximum:number|null; adcLast:number|null; clippedSamples:number|null;
   unit: string; timestamp: string | null; health: HealthState; valid: boolean;
   rawAvailable?: boolean; measurementValid?: boolean;

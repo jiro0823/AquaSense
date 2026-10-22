@@ -15,7 +15,11 @@ struct SystemState {
     bool buzzer = false;
     bool automation = false;
     bool relaysReady = false;
+    bool actuatorCommissioningEnabled = false;
     char waterPhase[24] = "IDLE";
     char fault[64] = {};
+    char scheduleResultId[37] = {};
+    char scheduleResult[24] = "none";
+    int64_t scheduleResultMinute = -1;
     uint32_t uptimeMs = 0;
 };

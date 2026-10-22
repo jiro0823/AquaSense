@@ -8,6 +8,8 @@ import type { Transaction } from 'sequelize';
 
 const WATER_START_ACTIONS: HardwareAction[] = ['FILL', 'DRAIN', 'WATER_EXCHANGE', 'AUTOMATION_ON'];
 const ALL_START_ACTIONS: HardwareAction[] = [...WATER_START_ACTIONS, 'AERATOR_ON', 'AERATOR_AUTO', 'BUZZER_ON'];
+const acknowledgedResult = (action: string, result: string): boolean =>
+  result === 'accepted' || (action === 'STATUS_REQUEST' && result === 'status_reported');
 
 /** Persist only newer ACK state. The conditional UPDATE is atomic in the database;
  * creating the first state row handles the empty case, with unique-key races retried. */
@@ -32,9 +34,8 @@ const acknowledgeInTransaction = async (userId: string, deviceId: string, receip
   if (receipt.source === 'feeding') {
     const command = await FeedingCommand.findOne({ where: { id: receipt.id, userId, deviceId }, transaction });
     if (!command) return false;
-    if (command.status === 'ACKED') return true;
-    command.status = 'ACKED';
-    command.executedAt = new Date();
+    if (command.status !== 'PENDING') return true;
+    command.status = acknowledgedResult(command.action, receipt.result) ? 'ACKED' : 'FAILED';
     command.metadata = { ...(command.metadata || {}), deviceResult: receipt.result };
     await command.save({ transaction });
     return true;
@@ -42,7 +43,7 @@ const acknowledgeInTransaction = async (userId: string, deviceId: string, receip
   const command = await HardwareCommand.findOne({ where: { id: receipt.id, userId, deviceId }, transaction });
   if (!command) return false;
   if (command.status !== 'PENDING') return true;
-  await command.update({ status: 'ACKED', result: receipt.result }, { transaction });
+  await command.update({ status: acknowledgedResult(command.action, receipt.result) ? 'ACKED' : 'FAILED', result: receipt.result }, { transaction });
   return true;
 };
 
@@ -68,7 +69,7 @@ export const hardwareService = {
           where: { userId, deviceId, status: 'PENDING', ...(cancelledActions ? { action: { [Op.in]: cancelledActions } } : {}) }, transaction,
         });
         if (action === 'ALL_OFF') {
-          await FeedingCommand.update({ status: 'ACKED', metadata: { deviceResult: 'cancelled_by_stop' } }, {
+          await FeedingCommand.update({ status: 'EXPIRED', metadata: { deviceResult: 'cancelled_by_stop' } }, {
             where: { userId, deviceId, status: 'PENDING' }, transaction,
           });
         }
@@ -96,7 +97,7 @@ export const hardwareService = {
     const now = new Date();
     await HardwareCommand.update({ status: 'EXPIRED', result: 'expired_before_delivery' },
       { where: { status: 'PENDING', expiresAt: { [Op.lte]: now } } });
-    await FeedingCommand.update({ status: 'ACKED', metadata: { deviceResult: 'expired_before_delivery' } },
+    await FeedingCommand.update({ status: 'EXPIRED', metadata: { deviceResult: 'expired_before_delivery' } },
       { where: { status: 'PENDING', source: 'MANUAL', createdAt: { [Op.lt]: new Date(now.getTime() - COMMAND_TTL_MS) } } });
   },
 
@@ -110,10 +111,10 @@ export const hardwareService = {
       if (command.status === 'EXPIRED' ||
           (command.createdAt && ackTime < command.createdAt) ||
           (command.expiresAt && ackTime > command.expiresAt)) return false;
-      if (command.status === 'PENDING') await command.update({ status: 'ACKED', result });
+      if (command.status === 'PENDING') await command.update({ status: acknowledgedResult(action, result) ? 'ACKED' : 'FAILED', result });
     } else {
       const command = await FeedingCommand.findOne({ where: { id, userId, deviceId } });
-      if (!command || command.action !== action || command.source !== 'MANUAL') return false;
+      if (!command || command.action !== action || command.source !== 'MANUAL' || command.status === 'EXPIRED') return false;
       if (ackTime < command.createdAt || ackTime.getTime() > command.createdAt.getTime() + COMMAND_TTL_MS ||
           (command.metadata as { deviceResult?: string } | null)?.deviceResult === 'expired_before_delivery') return false;
       if (command.status === 'PENDING') await feedingService.ackCommand(userId, deviceId, id,

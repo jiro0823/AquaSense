@@ -132,8 +132,8 @@ export const feedingService = {
     });
     if (!command) return false;
 
-    command.status = 'ACKED';
-    command.executedAt = new Date();
+    const deviceResult = metadata?.deviceResult;
+    command.status = deviceResult === 'accepted' ? 'ACKED' : 'FAILED';
     if (metadata) {
       command.metadata = { ...(command.metadata || {}), ...metadata };
     }
@@ -165,7 +165,7 @@ export const feedingService = {
       FeedingSchedule.count({ where: { userId, enabled: true } }),
       FeedingCommand.count({ where: { userId, deviceId, status: 'PENDING' } }),
       FeedingCommand.findOne({
-        where: { userId, deviceId, status: { [Op.in]: ['PENDING', 'ACKED'] } },
+        where: { userId, deviceId, status: { [Op.in]: ['PENDING', 'ACKED', 'EXPIRED'] } },
         order: [['createdAt', 'DESC']],
       }),
     ]);

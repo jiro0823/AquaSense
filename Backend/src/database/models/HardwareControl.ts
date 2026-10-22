@@ -8,7 +8,7 @@ export class HardwareCommand extends Model {
   declare deviceId: string;
   declare action: HardwareAction;
   declare durationMs: number | null;
-  declare status: 'PENDING' | 'ACKED' | 'EXPIRED';
+  declare status: 'PENDING' | 'ACKED' | 'FAILED' | 'EXPIRED';
   declare result: string | null;
   declare expiresAt: Date;
   declare createdAt: Date;

@@ -16,6 +16,7 @@ router.post('/hardware/commands', authenticateToken, requireRole(['admin', 'farm
   async (req: AuthenticatedRequest, res) => {
     const { deviceId, action, durationMs } = req.body;
     try {
+      if (!config.mqtt.actuatorCommandsEnabled) { sendError(res, 503, 'Actuator commands are disabled in this MQTT profile'); return; }
       if (!req.userId || !(await deviceService.verifyOwnership(req.userId, deviceId))) { sendError(res, 403, 'Device is not owned/active'); return; }
       const command = await hardwareService.queue(req.userId, deviceId, action, durationMs);
       const published = await mqttService.dispatchHardwareCommand({ id: command.id, deviceId, source: 'hardware', action,

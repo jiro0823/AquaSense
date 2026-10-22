@@ -6,6 +6,7 @@ import type { HealthSummary, Speciation } from './sensorHealth';
 
 export interface WaterQualityReading {
   id: string;
+  deviceId?: string;
   timestamp: Date;
   createdAt?: Date;
   temperature: number | null;

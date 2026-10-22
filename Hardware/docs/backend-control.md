@@ -209,9 +209,11 @@ does not need that policy, but does require confirmed relay configuration.
 
 Existing feeding API commands TRIGGER, ON, and OFF are delivered through signed
 MQTT; authenticated HTTPS sync supplies schedules and heartbeat state.
-GPIO19 servo starts closed at25 degrees, opens to140, and preserves the original
-800/1000/800 ms cycle. ON closes after ten seconds. OFF/ALL_OFF suppress scheduled
-feeding for the current minute.
+GPIO18 is the servo signal. Firmware leaves the servo unattached at boot to avoid
+moving the mechanism during restart; a valid request attaches it and runs the
+25-degree closed, 140-degree open, 25-degree return cycle (800/1000/800 ms).
+ON closes after ten seconds. OFF/ALL_OFF suppress scheduled feeding for the
+current minute.
 
 Schedules remain the existing **user-wide** list, up to20 enabled entries; they
 are not device-scoped. Multiple feeders for one user require a later scheduling
@@ -219,10 +221,15 @@ extension. Schedules and last-fired minutes persist in NVS; cached schedules
 continue through backend outages. Disable schedules while online and confirm
 sync before intentionally suspending offline feeding.
 
-NTP/system time and DS3231 use UTC; dates and HH:mm use Asia/Manila UTC+8.
-RTC lost power or unmarked legacy clock contents inhibit schedules until NTP
-succeeds. Missed minutes are skipped; stored last-fired records prevent repeats
-after resets/backward clock shifts.
+NTP/system time and an optional DS3231 use UTC; dates and HH:mm use Asia/Manila
+UTC+8. RTC lost power or unmarked legacy clock contents inhibit schedules until
+NTP succeeds. Busy due occurrences use a persisted queue and may run once within
+the due minute or the following local minute; older entries expire. The device
+persists and reports the latest schedule result (`deferred`, `started`,
+`completed`, `cancelled`, `skipped_expired`, or `skipped_queue_full`) with its
+schedule ID and local epoch-minute. Stored last-fired records prevent repeats
+after resets/backward clock shifts. The reported result is software execution
+status and does not prove physical food dispensing.
 
 ## Telemetry scope
 
@@ -232,3 +239,30 @@ legacy raw ADC remains separate. Invalid/disconnected sensor values are not
 fabricated. Existing missing-DO compatibility storage remains explicitly
 unmeasured. No physical flow/level feedback, live device upload, database
 migration or hardware-in-the-loop test was performed.
+
+## Isolated actuator commissioning preparation
+
+This section prepares a future supervised test; it does not authorize or perform
+actuation. The `water-monitor-public-dev` profile permanently forces relay,
+aerator, feeder, and actuator-commissioning gates off. Its only supported command
+for integration checks is the read-only `STATUS_REQUEST`; do not use that public
+profile to commission outputs. A future actuator test requires a separately
+reviewed, private installation build and an explicit test authorization.
+
+Before that test, keep every actuator load disconnected from external power.
+With the MCU unpowered, verify the board pin labels and physically trace GPIO26
+and GPIO27 to the relay inputs, then identify the K3/refill and K4/drain paths;
+do not infer channel mapping from labels or this document. Verify active-LOW
+polarity and a hardware OFF bias during reset with a meter or other appropriate
+instrument. Keep the servo unattached and aerator/buzzer loads disconnected.
+Record the exact board, wiring, polarity, and measured OFF state. Any uncertain
+mapping, unexpected relay state, or powered load stops the procedure.
+
+For a later approved test, use an isolated bench setup with no pump, feeder,
+aerator, or other load attached. First verify output logic and state reporting
+while loads remain disconnected. If a later separate authorization permits a
+load test, energize only the single explicitly approved load, run one short
+bounded action, verify OFF, and restore load isolation before testing another
+output. Keep an operator at the hardware disconnect throughout. Do not enable
+the firmware gates, set runtime values, or attach/energize outputs as part of
+this preparation. The public development firmware remains gate-closed.

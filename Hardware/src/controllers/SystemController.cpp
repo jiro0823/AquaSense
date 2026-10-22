@@ -1,8 +1,10 @@
 #include "SystemController.h"
 #include <Arduino.h>
 #include <string.h>
+#include "config/ActuatorConfig.h"
 #include "config/DeviceConfig.h"
 #include "config/Thresholds.h"
+#include "controllers/ControlSafety.h"
 
 namespace {
 bool alarmThresholdsReady() {
@@ -64,6 +66,21 @@ bool SystemController::rememberHandled(const char* id) {
 
 CommandReceipt SystemController::handle(const Command& command, uint32_t nowMs) {
     CommandReceipt receipt{}; strlcpy(receipt.id, command.id, sizeof(receipt.id)); receipt.feedingSource = command.feedingSource;
+    // A signed status request is read-only and remains available with relay commissioning disabled.
+    // Repeated status requests have no side effects, so they do not need the actuator dedupe store.
+    if (isReadOnlyAction(command.action)) {
+        const bool validLifetime = command.ttlMs > 0 && command.ttlMs <= DeviceConfig::COMMAND_MAX_TTL_MS &&
+            uint32_t(nowMs - command.receivedAtMs) < command.ttlMs;
+        strlcpy(receipt.result, validLifetime ? "status_reported" : "expired", sizeof(receipt.result));
+        return receipt;
+    }
+    const bool safeStop = command.action == CommandAction::AllOff || command.action == CommandAction::WaterStop ||
+        command.action == CommandAction::FeedOff || command.action == CommandAction::AeratorOff ||
+        command.action == CommandAction::BuzzerOff;
+    if (!ControlSafety::commissioningAllowsActuation(ActuatorConfig::ACTUATOR_COMMISSIONING_ENABLED, safeStop)) {
+        strlcpy(receipt.result, "commissioning_disabled", sizeof(receipt.result));
+        return receipt;
+    }
     if (!DeviceConfig::COMMAND_CONTROL_ENABLED || !DeviceConfig::ACTUATOR_CONTROL_ENABLED) {
         strlcpy(receipt.result, "offline_calibration_mode", sizeof(receipt.result));
         return receipt;
@@ -109,25 +126,31 @@ const char* SystemController::dispatch(const Command& command, uint32_t nowMs) {
         case CommandAction::AeratorAuto: return aerator.setAutomatic();
         case CommandAction::AutomationOn: return water.setAutomatic(true, nowMs);
         case CommandAction::AutomationOff: return water.setAutomatic(false, nowMs);
-        case CommandAction::BuzzerOn: buzzer.setManual(true); return "accepted";
-        case CommandAction::BuzzerOff: buzzer.setManual(false); return "accepted";
+        case CommandAction::BuzzerOn: buzzer.setManual(true, nowMs); return "accepted";
+        case CommandAction::BuzzerOff: buzzer.setManual(false, nowMs); return "accepted";
         case CommandAction::ClearFault: return water.clearFault();
         case CommandAction::AllOff:
             water.request(CommandAction::WaterStop, 0, nowMs);
             aerator.setManual(false);
             feeder.stop();
-            buzzer.setManual(false);
+            buzzer.setManual(false, nowMs);
             return relays.allOff() ? "accepted" : "outputs_not_configured";
         case CommandAction::FeedTrigger: case CommandAction::FeedOn: case CommandAction::FeedOff: return feeder.request(command.action, nowMs);
         default: return "invalid_action";
     }
 }
 void SystemController::update(const SensorReadings& readings, uint32_t nowMs) {
-    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return;
+    if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED || !ActuatorConfig::ACTUATOR_COMMISSIONING_ENABLED) return;
     water.update(readings, nowMs);
     aerator.update(readings, nowMs);
     feeder.update(nowMs);
     buzzer.update(hasCriticalSensorReading(readings, nowMs), nowMs);
+}
+void SystemController::updateFeederSafety(uint32_t nowMs) {
+    // Keep an active feeder cycle's bounded close/finish phases running when
+    // network loss pauses water and aerator automation. Cached schedules also
+    // retain their existing offline behavior.
+    feeder.update(nowMs);
 }
 void SystemController::stopRelayActuators(uint32_t nowMs) {
     if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return;
@@ -136,8 +159,12 @@ void SystemController::stopRelayActuators(uint32_t nowMs) {
     relays.allOff();
 }
 void SystemController::report(SystemState& state) const {
+    state.actuatorCommissioningEnabled = ActuatorConfig::ACTUATOR_COMMISSIONING_ENABLED;
     state.fillPump = relays.fillOn(); state.drainPump = relays.drainOn(); state.aerator = relays.aeratorOn();
     state.feederBusy = feeder.isBusy(); state.buzzer = buzzer.isActive(); state.automation = water.isAutomatic();
     state.relaysReady = relays.isReady();
     strlcpy(state.waterPhase, water.phaseName(), sizeof(state.waterPhase)); strlcpy(state.fault, water.fault(), sizeof(state.fault));
+    strlcpy(state.scheduleResultId, feeder.scheduleResultId(), sizeof(state.scheduleResultId));
+    strlcpy(state.scheduleResult, feeder.scheduleResult(), sizeof(state.scheduleResult));
+    state.scheduleResultMinute = feeder.scheduleResultMinute();
 }

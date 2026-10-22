@@ -1,13 +1,11 @@
 # MQTT security and staged device isolation
 
-## Active `water-monitor` contract
+## MQTT topic contracts
 
-The compatibility defaults remain the existing protocol until a coordinated
-broker migration is approved: public plaintext MQTT on port 1883, retained
-scalar telemetry under `aquasense/<parameter>`, and a signed, non-retained
-command on `aquasense/<deviceId>/command`. Signed acknowledgments remain on
-`aquasense/<deviceId>/state`. The default is suitable only for local development
-and is not private or authenticated.
+The regular `water-monitor` target uses the broker and transport settings from
+the ignored `include/config/device_config.local.h` when present. Without local
+settings it falls back to the compatibility defaults. Do not assume the
+fallback host is the effective endpoint on a configured device.
 
 The opt-in secure contract uses TLS with certificate verification and unique
 broker credentials per ESP32. Telemetry remains scalar and keeps the same values
@@ -27,7 +25,23 @@ and signed state topics, so it does not ingest both old and new topics during
 migration. Assemblies are independent per ID and capped; disconnect clears
 partial assemblies. Retained telemetry replays are ignored by the backend.
 
-## Configure a device
+## Public HiveMQ development profile
+
+Use `water-monitor-public-dev` only for development. It connects anonymously
+over plaintext MQTT to `broker.hivemq.com:1883` and publishes device-scoped
+topics under `aquasense-dev/<deviceId>/...`; the existing registered device ID
+is preserved. The public profile does not subscribe to MQTT commands, and the
+backend's `dev-public-mqtt` launcher disables command publication. Pump, aerator,
+and feeder outputs also remain compile-time disabled in that firmware profile.
+
+Start its backend counterpart with `npm run dev:public-mqtt` from `Backend`
+after copying `public-dev.env.example` to the ignored `.env.public-dev`. The
+launcher layers only the development MQTT settings over `.env`, including the
+`aquasense-dev` namespace. The anonymous public broker has no publisher ACL;
+topic names do not authenticate a device. Use non-sensitive development data
+only, and do not treat received telemetry as authenticated physical readings.
+
+## Configure a secure device
 
 1. Copy `include/config/device_config.local.example.h` to the ignored
    `include/config/device_config.local.h`.

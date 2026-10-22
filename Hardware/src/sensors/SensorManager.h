@@ -22,12 +22,13 @@ public:
     void begin();
     void update(uint32_t nowMs);
     const SensorReadings& getReadings() const;
-    void printReadings() const;
+    void printReadings();
 
 private:
     enum class Phase { Idle, Temperature, Turbidity, Ph, PhVoltage, Orp, OrpVoltage };
     void startSampling(Phase phase, uint32_t nowMs);
     void startVoltageSampling(Phase phase);
+    void requestTemperatureConversion();
     void finishSample(uint32_t nowMs);
 
     OneWire oneWire;
@@ -38,6 +39,9 @@ private:
     bool hasSample = false;
     uint32_t lastSampleStartedMs = 0;
     uint32_t phaseStartedMs = 0;
+    uint32_t lastTemperatureDiscoveryMs = 0;
+    float lastTemperatureRawC = 0.0f;
+    bool lastTemperatureRawAvailable = false;
     int adcSum = 0;
     uint32_t voltageSumMv = 0;
     AnalogDiagnostics burst;

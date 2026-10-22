@@ -17,6 +17,7 @@ public:
     void begin();
     CommandReceipt handle(const Command& command, uint32_t nowMs);
     void update(const SensorReadings& readings, uint32_t nowMs);
+    void updateFeederSafety(uint32_t nowMs);
     void stopRelayActuators(uint32_t nowMs);
     void report(SystemState& state) const;
 private:

@@ -13,6 +13,14 @@ export function SensorHealthPanel({reading}:{reading:WaterQualityReading|null}) 
           {name==='orp' && s?.health==='MISSING' && s.value!==null && s.reason.includes('not commissioned') &&
             <p className="text-amber-800">Device-reported diagnostic: {s.value.toFixed(2)} mV · uncalibrated, not a validated measurement</p>}
           {s?.rawAvailable && !s.measurementValid && <p className="text-amber-800">Signal available; engineering measurement unavailable</p>}
+          {name !== 'temperature' && <>
+            <p className="text-amber-800">Provisional estimate: {s?.provisional && Number.isFinite(s.provisional.value) && s.provisional.status === 'UNVERIFIED'
+              ? `${s.provisional.value.toFixed(2)} ${s.provisional.unit} · UNVERIFIED`
+              : 'UNAVAILABLE'}</p>
+            {s?.provisional && Number.isFinite(s.provisional.value) && s.provisional.status === 'UNVERIFIED' && <p>
+              Acquisition: {s.timestamp ? new Date(s.timestamp).toLocaleString() : 'UNAVAILABLE'} · Freshness: {s.health === 'STALE' ? 'STALE' : s.timestamp ? 'RECENT' : 'UNAVAILABLE'}
+            </p>}
+          </>}
           <p>Water quality: {reading?.waterQuality?.[name] || 'UNAVAILABLE'}</p>
           <p>Stability: {s?.stability || 'COLLECTING'} · Calibration required</p>
           {s?.reason && <p className="text-amber-800">{s.reason}</p>}

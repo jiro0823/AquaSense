@@ -64,7 +64,11 @@ const char* WaterManager::clearFault() {
 }
 
 const char* WaterManager::request(CommandAction action, uint32_t durationMs, uint32_t nowMs) {
-    if (action == CommandAction::WaterStop) { automatic = false; stop(nowMs); return "accepted"; }
+    if (action == CommandAction::WaterStop) {
+        automatic = false;
+        stop(nowMs);
+        return relays.isReady() ? "accepted" : "outputs_not_configured";
+    }
     if (phase == Phase::Fault) return "fault_latched";
     if (action != CommandAction::Fill && action != CommandAction::Drain && action != CommandAction::WaterExchange)
         return "invalid_action";

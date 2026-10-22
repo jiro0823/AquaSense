@@ -4,8 +4,9 @@
 enum class CommandAction {
     Fill, Drain, WaterExchange, WaterStop, AeratorOn, AeratorOff, AeratorAuto,
     AutomationOn, AutomationOff, BuzzerOn, BuzzerOff, AllOff, ClearFault,
-    FeedTrigger, FeedOn, FeedOff, Invalid
+    FeedTrigger, FeedOn, FeedOff, StatusRequest, Invalid
 };
+constexpr bool isReadOnlyAction(CommandAction action) { return action == CommandAction::StatusRequest; }
 struct Command {
     char id[37] = {};
     bool feedingSource = false;

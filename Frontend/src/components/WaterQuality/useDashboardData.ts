@@ -1,4 +1,5 @@
 import { refreshDisplayReading } from './sensorDisplay';
+import { readingsForDevice, toDiagnosticChartPoint } from './dashboardDiagnostics';
 import { useEffect, useRef, useState } from 'react';
 import { useWaterQualityWebSocket } from '../../hooks/useWaterQualityWebSocket';
 import { apiClient, getApiErrorMessage } from '../../services/apiClient';
@@ -8,6 +9,7 @@ import type { SmsLogEntry } from '../../types/sms';
 interface ChartDataPoint {
   timestamp: string;
   time: string;
+  deviceId?: string;
   temperature?: number|null;
   ph?: number|null;
   orp?: number|null;
@@ -15,6 +17,12 @@ interface ChartDataPoint {
   turbidityUnit?: string;
   tan?: number|null;
   nh3N?: number|null;
+  rawPhAdc?: number|null;
+  provisionalPh?: number|null;
+  rawTurbidityAdc?: number|null;
+  provisionalTurbidity?: number|null;
+  rawOrpAdc?: number|null;
+  provisionalOrp?: number|null;
 }
 
 interface FeedingSchedule {
@@ -43,6 +51,7 @@ export const useDashboardData = () => {
   const [feedingSchedules, setFeedingSchedules] = useState<FeedingSchedule[]>([]);
   const [feedingLoading, setFeedingLoading] = useState(false);
   const [predictiveWarning, setPredictiveWarning] = useState<PredictiveAnalyticsResult | null>(null);
+  const [predictionHistory, setPredictionHistory] = useState<PredictionLog[]>([]);
   const [smsLogs, setSmsLogs] = useState<SmsLogEntry[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<HealthAlert[]>([]);
   const [recentAlerts, setRecentAlerts] = useState<HealthAlert[]>([]);
@@ -57,13 +66,14 @@ export const useDashboardData = () => {
 
   useEffect(() => {
     if (!historyReadings.length) return;
-    const sorted = [...historyReadings]
+    const sorted = readingsForDevice(historyReadings, latestReading?.deviceId)
       .filter((reading) => Number.isFinite(new Date(reading.timestamp).getTime()))
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .slice(-30)
       .map((reading) => ({
         timestamp: new Date(reading.timestamp).toISOString(),
         time: new Date(reading.timestamp).toLocaleTimeString(),
+        ...toDiagnosticChartPoint(reading),
         temperature: reading.temperature,
         ph: reading.ph,
         orp: reading.orp,
@@ -73,7 +83,7 @@ export const useDashboardData = () => {
         nh3N: reading.speciation?.nh3N ?? null,
       }));
     setChartData(sorted);
-  }, [historyReadings]);
+  }, [historyReadings, latestReading?.deviceId]);
 
   useEffect(() => {
     const candidates = [polledReading, latestReading].filter((reading): reading is WaterQualityReading => reading !== null);
@@ -87,6 +97,7 @@ export const useDashboardData = () => {
       return [...prev, {
         timestamp,
         time,
+        ...toDiagnosticChartPoint(reading),
         temperature: reading.temperature,
         ph: reading.ph,
         orp: reading.orp,
@@ -152,6 +163,7 @@ export const useDashboardData = () => {
           return {...incoming,connectionState:'LIVE'};
         });
         setPredictiveWarning(response.data.predictiveWarning);
+        setPredictionHistory(response.data.predictionHistory || []);
         setSmsLogs(response.data.smsLogs || []);
         setRestError(null);
       } catch {
@@ -231,6 +243,7 @@ export const useDashboardData = () => {
     feedingSchedules,
     feedingLoading,
     predictiveWarning,
+    predictionHistory,
     smsLogs,
     triggerManual,
     addSchedule,

@@ -13,6 +13,9 @@ constexpr int relayOutputLevel(bool on, int active) {
 constexpr bool relayOutputsReady(bool configurationValid, bool outputsEnabled) {
     return configurationValid && outputsEnabled;
 }
+constexpr bool commissioningAllowsActuation(bool commissioningEnabled, bool safeStop) {
+    return commissioningEnabled || safeStop;
+}
 constexpr bool pumpCombination(bool fill, bool drain) { return !(fill && drain); }
 constexpr bool durationAllowed(uint32_t requested, uint32_t limit) {
     return limit > 0 && requested > 0 && requested < limit && limit <= 300000;

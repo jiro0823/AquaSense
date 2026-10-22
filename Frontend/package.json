@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:public-mqtt": "node scripts/dev-public-mqtt.cjs",
     "build": "tsc && vite build",
     "build:watch": "tsc --watch",
     "preview": "vite preview",

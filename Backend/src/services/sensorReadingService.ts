@@ -3,7 +3,9 @@ import { SensorReading as SensorReadingModel } from '../database/models/SensorRe
 import { Op } from 'sequelize';
 import { getDatabase } from '../database/connection';
 import {ruleEngine} from './ruleEngine.service';
-import { SensorValidator, SENSOR_NAMES, numeric, timestampMs, refreshHealth, ammoniaSpeciation, type HealthSummary, type AmmoniaSpeciation, HEALTH_CONFIG } from './sensorHealth';
+import { SensorValidator, SENSOR_NAMES, numeric, timestampMs, refreshHealth, ammoniaSpeciation, type HealthSummary, type AmmoniaSpeciation, HEALTH_CONFIG,
+  isPublicDevelopmentTelemetryProfile, parseProvisionalSensorValue } from './sensorHealth';
+import { config as appConfig } from '../config/config';
 export interface SensorReading {
   id: string; deviceId: string; temperature: number|null; ph: number|null; do: number|null;
   doMeasured: boolean; turbidity: number|null; orp: number|null; ammonia: number|null;
@@ -22,6 +24,21 @@ class SensorReadingService {
     if (this.transitions.size>2048) this.transitions.clear();
   }
   async ingest(deviceId: string, payload: Record<string,any>): Promise<SensorReading> {
+    const diagnostics = payload.sensors && typeof payload.sensors === 'object' && !Array.isArray(payload.sensors) ? payload.sensors : {};
+    const provisionalNames = SENSOR_NAMES.filter(name => {
+      const sensor = diagnostics[name];
+      return sensor && typeof sensor === 'object' && !Array.isArray(sensor) && Object.prototype.hasOwnProperty.call(sensor, 'provisional');
+    });
+    if (provisionalNames.length) {
+      if (!isPublicDevelopmentTelemetryProfile(appConfig.mqtt, appConfig.server.nodeEnv)) {
+        throw new Error('Provisional sensor diagnostics are accepted only in the public development MQTT profile');
+      }
+      if (provisionalNames.includes('temperature')) throw new Error('Temperature cannot have a provisional diagnostic');
+      for (const name of provisionalNames) {
+        const unit = name === 'ph' ? 'pH' : name === 'turbidity' ? 'NTU' : 'mV';
+        parseProvisionalSensorValue(diagnostics[name].provisional, unit);
+      }
+    }
     const now=Date.now();
     const age=payload.sampleAgeMs===undefined?0:numeric(payload.sampleAgeMs);
     if (age===null || age<0 || age>86_400_000) throw new Error('Invalid sampleAgeMs');

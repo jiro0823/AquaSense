@@ -9,18 +9,29 @@ void RelayController::writeRelay(int pin, bool on) {
     digitalWrite(pin, ControlSafety::relayOutputLevel(on, ActuatorConfig::RELAY_ACTIVE_LEVEL));
 }
 void RelayController::begin() {
+    fill = drain = air = false;
+    ready = false;
     if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) {
-        ready = false;
-        fill = drain = air = false;
         return;
     }
     const bool configurationValid = ControlSafety::relayConfiguration(Pins::FILL_RELAY_GPIO,
         Pins::DRAIN_RELAY_GPIO, Pins::AERATOR_RELAY_GPIO, ActuatorConfig::RELAY_ACTIVE_LEVEL);
-    ready = ControlSafety::relayOutputsReady(configurationValid, ActuatorConfig::RELAY_OUTPUTS_ENABLED);
-    if (!ready) { Serial.println("Relays disabled: commissioning gate is closed or configuration is invalid."); return; }
-    for (int pin : {Pins::FILL_RELAY_GPIO, Pins::DRAIN_RELAY_GPIO, Pins::AERATOR_RELAY_GPIO}) {
+    if (!configurationValid) {
+        Serial.println("Relays disabled: relay configuration is invalid.");
+        return;
+    }
+    for (int pin : {Pins::FILL_RELAY_GPIO, Pins::DRAIN_RELAY_GPIO}) {
         writeRelay(pin, false); // Set output latch to OFF before switching direction.
         pinMode(pin, OUTPUT);
+    }
+    if (ActuatorConfig::AERATOR_OUTPUTS_ENABLED) {
+        writeRelay(Pins::AERATOR_RELAY_GPIO, false);
+        pinMode(Pins::AERATOR_RELAY_GPIO, OUTPUT);
+    }
+    ready = ControlSafety::relayOutputsReady(configurationValid, ActuatorConfig::RELAY_OUTPUTS_ENABLED);
+    if (!ready) {
+        Serial.println("Relays disabled: commissioning gate is closed.");
+        return;
     }
     allOff();
 }
@@ -37,6 +48,8 @@ bool RelayController::setPumps(bool nextFill, bool nextDrain) {
 }
 bool RelayController::setAerator(bool on) {
     if (!DeviceConfig::ACTUATOR_CONTROL_ENABLED) return false;
+    if (on && !ActuatorConfig::AERATOR_OUTPUTS_ENABLED) return false;
+    if (!ActuatorConfig::AERATOR_OUTPUTS_ENABLED) { air = false; return true; }
     if (!ready) return false;
     writeRelay(Pins::AERATOR_RELAY_GPIO, on); air = on; return true;
 }

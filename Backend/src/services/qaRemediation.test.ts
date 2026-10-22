@@ -21,6 +21,12 @@ test('threshold and device payload schemas reject malformed values', () => {
   assert.equal(sensorIngestSchema.safeParse({ deviceId: 'board', ph: 'malformed' }).success, true);
   assert.equal(sensorIngestSchema.safeParse({ deviceId: 'board', turbidityUnit: 'unsupported' }).success, false);
   assert.equal(feedingDeviceAckSchema.safeParse({ deviceId: 'board', commandId: 'not-a-uuid' }).success, false);
+  assert.equal(feedingDeviceAckSchema.safeParse({ deviceId: 'board', commandId: '9f2f2cbb-5e87-4bb3-a95e-c45d05de97d1' }).success, false);
+  assert.equal(feedingDeviceAckSchema.safeParse({ v: 1, deviceId: 'board', id: '9f2f2cbb-5e87-4bb3-a95e-c45d05de97d1',
+    source: 'feeding', action: 'TRIGGER', result: 'accepted', reportedAt: Date.now(),
+    state: { fillPump: false, drainPump: false, aerator: false, feederBusy: false, buzzer: false, automation: false,
+      waterPhase: 'IDLE', fault: '', relaysReady: false, timeValid: true, wifiConnected: true, mqttConnected: true, uptimeMs: 1 },
+    signature: 'a'.repeat(64) }).success, true);
 });
 
 test('prediction history requests newest records first', async () => {

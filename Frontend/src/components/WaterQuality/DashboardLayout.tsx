@@ -26,7 +26,7 @@ export const DashboardLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#eef2f7] text-gray-800 lg:h-screen lg:overflow-hidden">
-      <div className="min-h-screen lg:grid lg:h-screen lg:grid-cols-[260px_1fr] lg:overflow-hidden">
+      <div className="min-h-screen lg:grid lg:h-screen lg:grid-cols-[280px_1fr] lg:overflow-hidden">
         <div className="sticky top-0 z-30 flex items-center justify-between border-b border-gray-200 bg-white p-4 lg:hidden">
           <div className="flex items-center gap-2">
             <img src={logo} alt="AquaSense" className="h-9 w-9 rounded-full object-cover" />
@@ -57,7 +57,7 @@ export const DashboardLayout: React.FC = () => {
         )}
 
         <aside
-          className={`fixed inset-y-0 left-0 z-40 w-72 overflow-y-auto border-b border-gray-200 bg-white p-5 transition-transform duration-200 lg:static lg:z-auto lg:flex lg:h-screen lg:w-auto lg:flex-col lg:border-b-0 lg:border-r lg:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-40 w-72 overflow-y-auto border-b border-gray-200 bg-white p-5 transition-transform duration-200 lg:static lg:z-auto lg:flex lg:h-screen lg:w-auto lg:flex-col lg:border-b-0 lg:border-r lg:!translate-x-0 ${
             isMenuOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >

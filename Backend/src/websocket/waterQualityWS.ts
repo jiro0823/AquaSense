@@ -348,6 +348,10 @@ class WaterQualityWebSocketServer {
     return this.connectedClients.size;
   }
 
+  public close(): Promise<void> {
+    return new Promise((resolve) => this.io.close(() => resolve()));
+  }
+
   /**
    * Placeholder for data simulation
    * In production, this will receive data from ESP32 IoT device via HTTP POST to /api/v1/water/readings

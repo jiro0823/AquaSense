@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 export const hardwareActions = ['FILL', 'DRAIN', 'WATER_EXCHANGE', 'WATER_STOP', 'AERATOR_ON',
   'AERATOR_OFF', 'AERATOR_AUTO', 'AUTOMATION_ON', 'AUTOMATION_OFF', 'BUZZER_ON',
-  'BUZZER_OFF', 'ALL_OFF', 'CLEAR_FAULT'] as const;
+  'BUZZER_OFF', 'ALL_OFF', 'CLEAR_FAULT', 'STATUS_REQUEST'] as const;
 export type HardwareAction = typeof hardwareActions[number];
 export const COMMAND_TTL_MS = 120_000;
 export const DEVICE_ONLINE_MS = 20_000;
@@ -21,7 +21,13 @@ export const hardwareStateSchema = z.object({
   waterPhase: z.enum(['IDLE', 'DRAINING', 'SETTLING_AFTER_DRAIN', 'REFILLING', 'COOLDOWN', 'COMPLETE', 'FAULT']),
   fault: z.string().max(64), relaysReady: z.boolean(), timeValid: z.boolean(),
   wifiConnected: z.boolean(), mqttConnected: z.boolean(),
+  actuatorCommissioningEnabled: z.boolean().optional(),
   uptimeMs: z.number().int().min(0).max(0xffffffff),
+  scheduleResult: z.object({
+    id: z.string().uuid(),
+    outcome: z.enum(['deferred', 'started', 'completed', 'cancelled', 'skipped_expired', 'skipped_queue_full', 'servo_unavailable']),
+    localMinute: z.number().int().min(0),
+  }).strict().optional(),
 }).strict().superRefine((value, context) => {
   if (value.fillPump && value.drainPump) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Fill and drain cannot both be on' });
 });
@@ -48,7 +54,13 @@ export const commandCanonical = (value: Omit<SignedHardwareCommand, 'signature'>
   `v1|${value.deviceId}|${value.id}|${value.source}|${value.action}|${value.durationMs}|${value.expiresAt}`;
 export const ackCanonical = (value: Omit<SignedHardwareAck, 'signature'>): string => {
   const state = value.state;
-  return `v1|${value.deviceId}|${value.id}|${value.source}|${value.action}|${value.result}|${value.reportedAt}|${bit(state.fillPump)}|${bit(state.drainPump)}|${bit(state.aerator)}|${bit(state.feederBusy)}|${bit(state.buzzer)}|${bit(state.automation)}|${state.waterPhase}|${state.fault}|${bit(state.relaysReady)}|${bit(state.timeValid)}|${bit(state.wifiConnected)}|${bit(state.mqttConnected)}|${state.uptimeMs}`;
+  const base = `v1|${value.deviceId}|${value.id}|${value.source}|${value.action}|${value.result}|${value.reportedAt}|${bit(state.fillPump)}|${bit(state.drainPump)}|${bit(state.aerator)}|${bit(state.feederBusy)}|${bit(state.buzzer)}|${bit(state.automation)}|${state.waterPhase}|${state.fault}|${bit(state.relaysReady)}|${bit(state.timeValid)}|${bit(state.wifiConnected)}|${bit(state.mqttConnected)}|${state.uptimeMs}`;
+  const commissioning = state.actuatorCommissioningEnabled === undefined
+    ? base
+    : `${base}|${bit(state.actuatorCommissioningEnabled)}`;
+  return state.scheduleResult
+    ? `${commissioning}|${state.scheduleResult.id}|${state.scheduleResult.outcome}|${state.scheduleResult.localMinute}`
+    : commissioning;
 };
 export const signCanonical = (canonical: string, key: string): string => createHmac('sha256', key).update(canonical).digest('hex');
 export const verifyCanonical = (canonical: string, signature: string, key: string): boolean => {

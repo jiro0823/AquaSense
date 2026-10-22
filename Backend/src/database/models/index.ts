@@ -74,6 +74,18 @@ const ensureUserSchemaCompat = async (): Promise<void> => {
 const ensureFeedingSchemaCompat = async (): Promise<void> => {
   const sequelize = getDatabase();
 
+  // Keep expired manual commands distinct from device acknowledgments on
+  // existing PostgreSQL deployments. This is idempotent and does not rewrite rows.
+  await sequelize.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'enum_feeding_commands_status') THEN
+        ALTER TYPE enum_feeding_commands_status ADD VALUE IF NOT EXISTS 'FAILED';
+        ALTER TYPE enum_feeding_commands_status ADD VALUE IF NOT EXISTS 'EXPIRED';
+      END IF;
+    END$$;
+  `);
+
   // Existing deployments may have feeding_schedules without `date`.
   await sequelize.query('ALTER TABLE feeding_schedules ADD COLUMN IF NOT EXISTS "date" VARCHAR(10);');
   await sequelize.query('ALTER TABLE feeding_schedules ADD COLUMN IF NOT EXISTS "user_id" UUID;');

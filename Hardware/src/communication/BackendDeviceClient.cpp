@@ -50,6 +50,13 @@ bool BackendDeviceClient::sync(const SystemState& state) {
     report["waterPhase"] = state.waterPhase; report["fault"] = state.fault; report["relaysReady"] = state.relaysReady;
     report["timeValid"] = state.rtcTimeValid; report["wifiConnected"] = state.wifiConnected;
     report["mqttConnected"] = state.mqttConnected; report["uptimeMs"] = state.uptimeMs;
+    report["actuatorCommissioningEnabled"] = state.actuatorCommissioningEnabled;
+    if (state.scheduleResultId[0] && strcmp(state.scheduleResult, "none") != 0 && state.scheduleResultMinute >= 0) {
+        JsonObject scheduleResult = report.createNestedObject("scheduleResult");
+        scheduleResult["id"] = state.scheduleResultId;
+        scheduleResult["outcome"] = state.scheduleResult;
+        scheduleResult["localMinute"] = state.scheduleResultMinute;
+    }
     String body; body.reserve(1024); serializeJson(document, body);
     WiFiClient plainTransport; WiFiClientSecure secureTransport; HTTPClient http;
     const bool secure = DeviceConfig::hasPrefix(DeviceConfig::BACKEND_API_BASE_URL, "https://");

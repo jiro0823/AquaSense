@@ -20,3 +20,15 @@
 #define AQUASENSE_MQTT_TLS 1
 #define AQUASENSE_MQTT_ROOT_CA ""
 #define AQUASENSE_MQTT_DEVICE_SCOPED_TOPICS 1
+
+// Actuator commissioning values: keep commented/defaulted until the user has
+// approved supervised testing and measured safe pump timings at the installed head.
+// The output gate defaults to OFF. Both targets must be less than their maxima;
+// maxima are capped at five minutes by firmware and API pump requests at one minute.
+// #define AQUASENSE_RELAY_OUTPUTS_ENABLED 1
+// #define AQUASENSE_FILL_TARGET_RUNTIME_MS 0
+// #define AQUASENSE_FILL_MAX_RUNTIME_MS 0
+// #define AQUASENSE_DRAIN_TARGET_RUNTIME_MS 0
+// #define AQUASENSE_DRAIN_MAX_RUNTIME_MS 0
+// #define AQUASENSE_WATER_EXCHANGE_SETTLING_MS 0
+// #define AQUASENSE_PUMP_COOLDOWN_MS 0

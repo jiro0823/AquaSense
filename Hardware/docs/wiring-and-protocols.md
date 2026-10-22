@@ -7,21 +7,26 @@ GPIO4 and shared I2C SDA/SCL GPIO21/22. The current monitor source is configured
 for a 20x4 LCD at address 0x27, as in the attached code. The earlier wiring
 diagram labels a 16x2 LCD; verify the physical panel before deployment. Both use
 the same I2C wiring, but only four-row hardware can show the full sensor page.
-The supplied wiring reference sets
-the integrated servo to GPIO13 (older integrated code used GPIO19) and passive
-buzzer to GPIO18.
+The integrated logical actuator GPIO assignments are refill GPIO26, drain GPIO27,
+aerator GPIO25, servo GPIO18, and passive buzzer GPIO19. These are GPIO signal
+assignments only: the source does not establish which physical relay IN terminal
+controls K3 or K4. The user-reported physical load assignments are K3 refill and
+K4 drain. No standalone wiring diagram file is present in this repository to
+verify the module's IN-to-K channel wiring. Before commissioning, trace which
+input is wired to GPIO26 and GPIO27, then identify which inputs switch K3 and K4
+with loads isolated. The intended physical paths are GPIO26 to the input that
+switches K3/refill and GPIO27 to the input that switches K4/drain. If those do
+not match, correct the physical signal leads; keep the firmware's logical GPIO
+roles unchanged. GPIO25 is reserved for the disconnected aerator; GPIO33 is not
+assigned by this firmware.
 
-The diagram routes GPIO25, GPIO26, GPIO27 and GPIO33 to relay IN1..IN4 in order.
-It labels IN1 as fill, IN2 as drain, IN3 as aerator, and IN4 as unused; source
-uses the same assignments. The reported module assignment (K3 refill, K4 drain)
-conflicts with that diagram if K3/K4 refer to board output channels. No physical
-wiring evidence currently resolves the conflict, so do not change GPIO roles.
-Firmware polarity is configured active-LOW from the reported intent, while the
-output commissioning gate remains false. Measure the actual board trigger level,
-channel continuity, and safe OFF behavior before enabling outputs. The relay
-module has a separate 5 V supply and shares ground with ESP32. Verify its input
-bias holds the relay OFF while ESP32 GPIOs are high-impedance during reset;
-firmware cannot drive outputs during reset. There are no float switches.
+Firmware relay polarity is active-LOW; the output commissioning gate defaults
+off and pump timing defaults zero. Optional per-install macros in the ignored
+`config/device_config.local.h` can set the gate and measured pump durations;
+do not set them until supervised electrical checks and runtime measurements are
+complete. The relay module has a separate 5 V supply and shares ground with the
+ESP32. Verify input bias holds relays OFF while GPIOs are high-impedance during
+reset; firmware cannot drive outputs during reset. There are no float switches.
 
 Sensors publish retained values/status under `aquasense/`; actuator commands
 use signed, non-retained, device-scoped MQTT messages after authenticated API

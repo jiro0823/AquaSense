@@ -2,12 +2,14 @@
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include "SensorConversions.h"
 #include "config/DeviceConfig.h"
 #include "config/Pins.h"
-#include "config/Thresholds.h"
 
 namespace {
+constexpr uint32_t TEMPERATURE_DISCOVERY_RETRY_MS = 5000;
+
 bool updateConnection(bool valid, bool& connected, uint8_t& connectCount,
                       uint8_t& disconnectCount, const char* label) {
     if (valid) {
@@ -27,6 +29,22 @@ bool updateConnection(bool valid, bool& connected, uint8_t& connectCount,
     }
     return connected;
 }
+
+const char* analogDiagnosticReason(const AnalogDiagnostics& diagnostics, int connectMin,
+                                   int connectMax, bool connected) {
+    if (DeviceConfig::PUBLIC_MQTT_DEV && SensorConversions::provisionalAcquisitionUsable(
+            diagnostics.rawAdc, diagnostics.minimum, diagnostics.maximum,
+            diagnostics.clipped, diagnostics.voltage, connectMin, connectMax)) return "provisional_preview_usable";
+    if (diagnostics.clipped) return "adc_samples_clipped";
+    if (diagnostics.rawAdc < connectMin) return "below_presence_threshold";
+    if (diagnostics.rawAdc > connectMax) return "above_presence_threshold";
+    if (int(diagnostics.maximum) - int(diagnostics.minimum) > CalibrationConfig::STABILITY_MAX_DEV)
+        return "unstable_sample_spread";
+    if (!connected) return "connection_not_confirmed";
+    if (!CalibrationConfig::ANALOG_CONVERSION_VERIFIED && !DeviceConfig::OFFLINE_CALIBRATION_MODE)
+        return "conversion_unverified";
+    return "ok";
+}
 }
 
 SensorManager::SensorManager() : oneWire(Pins::TEMPERATURE), temperatureSensor(&oneWire) {}
@@ -42,51 +60,65 @@ void SensorManager::begin() {
     temperatureSensor.begin();
     temperatureSensor.setResolution(DeviceConfig::TEMPERATURE_RESOLUTION_BITS);
     temperatureSensor.setWaitForConversion(false);
+    lastTemperatureDiscoveryMs = millis();
+    Serial.printf("DS18B20 discovery at boot: %u device(s) on GPIO%d\n",
+        static_cast<unsigned>(temperatureSensor.getDeviceCount()), Pins::TEMPERATURE);
 }
 
 const SensorReadings& SensorManager::getReadings() const { return readings; }
 
-void SensorManager::printReadings() const {
-    Serial.println("===== SENSOR DATA =====");
-    if (DeviceConfig::OFFLINE_CALIBRATION_MODE) {
-        const char* status = readings.temperatureValid ? "VALID" :
-            readings.temperatureConnected ? "SENSOR_ERROR" : "DISCONNECTED";
-        Serial.printf("DS18B20: %.2f C [%s]; reference calibration pending\n",
-            readings.temperatureC, status);
+void SensorManager::printReadings() {
+    if (!DeviceConfig::SERIAL_DEBUG_MODE) return;
+    const uint8_t temperatureDevices = temperatureSensor.getDeviceCount();
+    if (temperatureDevices == 0) {
+        Serial.printf("DS18B20: detected=NO GPIO=%d reason=no_1wire_device_found retry_ms=%lu\n",
+            Pins::TEMPERATURE, static_cast<unsigned long>(TEMPERATURE_DISCOVERY_RETRY_MS));
     } else {
-        Serial.printf("Temp: %.2f C [%s]\n", readings.temperatureC, readings.temperatureValid ? "valid" : "invalid");
+        const char* reason = "ok";
+        if (!lastTemperatureRawAvailable || lastTemperatureRawC == DEVICE_DISCONNECTED_C)
+            reason = "disconnected_read";
+        else if (!isfinite(lastTemperatureRawC)) reason = "non_finite_read";
+        else if (lastTemperatureRawC <= -55.0f || lastTemperatureRawC >= 125.0f) reason = "outside_sensor_range";
+        else if (!readings.temperatureValid) reason = "reading_not_validated";
+        Serial.printf("DS18B20: detected=YES count=%u raw_c=%.2f value=",
+            static_cast<unsigned>(temperatureDevices), lastTemperatureRawC);
+        if (readings.temperatureValid) Serial.printf("%.2f C", readings.temperatureC);
+        else Serial.print("UNAVAILABLE");
+        Serial.printf(" valid=%s profile_offset=%.2f C reason=%s\n",
+            readings.temperatureValid ? "YES" : "NO", CalibrationConfig::TEMPERATURE_OFFSET_C, reason);
     }
-    if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED && !DeviceConfig::OFFLINE_CALIBRATION_MODE) {
-        Serial.printf("Turbidity: %.2f NTU [%s]\n", readings.turbidityRaw, readings.turbidityValid ? "valid" : "invalid");
-        Serial.printf("pH: %.2f [%s]\n", readings.ph, readings.phValid ? "valid" : "invalid");
-        Serial.printf("ORP: %.2f mV [%s]\n", readings.orpMv, readings.orpValid ? "valid" : "invalid");
-    } else {
-        if (readings.turbidityValid) {
-            Serial.printf("UNVERIFIED turbidity estimate: %.2f NTU; raw ADC=%.1f\n",
-                readings.turbidityRaw, readings.turbidityDiagnostics.rawAdc);
-        } else {
-            Serial.printf("UNVERIFIED turbidity estimate unavailable; raw ADC=%.1f\n", readings.turbidityDiagnostics.rawAdc);
-        }
-        if (readings.phValid) {
-            Serial.printf("UNVERIFIED pH estimate: %.2f; ADC=%.1f pin voltage=%.3f V\n",
-                readings.ph, readings.phDiagnostics.rawAdc, readings.phDiagnostics.voltage);
-        } else {
-            Serial.printf("UNVERIFIED pH estimate unavailable; ADC=%.1f pin voltage=%.3f V\n",
-                readings.phDiagnostics.rawAdc, readings.phDiagnostics.voltage);
-        }
-        if (readings.orpValid) {
-            Serial.printf("UNVERIFIED ORP estimate: %.2f mV; ADC=%.1f pin voltage=%.3f V\n",
-                readings.orpMv, readings.orpDiagnostics.rawAdc, readings.orpDiagnostics.voltage);
-        } else {
-            Serial.printf("UNVERIFIED ORP estimate unavailable; ADC=%.1f pin voltage=%.3f V\n",
-                readings.orpDiagnostics.rawAdc, readings.orpDiagnostics.voltage);
-        }
-    }
-    Serial.printf("ADC pH raw=%.1f range=%u..%u V=%.3f; turbidity raw=%.1f range=%u..%u; ORP raw=%.1f range=%u..%u\n",
-        readings.phDiagnostics.rawAdc, readings.phDiagnostics.minimum, readings.phDiagnostics.maximum,
-        readings.phDiagnostics.voltage, readings.turbidityDiagnostics.rawAdc,
-        readings.turbidityDiagnostics.minimum, readings.turbidityDiagnostics.maximum,
-        readings.orpDiagnostics.rawAdc, readings.orpDiagnostics.minimum, readings.orpDiagnostics.maximum);
+
+    const auto printAnalog = [](const char* name, const AnalogDiagnostics& diagnostics,
+                                int pin, int connectMin, int connectMax, bool connected,
+                                bool valid, float value, const char* unit) {
+        const char* reason = analogDiagnosticReason(diagnostics, connectMin, connectMax, connected);
+        const bool convertedValueValid = valid && CalibrationConfig::ANALOG_CONVERSION_VERIFIED;
+        const bool acquisitionUsable = SensorConversions::provisionalAcquisitionUsable(
+            diagnostics.rawAdc, diagnostics.minimum, diagnostics.maximum,
+            diagnostics.clipped, diagnostics.voltage, connectMin, connectMax);
+        const bool adcVoltageDisagree = diagnostics.rawAdc <= 8.0f && diagnostics.voltage >= 0.05f;
+        Serial.printf("%-9s GPIO%d: connected=%s acquisition_usable=%s converted_valid=%s\n",
+            name, pin, connected ? "YES" : "NO", acquisitionUsable ? "YES" : "NO",
+            convertedValueValid ? "YES" : "NO");
+        Serial.printf("  reason=%s raw_avg=%.1f range=%u..%u clipped=%u pin_voltage=%.0f mV",
+            reason, diagnostics.rawAdc, diagnostics.minimum, diagnostics.maximum,
+            diagnostics.clipped, diagnostics.voltage * 1000.0f);
+        if (adcVoltageDisagree) Serial.print(" ADC_MV_DISAGREE");
+        if (convertedValueValid) Serial.printf(" value=%.2f %s", value, unit);
+        else if (!CalibrationConfig::ANALOG_CONVERSION_VERIFIED && connected && valid)
+            Serial.print(" value=UNVERIFIED");
+        else Serial.print(" value=UNAVAILABLE");
+        Serial.println();
+    };
+    printAnalog("pH", readings.phDiagnostics, Pins::PH, CalibrationConfig::PH_CONNECT_MIN,
+        CalibrationConfig::PH_CONNECT_MAX, readings.phConnected, readings.phValid, readings.ph, "pH");
+    printAnalog("Turbidity", readings.turbidityDiagnostics, Pins::TURBIDITY,
+        CalibrationConfig::TURBIDITY_CONNECT_MIN, CalibrationConfig::TURBIDITY_CONNECT_MAX,
+        readings.turbidityConnected, readings.turbidityValid, readings.turbidityRaw, "NTU");
+    printAnalog("ORP", readings.orpDiagnostics, Pins::ORP, CalibrationConfig::ORP_CONNECT_MIN,
+        CalibrationConfig::ORP_CONNECT_MAX, readings.orpConnected, readings.orpValid, readings.orpMv, "mV");
+    Serial.printf("Analog conversions: %s; raw and millivolt diagnostics are separate acquisitions.\n",
+        CalibrationConfig::ANALOG_CONVERSION_VERIFIED ? "VERIFIED" : "UNVERIFIED");
 }
 
 void SensorManager::startSampling(Phase next, uint32_t nowMs) {
@@ -106,6 +138,26 @@ void SensorManager::startVoltageSampling(Phase next) {
     voltageSumMv = 0;
 }
 
+void SensorManager::requestTemperatureConversion() {
+    const uint32_t requestStartedMs = millis();
+    if (temperatureSensor.getDeviceCount() == 0 &&
+        uint32_t(requestStartedMs - lastTemperatureDiscoveryMs) >= TEMPERATURE_DISCOVERY_RETRY_MS) {
+        lastTemperatureDiscoveryMs = requestStartedMs;
+        temperatureSensor.begin();
+        if (temperatureSensor.getDeviceCount() > 0) {
+            temperatureSensor.setResolution(DeviceConfig::TEMPERATURE_RESOLUTION_BITS);
+            temperatureSensor.setWaitForConversion(false);
+            Serial.printf("DS18B20 discovered after startup: %u device(s) on GPIO%d\n",
+                static_cast<unsigned>(temperatureSensor.getDeviceCount()), Pins::TEMPERATURE);
+        }
+    }
+    temperatureSensor.requestTemperatures();
+    // Start the 12-bit conversion wait from the actual bus request, not from
+    // the loop timestamp captured before the analog acquisition burst.
+    phaseStartedMs = millis();
+    phase = Phase::Temperature;
+}
+
 void SensorManager::update(uint32_t nowMs) {
     if (phase == Phase::Idle) {
         if (hasSample && uint32_t(nowMs - lastSampleStartedMs) < DeviceConfig::SENSOR_READ_INTERVAL_MS) return;
@@ -121,9 +173,11 @@ void SensorManager::update(uint32_t nowMs) {
         if (uint32_t(nowMs - phaseStartedMs) < DeviceConfig::TEMPERATURE_CONVERSION_MS) return;
         const bool devicePresent = temperatureSensor.getDeviceCount() > 0;
         const float raw = devicePresent ? temperatureSensor.getTempCByIndex(0) : DEVICE_DISCONNECTED_C;
+        lastTemperatureRawAvailable = devicePresent;
+        lastTemperatureRawC = raw;
         const float corrected = raw + CalibrationConfig::TEMPERATURE_OFFSET_C;
-        const bool sampleValid = raw != DEVICE_DISCONNECTED_C && isfinite(corrected) &&
-            corrected > Thresholds::TEMPERATURE_MIN_C && corrected < Thresholds::TEMPERATURE_MAX_C;
+        const bool sampleValid = devicePresent && raw != DEVICE_DISCONNECTED_C &&
+            raw > -55.0f && raw < 125.0f && isfinite(corrected);
         pending.temperatureC = NAN;
         pending.temperatureValid = false;
         pending.temperatureConnected = updateConnection(sampleValid, pending.temperatureConnected,
@@ -173,16 +227,16 @@ void SensorManager::update(uint32_t nowMs) {
             }
             pending.orpDiagnostics = burst;
             delayMicroseconds(200);
-            temperatureSensor.requestTemperatures();
-            phaseStartedMs = nowMs;
-            phase = Phase::Temperature;
+            requestTemperatureConversion();
         }
         return;
     }
     adcSum = 0;
+    voltageSumMv = 0;
     for (uint8_t i = 0; i < DeviceConfig::ADC_SAMPLE_COUNT; ++i) {
         const uint16_t count = analogRead(pin);
         adcSum += count;
+        voltageSumMv += analogReadMilliVolts(pin);
         burst.minimum = count < burst.minimum ? count : burst.minimum;
         burst.maximum = count > burst.maximum ? count : burst.maximum;
         burst.last = count;
@@ -193,14 +247,19 @@ void SensorManager::update(uint32_t nowMs) {
     // Integer division matches the supplied Arduino sketch's ADC averaging.
     const int raw = adcSum / DeviceConfig::ADC_SAMPLE_COUNT;
     burst.rawAdc = float(adcSum) / DeviceConfig::ADC_SAMPLE_COUNT;
+    // Keep raw and calibrated voltage diagnostics separate but average both
+    // paths over the same number of acquisitions, including below threshold.
+    // pH/ORP accepted by their presence threshold use their existing 20-sample
+    // calibrated-voltage conversion burst below.
+    burst.voltage = float(voltageSumMv) / DeviceConfig::ADC_SAMPLE_COUNT / 1000.0f;
     burst.sampledAtMs = nowMs;
     const int deviation = int(burst.maximum) - int(burst.minimum);
     bool connected = false;
     if (phase == Phase::Turbidity) {
         pending.turbidityDiagnostics = burst;
-        connected = raw >= CalibrationConfig::TURBIDITY_CONNECT_MIN && raw <= CalibrationConfig::TURBIDITY_CONNECT_MAX &&
-                    deviation <= CalibrationConfig::STABILITY_MAX_DEV && burst.clipped == 0 &&
-                    SensorConversions::adcUsable(uint16_t(raw));
+        connected = burst.clipped == 0 && SensorConversions::adcUsable(uint16_t(raw)) &&
+                    raw >= CalibrationConfig::TURBIDITY_CONNECT_MIN && raw <= CalibrationConfig::TURBIDITY_CONNECT_MAX &&
+                    deviation <= CalibrationConfig::STABILITY_MAX_DEV;
         pending.turbidityRaw = NAN;
         pending.turbidityValid = false;
         pending.turbidityConnected = updateConnection(connected, pending.turbidityConnected,
@@ -218,33 +277,39 @@ void SensorManager::update(uint32_t nowMs) {
         startSampling(Phase::Orp, nowMs);
     } else if (phase == Phase::Ph) {
         pending.phDiagnostics = burst;
-        connected = raw >= CalibrationConfig::PH_CONNECT_MIN && raw <= CalibrationConfig::PH_CONNECT_MAX &&
-                    deviation <= CalibrationConfig::STABILITY_MAX_DEV && burst.clipped == 0 &&
-                    SensorConversions::adcUsable(uint16_t(raw));
+        connected = burst.clipped == 0 && SensorConversions::adcUsable(uint16_t(raw)) &&
+                    raw >= CalibrationConfig::PH_CONNECT_MIN && raw <= CalibrationConfig::PH_CONNECT_MAX &&
+                    deviation <= CalibrationConfig::STABILITY_MAX_DEV;
         pending.ph = NAN;
         pending.phValid = false;
         pending.phConnected = updateConnection(connected, pending.phConnected,
             phConnectCount, phDisconnectCount, "pH");
-        if (connected) {
+        const bool previewUsable = DeviceConfig::PUBLIC_MQTT_DEV &&
+            SensorConversions::provisionalAcquisitionUsable(burst.rawAdc, burst.minimum,
+                burst.maximum, burst.clipped, burst.voltage,
+                CalibrationConfig::PH_CONNECT_MIN, CalibrationConfig::PH_CONNECT_MAX);
+        if (connected || previewUsable) {
             startVoltageSampling(Phase::PhVoltage);
         } else {
             startSampling(Phase::Turbidity, nowMs);
         }
     } else {
         pending.orpDiagnostics = burst;
-        connected = raw >= CalibrationConfig::ORP_CONNECT_MIN && raw <= CalibrationConfig::ORP_CONNECT_MAX &&
-                    deviation <= CalibrationConfig::STABILITY_MAX_DEV && burst.clipped == 0 &&
-                    SensorConversions::adcUsable(uint16_t(raw));
+        connected = burst.clipped == 0 && SensorConversions::adcUsable(uint16_t(raw)) &&
+                    raw >= CalibrationConfig::ORP_CONNECT_MIN && raw <= CalibrationConfig::ORP_CONNECT_MAX &&
+                    deviation <= CalibrationConfig::STABILITY_MAX_DEV;
         pending.orpMv = NAN;
         pending.orpValid = false;
         pending.orpConnected = updateConnection(connected, pending.orpConnected,
             orpConnectCount, orpDisconnectCount, "ORP");
-        if (connected) {
+        const bool previewUsable = DeviceConfig::PUBLIC_MQTT_DEV &&
+            SensorConversions::provisionalAcquisitionUsable(burst.rawAdc, burst.minimum,
+                burst.maximum, burst.clipped, burst.voltage,
+                CalibrationConfig::ORP_CONNECT_MIN, CalibrationConfig::ORP_CONNECT_MAX);
+        if (connected || previewUsable) {
             startVoltageSampling(Phase::OrpVoltage);
         } else {
-            temperatureSensor.requestTemperatures();
-            phaseStartedMs = nowMs;
-            phase = Phase::Temperature;
+            requestTemperatureConversion();
         }
     }
 }

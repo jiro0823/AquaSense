@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { z, ZodSchema } from 'zod';
 import { sendError } from '../utils/response';
+import { signedAckSchema } from '../services/hardwareProtocol';
 
 export const validateBody = <T>(schema: ZodSchema<T>) => (req: Request, res: Response, next: NextFunction): void => {
   const result = schema.safeParse(req.body);
@@ -164,9 +165,5 @@ export const alertQuerySchema = z.object({
 export const timeRangeQuerySchema = z.object({ minutes: z.coerce.number().int().min(1).max(1440).default(60) }).strict();
 export const limitQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }).strict();
 
-export const feedingDeviceAckSchema = z.object({
-  deviceId: z.string().trim().min(1).max(120),
-  commandId: z.string().uuid(),
-  result: z.string().trim().min(1).max(64).optional(),
-}).strict();
+export const feedingDeviceAckSchema = signedAckSchema;
 export const feedingDeviceSyncSchema = z.object({ deviceId: z.string().trim().min(1).max(120) }).strict();

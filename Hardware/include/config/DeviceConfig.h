@@ -31,8 +31,14 @@
 #ifndef AQUASENSE_MQTT_DEVICE_SCOPED_TOPICS
 #define AQUASENSE_MQTT_DEVICE_SCOPED_TOPICS 0
 #endif
+#ifndef AQUASENSE_MQTT_TOPIC_NAMESPACE
+#define AQUASENSE_MQTT_TOPIC_NAMESPACE "aquasense"
+#endif
 #ifndef AQUASENSE_LCD_ANALOG_DIAGNOSTIC_MODE
 #define AQUASENSE_LCD_ANALOG_DIAGNOSTIC_MODE 0
+#endif
+#ifndef AQUASENSE_SERIAL_DEBUG
+#define AQUASENSE_SERIAL_DEBUG 0
 #endif
 
 namespace DeviceConfig {
@@ -137,12 +143,33 @@ constexpr int32_t LOCAL_OFFSET_SECONDS = 8 * 3600;
 constexpr const char* NTP_PRIMARY = "pool.ntp.org";
 constexpr const char* NTP_SECONDARY = "time.nist.gov";
 
+#if defined(AQUASENSE_PUBLIC_MQTT_DEV) && defined(AQUASENSE_PRODUCTION_BUILD)
+#error "The public MQTT development profile cannot be used for production builds."
+#endif
+#if defined(AQUASENSE_PUBLIC_MQTT_DEV)
+constexpr bool PUBLIC_MQTT_DEV = true;
+constexpr const char* MQTT_HOST = "broker.hivemq.com";
+constexpr uint16_t MQTT_PORT = 1883;
+constexpr const char* MQTT_ROOT_CA = "";
+constexpr bool MQTT_TLS_ENABLED = false;
+constexpr bool MQTT_DEVICE_SCOPED_TOPICS = true;
+// Isolate development traffic from production and unrelated public-broker topics.
+constexpr const char* MQTT_TOPIC_NAMESPACE = "aquasense-dev";
+constexpr bool MQTT_ACTUATOR_COMMANDS_ENABLED = false;
+#else
+constexpr bool PUBLIC_MQTT_DEV = false;
 constexpr const char* MQTT_HOST = AQUASENSE_MQTT_HOST;
 constexpr uint16_t MQTT_PORT = AQUASENSE_MQTT_PORT;
 constexpr const char* MQTT_ROOT_CA = AQUASENSE_MQTT_ROOT_CA;
 constexpr bool MQTT_TLS_ENABLED = AQUASENSE_MQTT_TLS != 0;
 constexpr bool MQTT_DEVICE_SCOPED_TOPICS = AQUASENSE_MQTT_DEVICE_SCOPED_TOPICS != 0;
+constexpr const char* MQTT_TOPIC_NAMESPACE = AQUASENSE_MQTT_TOPIC_NAMESPACE;
+// Do not accept actuator control on the default anonymous/plain MQTT profile.
+// Secure non-production profiles must opt in with TLS and device-scoped topics.
+constexpr bool MQTT_ACTUATOR_COMMANDS_ENABLED = MQTT_TLS_ENABLED && MQTT_DEVICE_SCOPED_TOPICS;
+#endif
 constexpr bool LCD_ANALOG_DIAGNOSTIC_MODE = AQUASENSE_LCD_ANALOG_DIAGNOSTIC_MODE != 0;
+constexpr bool SERIAL_DEBUG_MODE = AQUASENSE_SERIAL_DEBUG != 0;
 #if defined(AQUASENSE_PRODUCTION_BUILD) && (!AQUASENSE_MQTT_TLS || !AQUASENSE_MQTT_DEVICE_SCOPED_TOPICS)
 #error "Production MQTT requires TLS and device-scoped topics."
 #endif

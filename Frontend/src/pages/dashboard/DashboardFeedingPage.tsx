@@ -6,9 +6,11 @@ import { apiClient, getApiErrorMessage } from '../../services/apiClient';
 const inputClass = 'rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400';
 
 interface Device { deviceId: string; name?: string; isActive: boolean }
-interface FeedingCommand { id: string; action: string; status: 'PENDING' | 'ACKED'; metadata?: Record<string, unknown> | null; executedAt?: string | null; createdAt?: string }
+interface FeedingCommand { id: string; action: string; status: 'PENDING' | 'ACKED' | 'FAILED' | 'EXPIRED'; metadata?: Record<string, unknown> | null; executedAt?: string | null; createdAt?: string }
 interface FeedingState { scheduleCount: number; enabledCount: number; pendingCommands: number; lastCommand: FeedingCommand | null }
-interface HardwareState { deviceId: string; online: boolean; receivedAt: string | null; state: null | { feederBusy: boolean } }
+interface HardwareState { deviceId: string; online: boolean; receivedAt: string | null; state: null | {
+  feederBusy: boolean; actuatorCommissioningEnabled?: boolean; scheduleResult?: { id: string; outcome: string; localMinute: number }
+} }
 
 const Pill = ({ label, tone }: { label: string; tone: 'emerald' | 'amber' | 'gray' }) => {
   const styles = {
@@ -37,6 +39,8 @@ const DashboardFeedingPage: React.FC = () => {
   const [hardwareState, setHardwareState] = useState<HardwareState | null>(null);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
@@ -46,6 +50,23 @@ const DashboardFeedingPage: React.FC = () => {
   const [editTime, setEditTime] = useState('');
   const [editLabel, setEditLabel] = useState('');
   const enabledCount = feedingSchedules.filter((item) => item.enabled).length;
+  const deviceStateFresh = Boolean(
+    deviceId &&
+    devices.some((device) => device.deviceId === deviceId) &&
+    hardwareState?.deviceId === deviceId &&
+    hardwareState.online &&
+    loadedAt !== null &&
+    Date.now() - loadedAt < 20000
+  );
+  const manualControlStatus = !deviceId
+    ? 'NO DEVICE'
+    : !deviceStateFresh
+      ? 'OFFLINE / STALE'
+      : hardwareState?.state?.actuatorCommissioningEnabled !== true
+        ? 'COMMISSIONING DISABLED'
+        : hardwareState?.state?.feederBusy
+        ? 'FEEDING'
+        : 'IDLE';
 
   const refreshState = useCallback(async (selectedId = deviceId) => {
     if (!selectedId) return;
@@ -82,20 +103,47 @@ const DashboardFeedingPage: React.FC = () => {
   }, [deviceId, refreshState]);
 
   const runManual = async (action: 'ON' | 'OFF' | 'TRIGGER') => {
+    if (!deviceStateFresh) {
+      setActionError('Select an active device with fresh online state before sending a feeder command.');
+      return;
+    }
     try {
       setManualBusy(true);
+      setActionError(null);
+      setActionNotice(null);
       await triggerManual(action, deviceId);
       await refreshState();
+      setActionNotice(`${action === 'TRIGGER' ? 'Feed' : `Feeder ${action}`} command queued. Device acknowledgment does not confirm food was dispensed.`);
+    } catch (cause) {
+      setActionError(getApiErrorMessage(cause, 'Feeder command failed. Check the device connection and try again.'));
     } finally {
       setManualBusy(false);
     }
   };
 
   const saveSchedule = async () => {
-    await addSchedule(scheduleDate, scheduleTime, scheduleLabel);
-    setScheduleDate('');
-    setScheduleTime('');
-    setScheduleLabel('');
+    try {
+      setActionError(null);
+      setActionNotice(null);
+      await addSchedule(scheduleDate, scheduleTime, scheduleLabel);
+      setScheduleDate('');
+      setScheduleTime('');
+      setScheduleLabel('');
+      setActionNotice('Schedule saved. Device synchronization and scheduled execution are reported separately.');
+    } catch (cause) {
+      setActionError(getApiErrorMessage(cause, 'Unable to save feeding schedule.'));
+    }
+  };
+
+  const runScheduleChange = async (operation: () => Promise<void>, successMessage: string) => {
+    try {
+      setActionError(null);
+      setActionNotice(null);
+      await operation();
+      setActionNotice(successMessage);
+    } catch (cause) {
+      setActionError(getApiErrorMessage(cause, 'Unable to update feeding schedule.'));
+    }
   };
 
   return (
@@ -117,7 +165,7 @@ const DashboardFeedingPage: React.FC = () => {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Manual Control
             </h3>
-            <Pill label={manualBusy ? 'Sending' : hardwareState?.state?.feederBusy ? 'Feeding' : 'Ready'} tone={manualBusy || hardwareState?.state?.feederBusy ? 'amber' : 'emerald'} />
+            <Pill label={manualBusy ? 'Sending' : manualControlStatus} tone={manualBusy || hardwareState?.state?.feederBusy ? 'amber' : deviceStateFresh ? 'emerald' : 'gray'} />
           </div>
           <label className="mb-2 block text-[10px] font-semibold text-gray-600" htmlFor="feeding-device">Device</label>
           <select id="feeding-device" value={deviceId} onChange={(event) => { setDeviceId(event.target.value); setFeedingState(null); setHardwareState(null); setLoadedAt(null); }} className="mb-2 w-full rounded border border-gray-200 bg-gray-50 p-2 text-xs">
@@ -125,19 +173,22 @@ const DashboardFeedingPage: React.FC = () => {
             {devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} ({device.deviceId})</option>)}
           </select>
           <div className="mb-2 grid grid-cols-2 gap-2 text-[10px] text-gray-600">
-            <span>Device: <strong>{hardwareState?.online && loadedAt !== null && Date.now() - loadedAt < 20000 ? 'ONLINE' : 'OFFLINE / STALE'}</strong></span>
+              <span>Device: <strong>{deviceStateFresh ? 'ONLINE' : 'OFFLINE / STALE'}</strong></span>
             <span>Feeder state: <strong>{hardwareState?.state ? (hardwareState.state.feederBusy ? 'FEEDING' : 'IDLE') : 'UNKNOWN'}</strong></span>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <button disabled={manualBusy} onClick={() => void runManual('ON')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">ON</button>
-            <button disabled={manualBusy} onClick={() => void runManual('OFF')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-40">OFF</button>
-            <button disabled={manualBusy} onClick={() => void runManual('TRIGGER')} className="px-3 py-2 text-xs font-semibold text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">Feed</button>
+            <button disabled={manualBusy || !deviceStateFresh || hardwareState?.state?.actuatorCommissioningEnabled !== true} onClick={() => void runManual('ON')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">ON</button>
+            <button disabled={!deviceId || manualBusy} onClick={() => void runManual('OFF')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-40">OFF</button>
+            <button disabled={manualBusy || !deviceStateFresh || hardwareState?.state?.actuatorCommissioningEnabled !== true} onClick={() => void runManual('TRIGGER')} className="px-3 py-2 text-xs font-semibold text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">Feed</button>
           </div>
           <p className="mt-2 text-[10px] text-gray-400">State is device-reported logical status; it does not confirm food was physically dispensed. Manual commands use the backend feeder command endpoint.</p>
           <p className="mt-2 text-[10px] text-gray-600" aria-live="polite">{feedingState?.lastCommand ? `Latest command ${feedingState.lastCommand.action}: ${feedingState.lastCommand.status}${feedingState.lastCommand.metadata?.deviceResult ? ` · ${String(feedingState.lastCommand.metadata.deviceResult)}` : ''}` : 'No reported feeding command'}{manualBusy ? ' · PENDING' : ''}</p>
+          {hardwareState?.state?.scheduleResult && <p className="mt-1 text-[10px] text-gray-600" aria-live="polite">Latest device-reported schedule status (logical only): {hardwareState.state.scheduleResult.outcome.replace(/_/g, ' ')} ({hardwareState.state.scheduleResult.id})</p>}
           {feedingState?.lastCommand?.id && <p className="mt-1 break-all text-[10px] text-gray-400">Command ID: {feedingState.lastCommand.id}</p>}
           {loadedAt && <p className="mt-1 text-[10px] text-gray-400">Last state poll: {new Date(loadedAt).toLocaleTimeString()}</p>}
           {stateError && <p role="alert" className="mt-1 text-[10px] text-rose-700">{stateError}</p>}
+          {actionNotice && <p role="status" className="mt-1 text-[10px] text-emerald-700" aria-live="polite">{actionNotice}</p>}
+          {actionError && <p role="alert" className="mt-1 text-[10px] text-rose-700">{actionError}</p>}
         </div>
 
         <div className="p-3 bg-white border border-gray-200 shadow-sm rounded-xl">
@@ -180,7 +231,7 @@ const DashboardFeedingPage: React.FC = () => {
                       <input type="text" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} className={inputClass} />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => void updateSchedule(item.id, editDate, editTime, editLabel).then(() => setEditingScheduleId(null))} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-700 transition-colors">Save</button>
+                      <button onClick={() => void runScheduleChange(async () => { await updateSchedule(item.id, editDate, editTime, editLabel); setEditingScheduleId(null); }, 'Schedule updated.')} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-700 transition-colors">Save</button>
                       <button onClick={() => setEditingScheduleId(null)} className="rounded-lg bg-gray-200 px-3 py-1.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-300 transition-colors">Cancel</button>
                     </div>
                   </div>
@@ -193,8 +244,8 @@ const DashboardFeedingPage: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Pill label={item.enabled ? 'Enabled' : 'Disabled'} tone={item.enabled ? 'emerald' : 'gray'} />
                       <button onClick={() => { setEditingScheduleId(item.id); setEditDate(item.date || ''); setEditTime(item.time); setEditLabel(item.label || ''); }} className="rounded-lg bg-gray-200 px-2.5 py-1 text-[10px] font-semibold text-gray-700 hover:bg-gray-300 transition-colors">Edit</button>
-                      <button onClick={() => void toggleSchedule(item)} className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-amber-600 transition-colors">{item.enabled ? 'Disable' : 'Enable'}</button>
-                      <button onClick={() => void removeSchedule(item.id)} className="rounded-lg bg-rose-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-rose-600 transition-colors">Remove</button>
+                      <button onClick={() => void runScheduleChange(() => toggleSchedule(item), `Schedule ${item.enabled ? 'disabled' : 'enabled'}.`)} className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-amber-600 transition-colors">{item.enabled ? 'Disable' : 'Enable'}</button>
+                      <button onClick={() => void runScheduleChange(() => removeSchedule(item.id), 'Schedule removed.')} className="rounded-lg bg-rose-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-rose-600 transition-colors">Remove</button>
                     </div>
                   </div>
                 )}

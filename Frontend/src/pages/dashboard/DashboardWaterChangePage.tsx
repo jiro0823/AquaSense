@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
 import { apiClient, getApiErrorMessage } from '../../services/apiClient';
 
@@ -7,13 +7,13 @@ interface HardwareState {
   deviceId: string;
   online: boolean;
   receivedAt: string | null;
-  state: null | { fillPump: boolean; drainPump: boolean; waterPhase: 'IDLE' | 'DRAINING' | 'SETTLING_AFTER_DRAIN' | 'REFILLING' | 'COOLDOWN' | 'COMPLETE' | 'FAULT'; fault: string; automation: boolean };
+  state: null | { fillPump: boolean; drainPump: boolean; relaysReady: boolean; actuatorCommissioningEnabled?: boolean; waterPhase: 'IDLE' | 'DRAINING' | 'SETTLING_AFTER_DRAIN' | 'REFILLING' | 'COOLDOWN' | 'COMPLETE' | 'FAULT'; fault: string; automation: boolean };
   commands?: ApiCommand[];
 }
 interface ApiCommand {
   id: string;
   action: string;
-  status: 'PENDING' | 'ACKED' | 'EXPIRED';
+  status: 'PENDING' | 'ACKED' | 'FAILED' | 'EXPIRED';
   result?: string | null;
   durationMs?: number | null;
   expiresAt?: string;
@@ -30,11 +30,16 @@ const WaterChangePage: React.FC = () => {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const selectedDeviceRef = useRef(deviceId);
+  const stateRequestRef = useRef(0);
+  selectedDeviceRef.current = deviceId;
 
   const refresh = useCallback(async (selectedId = deviceId) => {
     if (!selectedId) return;
+    const requestId = ++stateRequestRef.current;
     try {
       const response = await apiClient.get<HardwareState & { commands?: ApiCommand[] }>(`/hardware/state?deviceId=${encodeURIComponent(selectedId)}`);
+      if (selectedDeviceRef.current !== selectedId || stateRequestRef.current !== requestId || response.data.deviceId !== selectedId) return;
       setHardware(response.data);
       setTrackedCommand((current) => {
         if (!current || current.status !== 'PENDING') return current;
@@ -46,6 +51,7 @@ const WaterChangePage: React.FC = () => {
       setLoadedAt(Date.now());
       setError(null);
     } catch (cause) {
+      if (selectedDeviceRef.current !== selectedId || stateRequestRef.current !== requestId) return;
       setError(getApiErrorMessage(cause, 'Unable to read device state.'));
     }
   }, [deviceId]);
@@ -68,11 +74,12 @@ const WaterChangePage: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [deviceId, refresh]);
 
-  const command = async (action: 'DRAIN' | 'FILL' | 'WATER_EXCHANGE' | 'WATER_STOP') => {
+  const command = async (action: 'DRAIN' | 'FILL' | 'WATER_EXCHANGE' | 'ALL_OFF' | 'STATUS_REQUEST') => {
     if (!deviceId || pending) return;
-    const durationMs = action === 'WATER_STOP' ? undefined : Number(durationSeconds) * 1000;
+    const requiresDuration = ['DRAIN', 'FILL', 'WATER_EXCHANGE'].includes(action);
+    const durationMs = requiresDuration ? Number(durationSeconds) * 1000 : undefined;
     const seconds = Number(durationSeconds);
-    if (action !== 'WATER_STOP' && (!Number.isInteger(seconds) || seconds < 1 || seconds > 60)) {
+    if (requiresDuration && (!Number.isInteger(seconds) || seconds < 1 || seconds > 60)) {
       setError('Enter a pump duration from 1 to 60 seconds.');
       return;
     }
@@ -92,12 +99,15 @@ const WaterChangePage: React.FC = () => {
 
   const state = hardware?.state;
   const fresh = hardware?.online === true && loadedAt !== null && Date.now() - loadedAt < 20000;
-  const pumpCommands = hardware?.commands?.filter((item) => ['FILL', 'DRAIN', 'WATER_EXCHANGE', 'WATER_STOP'].includes(item.action)) ?? [];
+  const pumpCommands = hardware?.commands?.filter((item) => ['FILL', 'DRAIN', 'WATER_EXCHANGE', 'WATER_STOP', 'ALL_OFF'].includes(item.action)) ?? [];
   const stateText = !hardware || !fresh ? 'OFFLINE / STALE' : state?.waterPhase || 'UNKNOWN';
+  const startsEnabled = Boolean(deviceId && fresh && state?.actuatorCommissioningEnabled === true && state.relaysReady);
   const commandStatus = !trackedCommand ? 'No command sent in this session'
     : trackedCommand.status === 'PENDING' ? 'QUEUED — awaiting device acknowledgement'
       : trackedCommand.status === 'TIMEOUT' ? 'TIMEOUT — device acknowledgement was not received before command expiry'
-        : trackedCommand.status === 'EXPIRED' ? 'EXPIRED — device did not execute this command'
+      : trackedCommand.status === 'EXPIRED' ? 'EXPIRED — device did not execute this command'
+        : trackedCommand.status === 'FAILED' ? `DEVICE REJECTED — ${trackedCommand.result || 'execution was not accepted'}`
+        : trackedCommand.action === 'STATUS_REQUEST' && trackedCommand.result === 'status_reported' ? 'DEVICE STATUS RECEIVED — no actuator action was requested'
           : trackedCommand.result === 'accepted' ? 'DEVICE ACKNOWLEDGED — command accepted'
             : `DEVICE REJECTED — ${trackedCommand.result || 'execution was not accepted'}`;
 
@@ -116,11 +126,13 @@ const WaterChangePage: React.FC = () => {
         </select>
         <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
           <div><span className="text-gray-500">Device</span><p className="font-semibold">{fresh ? 'ONLINE' : 'OFFLINE / STALE'}</p></div>
+          <div><span className="text-gray-500">Actuator commissioning</span><p className="font-semibold">{fresh && state ? (state.actuatorCommissioningEnabled === true ? 'ENABLED' : 'DISABLED') : 'UNKNOWN'}</p></div>
           <div><span className="text-gray-500">Water phase</span><p className="font-semibold">{stateText}</p></div>
           <div><span className="text-gray-500">Drain output (logical)</span><p className="font-semibold">{fresh && state ? (state.drainPump ? 'ON' : 'OFF') : 'UNKNOWN'}</p></div>
           <div><span className="text-gray-500">Fill output (logical)</span><p className="font-semibold">{fresh && state ? (state.fillPump ? 'ON' : 'OFF') : 'UNKNOWN'}</p></div>
         </div>
         <p className="mt-3 text-[11px] text-gray-500">State reported {hardware?.receivedAt ? new Date(hardware.receivedAt).toLocaleString() : 'not yet reported'}{state?.fault ? ` · Fault: ${state.fault}` : ''}</p>
+        <p className="mt-1 text-[11px] text-gray-600">Relay control: {!fresh ? 'unavailable until a fresh device report arrives' : state?.relaysReady ? 'ready according to device report' : 'disabled by device commissioning configuration'}.</p>
         <p className="mt-1 text-[11px] text-gray-500">Automation {state?.automation ? 'enabled on device' : 'disabled on device'}. The device firmware owns automatic water-change decisions; predictive risk on this page does not start pumps.</p>
       </div>
 
@@ -129,11 +141,14 @@ const WaterChangePage: React.FC = () => {
         <label className="block mt-3 text-xs font-semibold text-gray-600" htmlFor="pump-duration">Duration (seconds, required by the API)</label>
         <input id="pump-duration" type="number" min="1" max="60" step="1" value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)} placeholder="Enter duration (max 60 seconds)" className="w-full p-2 mt-1 text-sm border rounded" />
         <div className="grid grid-cols-2 gap-2 mt-3">
-          <button disabled={!deviceId || pending} onClick={() => void command('DRAIN')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-cyan-700 disabled:opacity-40">Drain for duration</button>
-          <button disabled={!deviceId || pending} onClick={() => void command('FILL')} className="px-3 py-2 text-xs font-semibold text-white bg-blue-700 rounded-lg disabled:opacity-40">Fill for duration</button>
-          <button disabled={!deviceId || pending} onClick={() => void command('WATER_EXCHANGE')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-violet-700 disabled:opacity-40">Exchange (commissioned targets)</button>
-          <button disabled={!deviceId || pending} onClick={() => void command('WATER_STOP')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-rose-700 disabled:opacity-40">Stop</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('STATUS_REQUEST')} className="px-3 py-2 text-xs font-semibold text-white bg-slate-700 rounded-lg disabled:opacity-40">Request device status (read only)</button>
+          <button disabled={!startsEnabled || pending} onClick={() => void command('DRAIN')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-cyan-700 disabled:opacity-40">Drain for duration</button>
+          <button disabled={!startsEnabled || pending} onClick={() => void command('FILL')} className="px-3 py-2 text-xs font-semibold text-white bg-blue-700 rounded-lg disabled:opacity-40">Fill for duration</button>
+          <button disabled={!startsEnabled || pending} onClick={() => void command('WATER_EXCHANGE')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-violet-700 disabled:opacity-40">Exchange (commissioned targets)</button>
+          <button disabled={!deviceId || pending} onClick={() => void command('ALL_OFF')} className="px-3 py-2 text-xs font-semibold text-white rounded-lg bg-rose-700 disabled:opacity-40">Emergency STOP (all outputs)</button>
         </div>
+        <p className="mt-2 text-[11px] text-gray-500">Status request uses the signed MQTT command and acknowledgment path. It does not operate GPIO or require relay commissioning.</p>
+        <p className="mt-2 text-[11px] text-rose-700">This network command requests all firmware outputs off. It is not a physical emergency disconnect and cannot guarantee stopping if the backend or device is unreachable.</p>
         <p className="mt-2 text-[11px] text-gray-500">FILL and DRAIN requests are capped at 60 seconds and may not exceed the commissioned pump target. WATER_EXCHANGE uses its separately commissioned drain and fill targets; the entered duration is required for API compatibility. Pump controls remain fail-closed until timing and relay settings are commissioned.</p>
         <p className="mt-3 text-xs" aria-live="polite">{pending ? 'Submitting command…' : commandStatus}</p>
         {trackedCommand && <p className="mt-1 text-[10px] text-gray-500">Command {trackedCommand.id} · {trackedCommand.action}</p>}

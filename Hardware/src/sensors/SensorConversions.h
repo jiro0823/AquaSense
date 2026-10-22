@@ -1,4 +1,6 @@
 #pragma once
+#include <math.h>
+#include <stdint.h>
 #include "config/CalibrationConfig.h"
 #include "config/Thresholds.h"
 
@@ -15,10 +17,38 @@ constexpr float filter(float previous, float current, bool initialized) {
 constexpr float phFromVoltage(float volts) {
     return volts * CalibrationConfig::PH_SLOPE + CalibrationConfig::PH_OFFSET;
 }
+constexpr float provisionalPhFromVoltage(float volts) {
+    return phFromVoltage(volts) < 0.0f ? 0.0f :
+        phFromVoltage(volts) > 14.0f ? 14.0f : phFromVoltage(volts);
+}
 constexpr float orpFromVoltage(float volts) {
     return volts * CalibrationConfig::ORP_SLOPE + CalibrationConfig::ORP_OFFSET;
 }
 constexpr float turbidityFromAdc(int raw) {
+    return ((CalibrationConfig::TURBIDITY_CLEAR_ADC - raw) /
+        (CalibrationConfig::TURBIDITY_CLEAR_ADC - CalibrationConfig::TURBIDITY_DIRTY_ADC)) *
+        CalibrationConfig::TURBIDITY_DIRTY_NTU < 0.0f ? 0.0f :
+        ((CalibrationConfig::TURBIDITY_CLEAR_ADC - raw) /
+         (CalibrationConfig::TURBIDITY_CLEAR_ADC - CalibrationConfig::TURBIDITY_DIRTY_ADC)) *
+        CalibrationConfig::TURBIDITY_DIRTY_NTU > CalibrationConfig::TURBIDITY_DIRTY_NTU ?
+        CalibrationConfig::TURBIDITY_DIRTY_NTU :
+        ((CalibrationConfig::TURBIDITY_CLEAR_ADC - raw) /
+         (CalibrationConfig::TURBIDITY_CLEAR_ADC - CalibrationConfig::TURBIDITY_DIRTY_ADC)) *
+        CalibrationConfig::TURBIDITY_DIRTY_NTU;
+}
+// Development-only local preview: separate from validated SensorReadings and
+// MQTT. Do not use presence heuristics to block a usable raw acquisition, but
+// still reject ADC rails/clipping, unstable bursts, and invalid pin voltages.
+inline bool provisionalAcquisitionUsable(float raw, uint16_t minimum, uint16_t maximum,
+                                         uint8_t clipped, float voltage,
+                                         int connectMin, int connectMax) {
+    return isfinite(raw) && raw >= connectMin && raw <= connectMax &&
+        raw > 8.0f && raw < CalibrationConfig::ADC_MAX - 8.0f &&
+        clipped == 0 && maximum >= minimum &&
+        int(maximum) - int(minimum) <= CalibrationConfig::STABILITY_MAX_DEV &&
+        isfinite(voltage) && voltage > 0.0f && voltage <= 3.3f;
+}
+constexpr float provisionalTurbidityFromAdc(float raw) {
     return ((CalibrationConfig::TURBIDITY_CLEAR_ADC - raw) /
         (CalibrationConfig::TURBIDITY_CLEAR_ADC - CalibrationConfig::TURBIDITY_DIRTY_ADC)) *
         CalibrationConfig::TURBIDITY_DIRTY_NTU < 0.0f ? 0.0f :

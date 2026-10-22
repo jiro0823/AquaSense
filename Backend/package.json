@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "node scripts/dev.cjs",
+    "dev:public-mqtt": "node scripts/dev-public-mqtt.cjs",
     "db:migrate": "node scripts/migrate.cjs",
     "build": "tsc",
     "build:watch": "tsc --watch",

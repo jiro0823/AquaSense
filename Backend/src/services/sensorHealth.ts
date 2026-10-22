@@ -3,6 +3,37 @@ export const SENSOR_NAMES = ['temperature', 'ph', 'turbidity', 'orp'] as const;
 export type SensorName = typeof SENSOR_NAMES[number];
 export type HealthState = 'VALID' | 'INVALID' | 'SENSOR_ERROR' | 'MISSING' | 'STALE' | 'UNSTABLE' | 'SATURATED' | 'POSSIBLY_STUCK';
 export type ConnectionState = 'CONNECTED' | 'DISCONNECTED' | 'UNKNOWN';
+export interface ProvisionalSensorValue {
+  value: number;
+  unit: 'pH' | 'NTU' | 'mV';
+  status: 'UNVERIFIED';
+}
+
+export function isPublicDevelopmentTelemetryProfile(profile: {
+  brokerUrl?: string; deviceScopedTopics?: boolean; topicNamespace?: string; actuatorCommandsEnabled?: boolean; username?: string; password?: string;
+}, nodeEnv: string): boolean {
+  try {
+    const broker = new URL(profile.brokerUrl ?? '');
+    return nodeEnv !== 'production' && profile.deviceScopedTopics === true && profile.topicNamespace === 'aquasense-dev' &&
+      profile.actuatorCommandsEnabled === false &&
+      broker.protocol === 'mqtt:' && broker.hostname === 'broker.hivemq.com' && broker.port === '1883' &&
+      !broker.username && !broker.password && !profile.username && !profile.password;
+  } catch {
+    return false;
+  }
+}
+
+/** Strictly parse an optional device diagnostic. It never represents a measurement. */
+export function parseProvisionalSensorValue(value: unknown, expectedUnit: ProvisionalSensorValue['unit']): ProvisionalSensorValue | null {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Malformed provisional sensor diagnostic');
+  const candidate = value as Record<string, unknown>;
+  if (Object.keys(candidate).length !== 3 || !Object.prototype.hasOwnProperty.call(candidate, 'value') ||
+      !Object.prototype.hasOwnProperty.call(candidate, 'unit') || !Object.prototype.hasOwnProperty.call(candidate, 'status') ||
+      typeof candidate.value !== 'number' || !Number.isFinite(candidate.value) || candidate.unit !== expectedUnit ||
+      candidate.status !== 'UNVERIFIED') throw new Error('Malformed provisional sensor diagnostic');
+  return { value: candidate.value, unit: expectedUnit, status: 'UNVERIFIED' };
+}
 export interface SensorHealth {
   name: SensorName; value: number | null; rawAdc: number | null; voltage: number | null;
   adcMinimum: number|null; adcMaximum: number|null; adcLast: number|null; clippedSamples: number|null;
@@ -11,6 +42,7 @@ export interface SensorHealth {
   rawAvailable: boolean; measurementValid: boolean;
   stability: 'COLLECTING' | 'STABLE' | 'UNSTABLE'; calibration: 'REQUIRED' | 'CALIBRATED';
   reason: string; readyForCalibration: boolean; communication: boolean;
+  provisional: ProvisionalSensorValue | null;
   adcRange: 'PASS' | 'WARNING' | 'UNKNOWN'; stuckDurationMs: number;
   window: { count: number; min: number | null; max: number | null; average: number | null; range: number | null; standardDeviation: number | null };
 }
@@ -43,7 +75,9 @@ export class SensorValidator {
     const connection: ConnectionState = typeof diagnostics?.connected === 'boolean'
       ? diagnostics.connected ? 'CONNECTED' : 'DISCONNECTED'
       : value !== null || rawAdc !== null ? 'CONNECTED' : 'UNKNOWN';
-    const result: SensorHealth = { name, value, rawAdc, voltage, unit: unit || ({temperature:'C',ph:'pH',turbidity:'unknown',orp:'mV'}[name]),
+    const provisionalUnit = name === 'ph' ? 'pH' : name === 'turbidity' ? 'NTU' : name === 'orp' ? 'mV' : null;
+    const provisional = provisionalUnit ? parseProvisionalSensorValue(diagnostics?.provisional, provisionalUnit) : null;
+    const result: SensorHealth = { name, value, rawAdc, voltage, provisional, unit: unit || ({temperature:'C',ph:'pH',turbidity:'unknown',orp:'mV'}[name]),
       adcMinimum:numeric(diagnostics?.adcMinimum),adcMaximum:numeric(diagnostics?.adcMaximum),adcLast:numeric(diagnostics?.adcLast),clippedSamples:numeric(diagnostics?.clippedSamples),
       timestamp: Number.isFinite(at) ? new Date(at).toISOString() : null, health:'VALID', valid:true, rawAvailable:rawAdc!==null, measurementValid:value!==null,
       stability:'COLLECTING', calibration:'REQUIRED', connection, reason:'', readyForCalibration:false, communication:connection === 'CONNECTED',

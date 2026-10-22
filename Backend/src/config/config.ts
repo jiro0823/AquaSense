@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 
@@ -22,6 +23,15 @@ const getOptionalCredential = (key: string): string | undefined => {
     return undefined;
   }
   return value;
+};
+
+const getMqttCaCertificate = (): string | undefined => {
+  const inlineCertificate = getOptionalCredential('MQTT_CA_CERT');
+  if (inlineCertificate) return inlineCertificate;
+
+  const certificatePath = getOptionalCredential('MQTT_CA_CERT_PATH');
+  if (!certificatePath) return undefined;
+  return fs.readFileSync(certificatePath, 'utf8');
 };
 
 const parseDeviceKeys = (raw?: string): Record<string, string> => {
@@ -102,8 +112,10 @@ export const config = {
     brokerUrl: getEnv('MQTT_BROKER_URL', 'mqtt://localhost:1883') || 'mqtt://localhost:1883',
     username: getOptionalCredential('MQTT_USERNAME'),
     password: getOptionalCredential('MQTT_PASSWORD'),
-    caCertificate: getOptionalCredential('MQTT_CA_CERT'),
+    caCertificate: getMqttCaCertificate(),
     deviceScopedTopics: getEnv('MQTT_DEVICE_SCOPED_TOPICS', 'false') === 'true',
+    topicNamespace: getEnv('MQTT_TOPIC_NAMESPACE', 'aquasense') || 'aquasense',
+    actuatorCommandsEnabled: getEnv('MQTT_ACTUATOR_COMMANDS_ENABLED', 'false') === 'true',
     topics: {
       readings: getEnv('MQTT_TOPIC_READINGS', 'water/esp32/readings') || 'water/esp32/readings',
       sensorWildcard: getEnv('MQTT_TOPIC_SENSOR_WILDCARD', 'aquasense/+') || 'aquasense/+',
@@ -154,6 +166,8 @@ const configSchema = z.object({
     password: z.string().min(1).optional(),
     caCertificate: z.string().min(1).optional(),
     deviceScopedTopics: z.boolean(),
+    topicNamespace: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+    actuatorCommandsEnabled: z.boolean(),
     topics: z.object({
       readings: z.string().min(1),
       sensorWildcard: z.string().min(1),
@@ -181,6 +195,13 @@ export const validateConfiguration = (candidate: unknown, environment: string = 
   }
   if (Boolean(candidateConfig.mqtt?.username) !== Boolean(candidateConfig.mqtt?.password)) {
     issues.push('MQTT_USERNAME and MQTT_PASSWORD must be configured together');
+  }
+  if (candidateConfig.mqtt?.actuatorCommandsEnabled) {
+    let mqttTls = false;
+    try { mqttTls = ['mqtts:', 'wss:'].includes(new URL(candidateConfig.mqtt.brokerUrl).protocol); } catch { /* schema reports malformed URLs */ }
+    if (!mqttTls || !candidateConfig.mqtt.username || !candidateConfig.mqtt.password || !candidateConfig.mqtt.deviceScopedTopics) {
+      issues.push('MQTT actuator commands require TLS, broker credentials, and device-scoped topics');
+    }
   }
   try {
     const parsedBroker = new URL(candidateConfig.mqtt?.brokerUrl);
@@ -210,6 +231,9 @@ export const validateConfiguration = (candidate: unknown, environment: string = 
     }
     if (!productionConfig.mqtt?.deviceScopedTopics) {
       issues.push('MQTT_DEVICE_SCOPED_TOPICS=true is required in production');
+    }
+    if (!productionConfig.mqtt?.actuatorCommandsEnabled) {
+      issues.push('MQTT_ACTUATOR_COMMANDS_ENABLED=true is required in production');
     }
     if (productionConfig.cors && Array.isArray(productionConfig.cors.origin) && productionConfig.cors.origin.some((origin) => origin.includes('localhost'))) {
       issues.push('CORS_ORIGIN must not use localhost in production');

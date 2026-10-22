@@ -52,7 +52,7 @@ test('production MQTT requires TLS, paired broker credentials, and device-scoped
   };
   const valid = validateConfiguration({
     ...common,
-    mqtt: { ...config.mqtt, brokerUrl: 'mqtts://broker.example:8883', username: 'device-service', password: 'broker-secret', deviceScopedTopics: true },
+    mqtt: { ...config.mqtt, brokerUrl: 'mqtts://broker.example:8883', username: 'device-service', password: 'broker-secret', deviceScopedTopics: true, actuatorCommandsEnabled: true },
   }, 'production');
   assert.equal(valid.some(issue => issue.startsWith('MQTT_')), false);
 
@@ -72,4 +72,13 @@ test('MQTT broker credentials cannot be embedded in the URL', () => {
   }, 'development');
   assert.ok(issues.some(issue => issue.includes('not URL userinfo')));
   assert.equal(issues.some(issue => issue.includes('secret')), false);
+});
+
+test('actuator commands cannot be enabled on anonymous or unscoped MQTT', () => {
+  const issues = validateConfiguration({
+    ...config,
+    mqtt: { ...config.mqtt, brokerUrl: 'mqtt://broker.hivemq.com:1883', username: undefined, password: undefined,
+      deviceScopedTopics: true, actuatorCommandsEnabled: true },
+  }, 'development');
+  assert.ok(issues.some((issue) => issue.includes('MQTT actuator commands require TLS, broker credentials, and device-scoped topics')));
 });

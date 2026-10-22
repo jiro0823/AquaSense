@@ -77,7 +77,7 @@ const DashboardParametersPage: React.FC = () => {
                 </div>
               );
             }
-            if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidityUnit==='raw_adc' ? `${latestReading.turbidity ?? '--'} raw ADC. NTU conversion requires formal calibration.` : 'Unit unavailable; turbidity value is not interpreted or charted.'}</div>;
+            if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidityUnit==='raw_adc' ? `${latestReading.sensorHealth?.turbidity.rawAdc ?? '--'} raw ADC. NTU conversion requires formal calibration.` : 'Unit unavailable; turbidity value is not interpreted or charted.'}</div>;
             const sensorStats: WaterQualityStats[ParameterKey] = statistics[item.key as ParameterKey];
             const stats: CardStats = { ...sensorStats, current: currentWaterSensorValue(latestReading, item.key as 'temperature'|'ph'|'orp'|'turbidity') };
             const sensorName = item.key === 'temperature' || item.key === 'ph' || item.key === 'orp' || item.key === 'turbidity' ? item.key : null;

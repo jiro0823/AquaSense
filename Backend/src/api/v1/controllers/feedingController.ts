@@ -10,6 +10,8 @@ import type { DeviceAuthenticatedRequest } from '../../../middleware/deviceAuthM
 import { auditLogService } from '../../../services/auditLog.service';
 import { mqttService } from '../../../services/mqttService';
 import { config } from '../../../config/config';
+import { ackCanonical, verifyCanonical, type SignedHardwareAck } from '../../../services/hardwareProtocol';
+import { hardwareService } from '../../../services/hardwareService';
 
 const DEFAULT_DEVICE_ID = config.feeding.deviceId;
 const FEEDING_TIMEZONE = config.feeding.timezone;
@@ -92,6 +94,10 @@ export const deleteSchedule = async (req: AuthenticatedRequest, res: Response): 
 
 export const triggerManualCommand = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    if (!config.mqtt.actuatorCommandsEnabled) {
+      sendError(res, 503, 'Actuator commands are disabled in this MQTT profile');
+      return;
+    }
     if (!req.userId) {
       sendError(res, 401, 'Unauthorized');
       return;
@@ -183,40 +189,35 @@ export const deviceSync = async (req: DeviceAuthenticatedRequest, res: Response)
 
 export const deviceAck = async (req: DeviceAuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { deviceId, commandId, result } = req.body as {
-      deviceId?: string;
-      commandId?: string;
-      result?: string;
-    };
+    const ack = req.body as SignedHardwareAck;
     const authDeviceId = req.deviceId;
     const ownerUserId = req.deviceOwnerUserId;
     if (!authDeviceId || !ownerUserId) {
       sendError(res, 403, 'Device is not authorized for acknowledge');
       return;
     }
-    if (!deviceId || !commandId) {
-      sendError(res, 400, 'deviceId and commandId are required');
-      return;
-    }
-    if (deviceId !== authDeviceId) {
+    if (ack.deviceId !== authDeviceId || ack.source !== 'feeding') {
       sendError(res, 403, 'deviceId mismatch for authenticated device');
       return;
     }
-    const acked = await feedingService.ackCommand(ownerUserId, deviceId, commandId, {
-      deviceResult: result || 'done',
-      ackedAt: new Date().toISOString(),
-    });
-    if (!acked) {
-      sendError(res, 404, 'Pending command not found');
+    const key = Object.prototype.hasOwnProperty.call(config.device.keys, authDeviceId)
+      ? config.device.keys[authDeviceId] : undefined;
+    if (!key || !verifyCanonical(ackCanonical(ack), ack.signature, key)) {
+      sendError(res, 401, 'Invalid device acknowledgment signature');
+      return;
+    }
+    const accepted = await hardwareService.acceptMqttAck(ownerUserId, ack);
+    if (!accepted) {
+      sendError(res, 409, 'Acknowledgment does not match a pending, unexpired feeding command');
       return;
     }
     await auditLogService.createLog({
       userId: ownerUserId,
-      deviceId,
+      deviceId: authDeviceId,
       action: 'FEEDING_DEVICE_ACK',
       status: 'SUCCESS',
       ipAddress: req.ip,
-      metadata: { commandId, result: result || 'done' },
+      metadata: { commandId: ack.id, result: ack.result },
     });
     sendSuccess(res, 200, 'Command acknowledged');
   } catch (error) {

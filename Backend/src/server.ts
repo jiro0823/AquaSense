@@ -161,6 +161,8 @@ const createApp = (): Express => {
  */
 const startServer = async (): Promise<void> => {
   let server: any;
+  let wsServer: WaterQualityWebSocketServer | null = null;
+  let shutdown: ((signal: string, exitCode?: number) => Promise<void>) | undefined;
   try {
     // Initialize database and models
     logger.info('Initializing database connection...');
@@ -191,12 +193,12 @@ const startServer = async (): Promise<void> => {
     const httpServer = createHTTPServer(app);
 
     // Initialize WebSocket server
-    const wsServer = new WaterQualityWebSocketServer(httpServer);
+    wsServer = new WaterQualityWebSocketServer(httpServer);
 
     // Bridge MQTT readings to connected WebSocket dashboard clients
     mqttService.setRealtimeHandlers({
-      onReadingReceived: (reading) => wsServer.broadcastReading(reading),
-      onStatsUpdated: (stats) => wsServer.broadcastStats(stats),
+      onReadingReceived: (reading) => wsServer!.broadcastReading(reading),
+      onStatsUpdated: (stats) => wsServer!.broadcastStats(stats),
     });
 
     // Initialize MQTT Service (Optional - for ESP32 integration via MQTT)
@@ -204,14 +206,27 @@ const startServer = async (): Promise<void> => {
       logger.info('Initializing MQTT Service...');
       await mqttService.connect();
       const mqttStatus = mqttService.getStatus();
-      logger.info(`✓ MQTT Service initialized - Broker: ${mqttStatus.brokerUrl}`);
+      logger.info(`MQTT client initialized; awaiting broker connection: ${mqttStatus.brokerUrl}`);
     } catch (error) {
       logger.warn('MQTT Service initialization skipped or failed - Proceeding without MQTT', error instanceof Error ? error.message : 'Unknown error');
       // Continue without MQTT - REST API is still available
     }
 
-    const startListening = (): void => {
-      server = httpServer.listen(PORT, HOST, () => {
+    const startListening = (): Promise<void> => new Promise((resolve, reject) => {
+      const onError = (error: NodeJS.ErrnoException): void => {
+        const message = error.code === 'EADDRINUSE'
+          ? `Port ${PORT} on ${HOST} is already in use. Check the owning process before restarting or choose another PORT.`
+          : `HTTP server error: ${error.message}`;
+        if (!server.listening) {
+          reject(new Error(message));
+          return;
+        }
+        logger.error(message, { code: error.code });
+        void shutdown?.('HTTP server error', 1);
+      };
+      server = httpServer.listen(PORT, HOST);
+      server.on('error', onError);
+      server.once('listening', () => {
         const baseUrl = `http://${HOST}:${PORT}`;
         logger.info(`✓ Server is running on ${baseUrl}`);
         logger.info(`✓ Environment: ${config.server.nodeEnv}`);
@@ -229,24 +244,12 @@ const startServer = async (): Promise<void> => {
         logger.info('✓ Frontend: http://localhost:3000');
         logger.info('═══════════════════════════════════════════════════════════════');
         logger.info('');
+        resolve();
       });
-    };
-
-    httpServer.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        logger.error(`Port ${PORT} is already in use. Stop the existing process or change PORT in Backend/.env.`);
-        process.exit(1);
-      }
-
-      logger.error('Failed to start HTTP server', {
-        message: error.message,
-        code: error.code,
-      });
-      process.exit(1);
     });
 
     // Start server
-    startListening();
+    await startListening();
 
     // Add WebSocket server stats endpoint
     app.get('/stats', (_req: Request, res: Response) => {
@@ -255,7 +258,7 @@ const startServer = async (): Promise<void> => {
         statusCode: 200,
         message: 'Server statistics',
         data: {
-          connectedClients: wsServer.getConnectedClientsCount(),
+          connectedClients: wsServer!.getConnectedClientsCount(),
           timestamp: new Date().toISOString(),
         },
       };
@@ -263,64 +266,69 @@ const startServer = async (): Promise<void> => {
     });
 
     // Graceful shutdown
-    const shutdown = async (signal: string): Promise<void> => {
+    let shuttingDown = false;
+    shutdown = async (signal: string, exitCode = 0): Promise<void> => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       logger.warn(`${signal} received - Starting graceful shutdown...`);
-      if (server) {
-        server.close(async () => {
-          logger.info('HTTP server closed');
-          
-          // Close MQTT connection
-          try {
-            await mqttService.disconnect();
-          } catch (error) {
-            logger.warn('MQTT disconnect failed or already disconnected');
-          }
-
-          await closeDatabase();
-          logger.info('Database connection closed');
-          process.exit(0);
-        });
-      }
-
-      // Force shutdown after 15 seconds
-      setTimeout(() => {
+      const forceShutdown = setTimeout(() => {
         logger.error('Forced shutdown - timeout exceeded');
         process.exit(1);
       }, 15000);
+      try {
+        if (wsServer) await wsServer.close();
+        else if (server?.listening) await new Promise<void>((resolve, reject) => server.close((error: Error | undefined) => error ? reject(error) : resolve()));
+        logger.info('HTTP and WebSocket servers closed');
+        await mqttService.disconnect();
+        await closeDatabase();
+        logger.info('Database connection closed');
+        clearTimeout(forceShutdown);
+        process.exit(exitCode);
+      } catch (error) {
+        logger.error('Graceful shutdown failed', error);
+        process.exit(1);
+      }
     };
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => { void shutdown?.('SIGTERM'); });
+    process.on('SIGINT', () => { void shutdown?.('SIGINT'); });
 
-    // Handle uncaught exceptions - log but don't crash
+    // Uncaught exceptions can leave shared state inconsistent; shut down cleanly.
     process.on('uncaughtException', (err: Error) => {
       logger.error('Uncaught Exception detected', {
         message: err.message,
         stack: err.stack,
         timestamp: new Date().toISOString(),
       });
-      // Log the error but keep server running
-      // Only exit if it's a critical startup error
-      if (err.message.includes('EADDRINUSE') || err.message.includes('database')) {
-        logger.error('Critical error - shutting down');
-        process.exit(1);
-      }
+      logger.error('Uncaught exception is fatal - shutting down');
+      void shutdown?.('Uncaught exception', 1);
     });
 
-    // Handle unhandled promise rejections - log but don't crash
+    // Unhandled rejections are fatal unless the caller handles them explicitly.
     process.on('unhandledRejection', (reason: unknown) => {
       logger.error('Unhandled Promise Rejection detected', {
         reason: reason instanceof Error ? reason.message : String(reason),
         timestamp: new Date().toISOString(),
       });
-      // Log the error but keep server running unless it's critical
+      void shutdown?.('Unhandled promise rejection', 1);
     });
   } catch (error) {
     logger.error('Failed to start server', error);
-    if (server) {
-      server.close();
+    if (wsServer) {
+      await wsServer.close().catch(() => logger.warn('WebSocket cleanup failed during startup shutdown'));
+    } else if (server?.listening) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    await closeDatabase();
+    try {
+      await mqttService.disconnect();
+    } catch {
+      logger.warn('MQTT cleanup failed during startup shutdown');
+    }
+    try {
+      await closeDatabase();
+    } catch {
+      logger.warn('Database cleanup failed during startup shutdown');
+    }
     process.exit(1);
   }
 };

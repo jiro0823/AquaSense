@@ -23,7 +23,8 @@ import { waterAlertNotificationService } from './waterAlertNotification.service'
 import { csrfProtection } from '../middleware/csrfProtection';
 
 const originalKeys = config.device.keys;
-afterEach(() => { mock.restoreAll(); config.device.keys = originalKeys; });
+const originalActuatorCommandsEnabled = config.mqtt.actuatorCommandsEnabled;
+afterEach(() => { mock.restoreAll(); config.device.keys = originalKeys; config.mqtt.actuatorCommandsEnabled = originalActuatorCommandsEnabled; });
 const id = '9f2f2cbb-5e87-4bb3-a95e-c45d05de97d1';
 const mockSerializedDatabase = () => {
   let tail = Promise.resolve();
@@ -40,7 +41,7 @@ const mockSerializedDatabase = () => {
 };
 const state: HardwareState = { fillPump: false, drainPump: false, aerator: false, feederBusy: false,
   buzzer: false, automation: false, waterPhase: 'IDLE', fault: '', relaysReady: false, timeValid: false,
-  wifiConnected: true, mqttConnected: true, uptimeMs: 123 };
+  wifiConnected: true, mqttConnected: true, actuatorCommissioningEnabled: false, uptimeMs: 123 };
 
 test('pump commands require bounded integer timing; non-pump commands reject timing and extra fields', () => {
   for (const durationMs of [undefined, 0, -1, 1.5, 300001, '1000']) {
@@ -48,9 +49,12 @@ test('pump commands require bounded integer timing; non-pump commands reject tim
   }
   assert.equal(hardwareCommandSchema.safeParse({ deviceId: 'board', action: 'WATER_EXCHANGE', durationMs: 1000 }).success, true);
   assert.equal(hardwareCommandSchema.safeParse({ deviceId: 'board', action: 'ALL_OFF', durationMs: 1000 }).success, false);
+  assert.equal(hardwareCommandSchema.safeParse({ deviceId: 'board', action: 'STATUS_REQUEST' }).success, true);
+  assert.equal(hardwareCommandSchema.safeParse({ deviceId: 'board', action: 'STATUS_REQUEST', durationMs: 1000 }).success, false);
   assert.equal(hardwareCommandSchema.safeParse({ deviceId: 'board', action: 'RAW_GPIO', pin: 25 }).success, false);
   assert.equal(hardwareSyncSchema.safeParse({ deviceId: 'board', state: { ...state, floatWet: true } }).success, false);
   assert.equal(hardwareStateSchema.safeParse({ ...state, waterPhase: 'TRANSITION' }).success, false);
+  assert.equal(hardwareStateSchema.safeParse({ ...state, actuatorCommissioningEnabled: 'true' }).success, false);
 });
 
 test('hardware state accepts the explicit nonblocking water exchange phases', () => {
@@ -70,6 +74,7 @@ test('stop bypasses full queue and ALL_OFF cancels pending feeding starts', asyn
   await hardwareService.queue('owner', 'board', 'ALL_OFF');
   assert.equal(count.mock.callCount(), 1);
   assert.equal(cancel.mock.callCount(), 1); assert.equal(cancelFeed.mock.callCount(), 1);
+  assert.deepEqual(cancelFeed.mock.calls[0].arguments[0], { status: 'EXPIRED', metadata: { deviceResult: 'cancelled_by_stop' } });
   assert.equal(create.mock.callCount(), 1);
   assert.deepEqual(cancel.mock.calls[0].arguments[1]?.where, { userId: 'owner', deviceId: 'board', status: 'PENDING' });
 });
@@ -218,6 +223,19 @@ test('authenticated HTTPS sync updates heartbeat and schedules without deliverin
   assert.equal(expiry.mock.callCount(), 0); assert.equal(feedExpiry.mock.callCount(), 0);
 });
 
+test('expired manual feeding commands are terminal EXPIRED records, not ACKED commands', async () => {
+  const hardwareUpdate = mock.method(HardwareCommand, 'update', async () => [0]);
+  const feedingUpdate = mock.method(FeedingCommand, 'update', async () => [1]);
+  await hardwareService.expirePendingCommands();
+  assert.equal(hardwareUpdate.mock.callCount(), 1);
+  assert.equal(feedingUpdate.mock.callCount(), 1);
+  assert.equal(feedingUpdate.mock.calls[0].arguments[0]?.status, 'EXPIRED');
+  assert.deepEqual(feedingUpdate.mock.calls[0].arguments[0]?.metadata, { deviceResult: 'expired_before_delivery' });
+  const expiryWhere = feedingUpdate.mock.calls[0].arguments[1]?.where as any;
+  assert.equal(expiryWhere.status, 'PENDING');
+  assert.equal(expiryWhere.source, 'MANUAL');
+});
+
 test('signed actuator command and state ACK canonical strings verify HMAC-SHA256', () => {
   const key = 'test-device-secret';
   const command = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'DRAIN', durationMs: 1200, expiresAt: 123456 };
@@ -226,13 +244,33 @@ test('signed actuator command and state ACK canonical strings verify HMAC-SHA256
   assert.equal(verifyCanonical(commandCanonical(command), signature, 'wrong-key'), false);
   const ack = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'DRAIN', result: 'accepted', reportedAt: 123456,
     state, signature: '' };
-  assert.equal(ackCanonical(ack), `v1|board|${id}|hardware|DRAIN|accepted|123456|0|0|0|0|0|0|IDLE||0|0|1|1|123`);
+  assert.equal(ackCanonical(ack), `v1|board|${id}|hardware|DRAIN|accepted|123456|0|0|0|0|0|0|IDLE||0|0|1|1|123|0`);
   const ackSignature = signCanonical(ackCanonical(ack), key);
   assert.equal(verifyCanonical(ackCanonical(ack), ackSignature, key), true);
   assert.equal(verifyCanonical(ackCanonical({ ...ack, state: { ...state, drainPump: true } }), ackSignature, key), false);
+  const { actuatorCommissioningEnabled: _commissioning, ...legacyState } = state;
+  assert.equal(ackCanonical({ ...ack, state: legacyState }), `v1|board|${id}|hardware|DRAIN|accepted|123456|0|0|0|0|0|0|IDLE||0|0|1|1|123`);
   const signedAck = { ...ack, signature: ackSignature };
   assert.deepEqual(parseSignedAck(JSON.stringify(signedAck)), signedAck);
   assert.equal(parseSignedAck(JSON.stringify({ ...signedAck, ...state, state: undefined })), null);
+});
+
+test('scheduled feeding result is validated and covered by the signed ACK canonical value', () => {
+  const scheduleResult = { id, outcome: 'completed' as const, localMinute: 29_500_000 };
+  const reportedState = { ...state, scheduleResult };
+  assert.equal(hardwareStateSchema.safeParse(reportedState).success, true);
+  const ack = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'ALL_OFF',
+    result: 'accepted', reportedAt: 123456, state: reportedState, signature: '' };
+  const canonical = ackCanonical(ack);
+  assert.ok(canonical.endsWith(`|${id}|completed|29500000`));
+  const signature = signCanonical(canonical, 'test-device-secret');
+  assert.equal(verifyCanonical(canonical, signature, 'test-device-secret'), true);
+  assert.equal(verifyCanonical(ackCanonical({ ...ack, state: { ...reportedState,
+    scheduleResult: { ...scheduleResult, outcome: 'cancelled' } } }), signature, 'test-device-secret'), false);
+  assert.equal(verifyCanonical(ackCanonical({ ...ack, state: { ...reportedState,
+    actuatorCommissioningEnabled: true } }), signature, 'test-device-secret'), false);
+  assert.equal(hardwareStateSchema.safeParse({ ...reportedState,
+    scheduleResult: { ...scheduleResult, outcome: 'untrusted' } }).success, false);
 });
 
 test('MQTT ACK persists its nested state and acknowledges only the matching scoped command', async () => {
@@ -248,6 +286,67 @@ test('MQTT ACK persists its nested state and acknowledges only the matching scop
   assert.equal(status, 'ACKED');
   assert.deepEqual(find.mock.calls[0].arguments[0]?.where, { id, userId: 'owner', deviceId: 'board' });
   assert.deepEqual(create.mock.calls[0].arguments[0], { deviceId: 'board', state, receivedAt: new Date(123456) });
+});
+
+test('device rejection is recorded as FAILED instead of a successful acknowledgment', async () => {
+  const command: any = { action: 'DRAIN', status: 'PENDING', expiresAt: new Date(Date.now() + 30_000), result: null,
+    async update(values: { status: string; result: string }) { Object.assign(this, values); } };
+  mock.method(HardwareCommand, 'findOne', async () => command);
+  mock.method(HardwareDeviceState, 'findByPk', async () => null);
+  mock.method(HardwareDeviceState, 'create', async () => state as any);
+  const ack = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'DRAIN', result: 'water_timing_not_configured',
+    reportedAt: Date.now(), state, signature: 'verified-by-mqtt-listener' };
+
+  assert.equal(await hardwareService.acceptMqttAck('owner', ack), true);
+  assert.equal(command.status, 'FAILED');
+  assert.equal(command.result, 'water_timing_not_configured');
+});
+
+test('feeding rejection is FAILED and does not receive an executed timestamp', async () => {
+  const command: any = { id, action: 'TRIGGER', source: 'MANUAL', status: 'PENDING', createdAt: new Date(Date.now() - 1000),
+    metadata: null, executedAt: null, async save() {} };
+  mock.method(FeedingCommand, 'findOne', async () => command);
+  mock.method(HardwareDeviceState, 'findByPk', async () => null);
+  mock.method(HardwareDeviceState, 'create', async () => state as any);
+  const ack = { v: 1 as const, deviceId: 'board', id, source: 'feeding' as const, action: 'TRIGGER', result: 'servo_unavailable',
+    reportedAt: Date.now(), state, signature: 'verified-by-mqtt-listener' };
+
+  assert.equal(await hardwareService.acceptMqttAck('owner', ack), true);
+  assert.equal(command.status, 'FAILED');
+  assert.equal(command.executedAt, null);
+  assert.equal(command.metadata.deviceResult, 'servo_unavailable');
+});
+
+test('feeding acceptance records device acknowledgment without claiming completion time', async () => {
+  const command: any = { id, action: 'TRIGGER', source: 'MANUAL', status: 'PENDING', createdAt: new Date(Date.now() - 1000),
+    metadata: null, executedAt: null, async save() {} };
+  mock.method(FeedingCommand, 'findOne', async () => command);
+  mock.method(HardwareDeviceState, 'findByPk', async () => null);
+  mock.method(HardwareDeviceState, 'create', async () => state as any);
+  const ack = { v: 1 as const, deviceId: 'board', id, source: 'feeding' as const, action: 'TRIGGER', result: 'accepted',
+    reportedAt: Date.now(), state: { ...state, feederBusy: true }, signature: 'verified-by-mqtt-listener' };
+
+  assert.equal(await hardwareService.acceptMqttAck('owner', ack), true);
+  assert.equal(command.status, 'ACKED');
+  assert.equal(command.executedAt, null);
+  assert.equal(command.metadata.deviceResult, 'accepted');
+});
+
+test('read-only status ACK stores device state and matches only its queued request', async () => {
+  const expiresAt = new Date(Date.now() + 30_000);
+  let status = 'PENDING';
+  const command = { action: 'STATUS_REQUEST', status, expiresAt, createdAt: new Date(Date.now() - 1000),
+    async update(values: { status: string; result: string }) { status = values.status; } };
+  mock.method(HardwareCommand, 'findOne', async () => command);
+  mock.method(HardwareDeviceState, 'findByPk', async () => null);
+  const create = mock.method(HardwareDeviceState, 'create', async () => state as any);
+  const ack = { v: 1 as const, deviceId: 'board', id, source: 'hardware' as const, action: 'STATUS_REQUEST',
+    result: 'status_reported', reportedAt: Date.now(), state, signature: 'verified-by-mqtt-listener' };
+
+  assert.equal(await hardwareService.acceptMqttAck('owner', ack), true);
+  assert.equal(status, 'ACKED');
+  assert.equal(create.mock.calls[0].arguments[0]?.deviceId, 'board');
+  assert.equal(create.mock.calls[0].arguments[0]?.state, state);
 });
 
 test('MQTT ACK rejects expired commands and cannot roll device state backward', async () => {
@@ -268,6 +367,17 @@ test('MQTT ACK rejects expired commands and cannot roll device state backward', 
   mock.method(HardwareDeviceState, 'create', async () => { throw new UniqueConstraintError({ errors: [] }); });
   assert.equal(await hardwareService.acceptMqttAck('owner', ack), true);
   assert.equal(staleWrite.mock.callCount(), 1);
+});
+
+test('feeding ACK cannot change an expired manual command into an acknowledged command', async () => {
+  const ack = { v: 1 as const, deviceId: 'board', id, source: 'feeding' as const, action: 'TRIGGER', result: 'accepted',
+    reportedAt: Date.now(), state, signature: 'already-verified' };
+  mock.method(FeedingCommand, 'findOne', async () => ({ id, action: 'TRIGGER', source: 'MANUAL', status: 'EXPIRED',
+    createdAt: new Date(Date.now() - 60_000), metadata: { deviceResult: 'expired_before_delivery' } }));
+  mock.method(HardwareDeviceState, 'findByPk', async () => null);
+  const persistState = mock.method(HardwareDeviceState, 'create', async () => state as any);
+  assert.equal(await hardwareService.acceptMqttAck('owner', ack), false);
+  assert.equal(persistState.mock.callCount(), 0);
 });
 
 test('concurrent ACK state writes use a database conditional update so older ACK cannot win last', async () => {
@@ -303,7 +413,8 @@ test('concurrent ACK state writes use a database conditional update so older ACK
 test('MQTT actuator publish signs command and explicitly disables retention', async () => {
   config.device.keys = { board: 'test-device-secret' };
   const publishes: Array<{ topic: string; payload: string; options: { qos: number; retain: boolean } }> = [];
-  const service = new MQTTService();
+  const service = new MQTTService({ brokerUrl: 'mqtts://broker.test:8883', username: 'test-user', password: 'test-password',
+    deviceScopedTopics: true, actuatorCommandsEnabled: true });
   const fakeClient = { publish(topic: string, payload: string, options: { qos: number; retain: boolean }, callback: (error?: Error) => void) {
     publishes.push({ topic, payload, options }); callback();
   } };
@@ -315,6 +426,27 @@ test('MQTT actuator publish signs command and explicitly disables retention', as
   const command = parseSignedCommand(JSON.parse(publishes[0].payload));
   assert.ok(command);
   assert.equal(command.source, 'feeding'); assert.equal(command.action, 'TRIGGER'); assert.equal(command.durationMs, 0);
+  assert.equal(verifyCanonical(commandCanonical(command), command.signature, 'test-device-secret'), true);
+});
+
+test('read-only status request uses the signed non-retained device command path', async () => {
+  config.device.keys = { board: 'test-device-secret' };
+  const publishes: Array<{ topic: string; payload: string; options: { qos: number; retain: boolean } }> = [];
+  const service = new MQTTService({ brokerUrl: 'mqtts://broker.test:8883', username: 'test-user', password: 'test-password',
+    deviceScopedTopics: true, actuatorCommandsEnabled: true });
+  const fakeClient = { publish(topic: string, payload: string, options: { qos: number; retain: boolean }, callback: (error?: Error) => void) {
+    publishes.push({ topic, payload, options }); callback();
+  } };
+  Object.assign(service as unknown as object, { client: fakeClient, isConnected: true });
+
+  assert.equal(await service.dispatchHardwareCommand({ id, deviceId: 'board', source: 'hardware',
+    action: 'STATUS_REQUEST', expiresAt: new Date(Date.now() + 30_000) }), true);
+  assert.equal(publishes[0].topic, 'aquasense/board/command');
+  assert.deepEqual(publishes[0].options, { qos: 1, retain: false });
+  const command = parseSignedCommand(JSON.parse(publishes[0].payload));
+  assert.ok(command);
+  assert.equal(command.action, 'STATUS_REQUEST');
+  assert.equal(command.durationMs, 0);
   assert.equal(verifyCanonical(commandCanonical(command), command.signature, 'test-device-secret'), true);
 });
 
@@ -353,6 +485,7 @@ test('integrated MQTT snapshot retains ORP and device identity through persisten
 
 test('HTTP sync requires a configured matching key and active device even in development; user commands require ownership', async () => {
   config.device.keys = { board: 'test-key' };
+  config.mqtt.actuatorCommandsEnabled = true;
   mock.method(logger, 'warn', () => {});
   mock.method(auditLogService, 'createLog', async () => null);
   mock.method(deviceService, 'getActiveDevice', async () => ({ userId: 'owner' }));

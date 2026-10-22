@@ -7,9 +7,9 @@ interface HardwareState {
   deviceId: string;
   online: boolean;
   receivedAt: string | null;
-  state: null | { aerator: boolean; automation: boolean; wifiConnected: boolean; mqttConnected: boolean };
+  state: null | { aerator: boolean; automation: boolean; relaysReady: boolean; wifiConnected: boolean; mqttConnected: boolean };
 }
-interface ApiCommand { id: string; action: string; status: 'PENDING' | 'ACKED' | 'EXPIRED'; result?: string | null; expiresAt?: string }
+interface ApiCommand { id: string; action: string; status: 'PENDING' | 'ACKED' | 'FAILED' | 'EXPIRED'; result?: string | null; expiresAt?: string }
 type TrackedCommand = Omit<ApiCommand, 'status'> & { status: ApiCommand['status'] | 'TIMEOUT' };
 
 const DashboardAeratorPage: React.FC = () => {
@@ -80,6 +80,7 @@ const DashboardAeratorPage: React.FC = () => {
     : trackedCommand.status === 'PENDING' ? 'QUEUED — awaiting device acknowledgement'
       : trackedCommand.status === 'TIMEOUT' ? 'TIMEOUT — device acknowledgement was not received before command expiry'
         : trackedCommand.status === 'EXPIRED' ? 'EXPIRED — device did not execute this command'
+          : trackedCommand.status === 'FAILED' ? `DEVICE REJECTED — ${trackedCommand.result || 'execution was not accepted'}`
           : trackedCommand.result === 'accepted' ? 'DEVICE ACKNOWLEDGED — command accepted'
             : `DEVICE REJECTED — ${trackedCommand.result || 'execution was not accepted'}`;
 
@@ -109,10 +110,11 @@ const DashboardAeratorPage: React.FC = () => {
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-gray-800">Aerator control</h2>
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <button disabled={!deviceId || pending} onClick={() => void command('AERATOR_ON')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Turn ON</button>
+          <button disabled onClick={() => void command('AERATOR_ON')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Turn ON (not connected)</button>
           <button disabled={!deviceId || pending} onClick={() => void command('AERATOR_OFF')} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Turn OFF</button>
-          <button disabled={!deviceId || pending} onClick={() => void command('AERATOR_AUTO')} className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Automatic</button>
+          <button disabled onClick={() => void command('AERATOR_AUTO')} className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Automatic (not connected)</button>
         </div>
+        <p className="mt-2 text-[11px] text-gray-600">The aerator is not connected, so ON and automatic controls are disabled in the dashboard and firmware. OFF remains available as a stop request.</p>
         <p className="mt-3 text-[11px] text-gray-500">Manual ON/OFF selects manual mode on the device. Automatic returns control to the firmware temperature policy.</p>
         <p className="mt-3 text-xs" aria-live="polite">{pending ? 'Submitting command…' : commandStatus}</p>
         {trackedCommand && <p className="mt-1 text-[10px] text-gray-500">Command {trackedCommand.id} · {trackedCommand.action}</p>}

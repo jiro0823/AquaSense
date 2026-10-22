@@ -2,7 +2,7 @@ import { DataTypes, Model } from 'sequelize';
 import { getDatabase } from '../connection';
 
 export type FeedingCommandAction = 'ON' | 'OFF' | 'TRIGGER';
-export type FeedingCommandStatus = 'PENDING' | 'ACKED';
+export type FeedingCommandStatus = 'PENDING' | 'ACKED' | 'FAILED' | 'EXPIRED';
 export type FeedingCommandSource = 'MANUAL' | 'SCHEDULE';
 
 export class FeedingCommand extends Model {
@@ -45,7 +45,7 @@ export const initializeFeedingCommandModel = (): void => {
         allowNull: false,
       },
       status: {
-        type: DataTypes.ENUM('PENDING', 'ACKED'),
+        type: DataTypes.ENUM('PENDING', 'ACKED', 'FAILED', 'EXPIRED'),
         allowNull: false,
         defaultValue: 'PENDING',
       },

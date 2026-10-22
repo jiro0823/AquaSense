@@ -106,6 +106,7 @@ function App(): JSX.Element {
           <Route path="feeding" element={<DashboardFeedingPage />} />
           <Route path="water-change" element={<DashboardWaterChangePage />} />
           <Route path="aerator" element={<DashboardAeratorPage />} />
+          <Route path="buzzer" element={<Navigate to="/dashboard/alerts" replace />} />
           <Route path="alerts" element={<DashboardAlertsPage />} />
           <Route path="settings" element={<DashboardSettingsPage />} />
         </Route>

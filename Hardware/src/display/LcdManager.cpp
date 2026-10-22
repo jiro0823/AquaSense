@@ -7,7 +7,6 @@
 #include <math.h>
 #include "config/DeviceConfig.h"
 #include "config/CalibrationConfig.h"
-#include "config/Thresholds.h"
 #include "../sensors/SensorConversions.h"
 #if __has_include("secrets/Secrets.h")
 #include "secrets/Secrets.h"
@@ -69,91 +68,91 @@ void LcdManager::drawProgress(uint8_t row, uint32_t elapsedMs, uint32_t timeoutM
 }
 
 void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
-    const bool fresh = readings.sequence != 0 &&
-        uint32_t(nowMs - readings.sampledAtMs) <= DeviceConfig::TELEMETRY_MAX_AGE_MS;
     char row[32];
-#if AQUASENSE_LCD_ANALOG_DIAGNOSTIC_MODE
-    const bool hasSample = readings.sequence != 0;
-    const auto freshAt = [nowMs](uint32_t sampledAtMs) {
-        return sampledAtMs != 0 && uint32_t(nowMs - sampledAtMs) <= DeviceConfig::TELEMETRY_MAX_AGE_MS;
+    const auto freshAt = [nowMs, &readings](uint32_t sampledAtMs) {
+        return readings.sequence != 0 &&
+            uint32_t(nowMs - sampledAtMs) <= DeviceConfig::TELEMETRY_MAX_AGE_MS;
     };
-    const auto usableAdc = [](const AnalogDiagnostics& diagnostics, int minimum, int maximum) {
+    const auto analogStatus = [&readings](const AnalogDiagnostics& diagnostics, int minimum, int maximum,
+                                          bool connected, bool valid) -> const char* {
         const int raw = int(diagnostics.rawAdc);
         const int spread = int(diagnostics.maximum) - int(diagnostics.minimum);
-        return raw >= minimum && raw <= maximum && spread <= CalibrationConfig::STABILITY_MAX_DEV &&
-            diagnostics.clipped == 0 && SensorConversions::adcUsable(raw);
+        const bool acquisitionUsable = raw >= minimum && raw <= maximum &&
+            spread <= CalibrationConfig::STABILITY_MAX_DEV && diagnostics.clipped == 0 &&
+            SensorConversions::adcUsable(raw);
+        if (!acquisitionUsable || !connected) return "INVALID";
+        if (!CalibrationConfig::ANALOG_CONVERSION_VERIFIED || !readings.calibrated) return "UNVERIFIED";
+        return valid ? nullptr : "INVALID";
     };
-    if (!hasSample) {
-        writeRow(0, "pH: NO DATA");
-    } else if (!freshAt(readings.phDiagnostics.sampledAtMs)) {
-        writeRow(0, "pH: STALE");
-    } else if (!usableAdc(readings.phDiagnostics, CalibrationConfig::PH_CONNECT_MIN,
-                          CalibrationConfig::PH_CONNECT_MAX)) {
-        snprintf(row, sizeof(row), "pH ADC %.0f FAIL", double(readings.phDiagnostics.rawAdc));
+    const auto previewUsable = [](const AnalogDiagnostics& diagnostics, int connectMin, int connectMax) {
+        return DeviceConfig::PUBLIC_MQTT_DEV && SensorConversions::provisionalAcquisitionUsable(
+            diagnostics.rawAdc, diagnostics.minimum, diagnostics.maximum,
+            diagnostics.clipped, diagnostics.voltage, connectMin, connectMax);
+    };
+
+    if (!freshAt(readings.phDiagnostics.sampledAtMs)) writeRow(0, "pH: STALE");
+    else if (DeviceConfig::PUBLIC_MQTT_DEV) {
+        const float estimate = SensorConversions::provisionalPhFromVoltage(readings.phDiagnostics.voltage);
+        if (previewUsable(readings.phDiagnostics, CalibrationConfig::PH_CONNECT_MIN,
+                          CalibrationConfig::PH_CONNECT_MAX) && isfinite(estimate)) {
+            snprintf(row, sizeof(row), "pH: %.2f*", double(estimate));
+            writeRow(0, row);
+        } else writeRow(0, "pH: UNAVAILABLE");
+    }
+    else if (const char* status = analogStatus(readings.phDiagnostics, CalibrationConfig::PH_CONNECT_MIN,
+                                               CalibrationConfig::PH_CONNECT_MAX, readings.phConnected, readings.phValid)) {
+        snprintf(row, sizeof(row), "pH: %s", status);
         writeRow(0, row);
-    } else if (!CalibrationConfig::ANALOG_CONVERSION_VERIFIED && !readings.calibrated) {
-        const float phEstimate = SensorConversions::phFromVoltage(readings.phDiagnostics.voltage);
-        if (isfinite(phEstimate) && SensorConversions::phPlausible(phEstimate))
-            snprintf(row, sizeof(row), "pH: %.2f PRE-CAL", double(phEstimate));
-        else
-            snprintf(row, sizeof(row), "pH: INVALID");
-        writeRow(0, row);
-    } else if (fresh && readings.phValid) {
+    } else if (readings.phValid) {
         snprintf(row, sizeof(row), "pH: %.2f", double(readings.ph));
         writeRow(0, row);
-    } else {
-        writeRow(0, readings.phConnected ? "pH: INVALID" : "pH: DISCONNECTED");
-    }
-    if (readings.sequence == 0) {
-        writeRow(1, "Temp: NO DATA");
-    } else if (!freshAt(readings.temperatureSampledAtMs)) {
-        writeRow(1, "Temp: STALE");
-    } else if (!readings.temperatureConnected) {
-        writeRow(1, "Temp: DISCONNECTED");
-    } else if (!readings.temperatureValid) {
-        writeRow(1, "Temp: INVALID");
-    } else {
+    } else writeRow(0, "pH: INVALID");
+
+    if (!freshAt(readings.temperatureSampledAtMs)) writeRow(1, "Temp: STALE");
+    else if (!readings.temperatureConnected) writeRow(1, "Temp: DISCONNECTED");
+    else if (!readings.temperatureValid) writeRow(1, "Temp: INVALID");
+    else {
         snprintf(row, sizeof(row), "Temp: %.2f C", double(readings.temperatureC));
         writeRow(1, row);
     }
-    if (!hasSample) {
-        writeRow(2, "Turb: NO DATA");
-    } else if (!freshAt(readings.turbidityDiagnostics.sampledAtMs)) {
-        writeRow(2, "Turb: STALE");
-    } else if (!usableAdc(readings.turbidityDiagnostics, CalibrationConfig::TURBIDITY_CONNECT_MIN,
-                          CalibrationConfig::TURBIDITY_CONNECT_MAX)) {
-        snprintf(row, sizeof(row), "Turb ADC %.0f FAIL", double(readings.turbidityDiagnostics.rawAdc));
-        writeRow(2, row);
-    } else {
-        snprintf(row, sizeof(row), "Turb: ADC %.0f", double(readings.turbidityDiagnostics.rawAdc));
-        writeRow(2, row);
+
+    if (!freshAt(readings.turbidityDiagnostics.sampledAtMs)) writeRow(2, "Turbidity: STALE");
+    else if (DeviceConfig::PUBLIC_MQTT_DEV) {
+        const float estimate = SensorConversions::provisionalTurbidityFromAdc(readings.turbidityDiagnostics.rawAdc);
+        if (previewUsable(readings.turbidityDiagnostics, CalibrationConfig::TURBIDITY_CONNECT_MIN,
+                          CalibrationConfig::TURBIDITY_CONNECT_MAX) && isfinite(estimate)) {
+            snprintf(row, sizeof(row), "Turbidity: %.1f*", double(estimate));
+            writeRow(2, row);
+        } else writeRow(2, "Turbidity: UNAVAILABLE");
     }
-    if (!hasSample) {
-        writeRow(3, "ORP: NO DATA");
-    } else if (!freshAt(readings.orpDiagnostics.sampledAtMs)) {
-        writeRow(3, "ORP: STALE");
-    } else if (!usableAdc(readings.orpDiagnostics, CalibrationConfig::ORP_CONNECT_MIN,
-                          CalibrationConfig::ORP_CONNECT_MAX)) {
-        snprintf(row, sizeof(row), "ORP ADC %.0f FAIL", double(readings.orpDiagnostics.rawAdc));
-        writeRow(3, row);
-    } else {
-        snprintf(row, sizeof(row), "ORP: ADC %.0f", double(readings.orpDiagnostics.rawAdc));
-        writeRow(3, row);
+    else if (const char* status = analogStatus(readings.turbidityDiagnostics, CalibrationConfig::TURBIDITY_CONNECT_MIN,
+                                               CalibrationConfig::TURBIDITY_CONNECT_MAX,
+                                               readings.turbidityConnected, readings.turbidityValid)) {
+        // The full label plus UNVERIFIED fits exactly in the 20-column display.
+        if (strcmp(status, "UNVERIFIED") == 0) writeRow(2, "Turbidity:UNVERIFIED");
+        else writeRow(2, "Turbidity: INVALID");
+    } else if (readings.turbidityValid) {
+        snprintf(row, sizeof(row), "Turbidity: %.1f", double(readings.turbidityRaw));
+        writeRow(2, row);
+    } else writeRow(2, "Turbidity: INVALID");
+
+    if (!freshAt(readings.orpDiagnostics.sampledAtMs)) writeRow(3, "ORP: STALE");
+    else if (DeviceConfig::PUBLIC_MQTT_DEV) {
+        const float estimate = SensorConversions::orpFromVoltage(readings.orpDiagnostics.voltage);
+        if (previewUsable(readings.orpDiagnostics, CalibrationConfig::ORP_CONNECT_MIN,
+                          CalibrationConfig::ORP_CONNECT_MAX) && isfinite(estimate)) {
+            snprintf(row, sizeof(row), "ORP: %.1f mV*", double(estimate));
+            writeRow(3, row);
+        } else writeRow(3, "ORP: UNAVAILABLE");
     }
-#else
-    if (fresh && readings.phValid) snprintf(row, sizeof(row), "pH: %.2f", double(readings.ph));
-    else snprintf(row, sizeof(row), "pH: DISCONNECTED");
-    writeRow(0, row);
-    if (fresh && readings.temperatureValid) snprintf(row, sizeof(row), "Temp: %.2f C", double(readings.temperatureC));
-    else snprintf(row, sizeof(row), "Temp: DISCONNECTED");
-    writeRow(1, row);
-    if (fresh && readings.turbidityValid) snprintf(row, sizeof(row), "Turb: %.1f NTU", double(readings.turbidityRaw));
-    else snprintf(row, sizeof(row), "Turb: DISCONNECTED");
-    writeRow(2, row);
-    if (fresh && readings.orpValid) snprintf(row, sizeof(row), "ORP: %.1f mV", double(readings.orpMv));
-    else snprintf(row, sizeof(row), "ORP: DISCONNECTED");
-    writeRow(3, row);
-#endif
+    else if (const char* status = analogStatus(readings.orpDiagnostics, CalibrationConfig::ORP_CONNECT_MIN,
+                                               CalibrationConfig::ORP_CONNECT_MAX, readings.orpConnected, readings.orpValid)) {
+        snprintf(row, sizeof(row), "ORP: %s", status);
+        writeRow(3, row);
+    } else if (readings.orpValid) {
+        snprintf(row, sizeof(row), "ORP: %.1f mV", double(readings.orpMv));
+        writeRow(3, row);
+    } else writeRow(3, "ORP: INVALID");
 }
 
 void LcdManager::update(const SensorReadings& reading, const SystemState& state, uint32_t nowMs) {
@@ -172,16 +171,23 @@ void LcdManager::update(const SensorReadings& reading, const SystemState& state,
         lcd.createChar(0, fullBlock);
         lcd.createChar(1, lightBlock);
         available = true;
-        startupComplete = false;
-        wasWifiConnected = false;
-        wasMqttConnected = false;
-        wifiStageStartedMs = nowMs;
-        mqttStageStartedMs = 0;
+        if (!startupComplete) {
+            wasWifiConnected = false;
+            wasMqttConnected = false;
+            wifiStageStartedMs = nowMs;
+            mqttStageStartedMs = 0;
+        }
     }
     if (!state.wifiConnected) {
+        if (startupComplete) {
+            showReadings(reading, nowMs);
+            wasWifiConnected = false;
+            wasMqttConnected = false;
+            wifiSuccessScreenActive = false;
+            return;
+        }
         if (wasWifiConnected || wifiStageStartedMs == 0) wifiStageStartedMs = nowMs;
         mqttStageStartedMs = 0;
-        startupComplete = false;
         successScreenActive = false;
         wifiSuccessScreenActive = false;
         char ssidRow[DeviceConfig::LCD_COLUMNS + 1];
@@ -199,7 +205,7 @@ void LcdManager::update(const SensorReadings& reading, const SystemState& state,
     // Preserve the reference flow's WiFi success screen before displaying
     // MQTT progress. The shared state exposes connection booleans only, so
     // this transition is inferred from the WiFi rising edge.
-    if (!wasWifiConnected && !wifiSuccessScreenActive) {
+    if (!startupComplete && !wasWifiConnected && !wifiSuccessScreenActive) {
         const String ip = WiFi.localIP().toString();
         writeRow(0, "WiFi OK");
         writeRow(1, ip.c_str());
@@ -218,8 +224,13 @@ void LcdManager::update(const SensorReadings& reading, const SystemState& state,
     }
 
     if (!state.mqttConnected) {
+        if (startupComplete) {
+            showReadings(reading, nowMs);
+            wasWifiConnected = true;
+            wasMqttConnected = false;
+            return;
+        }
         if (wasMqttConnected || mqttStageStartedMs == 0) mqttStageStartedMs = nowMs;
-        startupComplete = false;
         successScreenActive = false;
         writeRow(0, "Connecting MQTT...");
         writeRow(1, DeviceConfig::MQTT_HOST);

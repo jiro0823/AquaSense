@@ -2,30 +2,67 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <WiFi.h>
+#include <new>
 #include <stdio.h>
 #include <string.h>
 #include "config/DeviceConfig.h"
+#include "config/CalibrationConfig.h"
 #if __has_include("secrets/Secrets.h")
 #include "secrets/Secrets.h"
 #else
 #include "secrets/Secrets.example.h"
 #endif
 
-LcdManager::LcdManager() : lcd(DeviceConfig::LCD_ADDRESS, DeviceConfig::LCD_COLUMNS, DeviceConfig::LCD_ROWS) {}
+LcdManager::LcdManager() = default;
 
-void LcdManager::begin() {
-    Wire.beginTransmission(DeviceConfig::LCD_ADDRESS);
-    available = Wire.endTransmission() == 0;
-    if (!available) {
-        Serial.println("LCD not found; monitoring continues.");
-        return;
+uint8_t LcdManager::detectLcdAddress() {
+    const auto responds = [](uint8_t address) {
+        Wire.beginTransmission(address);
+        return Wire.endTransmission() == 0;
+    };
+    if (responds(DeviceConfig::LCD_ADDRESS)) return DeviceConfig::LCD_ADDRESS;
+    for (uint8_t address = 0x20; address <= 0x27; ++address)
+        if (responds(address)) return address;
+    for (uint8_t address = 0x38; address <= 0x3F; ++address)
+        if (responds(address)) return address;
+    return 0;
+}
+
+bool LcdManager::initializeLcd() {
+    if (lcd && lcdObjectAddress != lcdAddress) {
+        delete lcd;
+        lcd = nullptr;
     }
-    lcd.init();
-    lcd.backlight();
+    if (!lcd) {
+        lcd = new (std::nothrow) LiquidCrystal_I2C(lcdAddress, DeviceConfig::LCD_COLUMNS, DeviceConfig::LCD_ROWS);
+        if (lcd) lcdObjectAddress = lcdAddress;
+    }
+    if (!lcd) return false;
+    lcd->init();
+    lcd->backlight();
     uint8_t fullBlock[8] = {0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111};
     uint8_t lightBlock[8] = {0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010};
-    lcd.createChar(0, fullBlock);
-    lcd.createChar(1, lightBlock);
+    lcd->createChar(0, fullBlock);
+    lcd->createChar(1, lightBlock);
+    invalidateRowCache();
+    return true;
+}
+
+void LcdManager::invalidateRowCache() {
+    memset(rowCacheValid, 0, sizeof(rowCacheValid));
+}
+
+void LcdManager::begin() {
+    lcdAddress = detectLcdAddress();
+    if (lcdAddress == 0 || !initializeLcd()) {
+        Serial.println("LCD not found on I2C addresses 0x20-0x27 or 0x38-0x3F; monitoring continues.");
+        available = false;
+        return;
+    }
+    available = true;
+    lcdMissCount = 0;
+    lcdRecoveryAckCount = 0;
+    Serial.printf("LCD found at I2C address 0x%02X\n", unsigned(lcdAddress));
     writeRow(0, "     AQUASENSE");
     writeRow(1, " Water Quality Mon. ");
     writeRow(2, "                    ");
@@ -36,23 +73,28 @@ void LcdManager::begin() {
     }
     for (uint8_t blink = 0; blink < 2; ++blink) {
         delay(250);
-        lcd.noDisplay();
+        lcd->noDisplay();
         delay(150);
-        lcd.display();
+        lcd->display();
     }
     delay(300);
-    lcd.clear();
+    lcd->clear();
+    invalidateRowCache();
     wifiStageStartedMs = millis();
 }
 
 void LcdManager::writeRow(uint8_t row, const char* text) {
+    if (row >= DeviceConfig::LCD_ROWS || !lcd) return;
     char padded[DeviceConfig::LCD_COLUMNS + 1];
     memset(padded, ' ', DeviceConfig::LCD_COLUMNS);
     const size_t length = strnlen(text, DeviceConfig::LCD_COLUMNS);
     memcpy(padded, text, length);
     padded[DeviceConfig::LCD_COLUMNS] = '\0';
-    lcd.setCursor(0, row);
-    lcd.print(padded); // Overwrite the whole row without clear()/visible flicker.
+    if (rowCacheValid[row] && strcmp(lastRows[row], padded) == 0) return;
+    lcd->setCursor(0, row);
+    lcd->print(padded); // Overwrite the whole row without clear()/visible flicker.
+    memcpy(lastRows[row], padded, sizeof(padded));
+    rowCacheValid[row] = true;
 }
 
 void LcdManager::drawProgress(uint8_t row, uint32_t elapsedMs, uint32_t timeoutMs) {
@@ -60,8 +102,9 @@ void LcdManager::drawProgress(uint8_t row, uint32_t elapsedMs, uint32_t timeoutM
     const uint8_t filled = timeoutMs
         ? uint8_t((uint64_t(boundedElapsed) * DeviceConfig::LCD_COLUMNS + timeoutMs / 2) / timeoutMs)
         : 0;
-    lcd.setCursor(0, row);
-    for (uint8_t i = 0; i < DeviceConfig::LCD_COLUMNS; ++i) lcd.write(byte(i < filled ? 0 : 1));
+    if (!lcd) return;
+    lcd->setCursor(0, row);
+    for (uint8_t i = 0; i < DeviceConfig::LCD_COLUMNS; ++i) lcd->write(byte(i < filled ? 0 : 1));
 }
 
 void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
@@ -74,8 +117,15 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
     if (fresh && readings.temperatureValid) snprintf(row, sizeof(row), "Temp: %.2f C", double(readings.temperatureC));
     else snprintf(row, sizeof(row), "Temp: DISCONNECTED");
     writeRow(1, row);
-    if (fresh && readings.turbidityValid) snprintf(row, sizeof(row), "Turb: %.1f NTU", double(readings.turbidityRaw));
-    else snprintf(row, sizeof(row), "Turb: DISCONNECTED");
+    if (fresh && readings.turbidityValid)
+        snprintf(row, sizeof(row), "Turb: %.1f NTU%s", double(readings.turbidityRaw),
+            CalibrationConfig::TURBIDITY_CALIBRATION_VERIFIED ? "" : " EST");
+    else if (fresh && (readings.turbidityDiagnostics.minimum <= 8 || readings.turbidityDiagnostics.maximum >= 4087))
+        snprintf(row, sizeof(row), "Turb: SENSOR ERROR");
+    else if (fresh && !readings.turbidityConnected)
+        snprintf(row, sizeof(row), "Turb: OUT OF RANGE");
+    else if (!fresh) snprintf(row, sizeof(row), "Turb: STALE");
+    else snprintf(row, sizeof(row), "Turb: INVALID");
     writeRow(2, row);
     if (fresh && readings.orpValid) snprintf(row, sizeof(row), "ORP: %.1f mV", double(readings.orpMv));
     else snprintf(row, sizeof(row), "ORP: DISCONNECTED");
@@ -85,24 +135,47 @@ void LcdManager::showReadings(const SensorReadings& readings, uint32_t nowMs) {
 void LcdManager::update(const SensorReadings& reading, const SystemState& state, uint32_t nowMs) {
     if (uint32_t(nowMs - lastRefreshMs) < DeviceConfig::LCD_REFRESH_INTERVAL_MS) return;
     lastRefreshMs = nowMs;
-    Wire.beginTransmission(DeviceConfig::LCD_ADDRESS);
-    if (Wire.endTransmission() != 0) {
-        available = false;
+    if (lcdAddress == 0) lcdAddress = detectLcdAddress();
+    if (lcdAddress == 0) {
+        if (++lcdMissCount >= 3) {
+            available = false;
+            lcdRecoveryAckCount = 0;
+        }
         return;
     }
+    Wire.beginTransmission(lcdAddress);
+    if (Wire.endTransmission() != 0) {
+        lcdRecoveryAckCount = 0;
+        if (++lcdMissCount >= 3) {
+            available = false;
+            lcdAddress = 0;
+        }
+        return;
+    }
+    lcdMissCount = 0;
     if (!available) {
-        lcd.init();
-        lcd.backlight();
-        uint8_t fullBlock[8] = {0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111};
-        uint8_t lightBlock[8] = {0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010, 0b10101, 0b01010};
-        lcd.createChar(0, fullBlock);
-        lcd.createChar(1, lightBlock);
+        // Ignore a single transient ACK after a bus disturbance. Reinitialize
+        // only after the backpack has responded consistently on two polls.
+        if (++lcdRecoveryAckCount < 2) return;
+        if (!initializeLcd()) return;
         available = true;
+        lcdRecoveryAckCount = 0;
+        Serial.printf("LCD reconnected at I2C address 0x%02X\n", unsigned(lcdAddress));
         startupComplete = false;
         wasWifiConnected = false;
         wasMqttConnected = false;
         wifiStageStartedMs = nowMs;
         mqttStageStartedMs = 0;
+    }
+    const bool readingFresh = reading.sequence != 0 &&
+        uint32_t(nowMs - reading.sampledAtMs) <= DeviceConfig::TELEMETRY_MAX_AGE_MS;
+    if (readingFresh) {
+        // Keep local measurements visible during network outages. Connectivity
+        // state and retry diagnostics continue on Serial Monitor.
+        showReadings(reading, nowMs);
+        wasWifiConnected = state.wifiConnected;
+        wasMqttConnected = state.mqttConnected;
+        return;
     }
     if (!state.wifiConnected) {
         if (wasWifiConnected || wifiStageStartedMs == 0) wifiStageStartedMs = nowMs;

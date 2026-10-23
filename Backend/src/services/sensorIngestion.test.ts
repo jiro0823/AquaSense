@@ -5,11 +5,19 @@ import * as database from '../database/connection';
 import {sensorReadingService} from './sensorReadingService';
 import {predictiveAnalyticsService} from './predictiveAnalytics.service';
 import {waterAlertNotificationService} from './waterAlertNotification.service';
-import {MQTTService} from './mqttService';
+import {MQTTService, sanitizeBrokerUrl} from './mqttService';
 import {logger} from '../utils/logger';
 import {waterReadingSchema,sensorIngestSchema} from '../middleware/validate';
 import {SensorValidator, timestampMs} from './sensorHealth';
+import {config} from '../config/config';
+import {signCanonical} from './hardwareProtocol';
 afterEach(()=>mock.restoreAll());
+test('MQTT broker diagnostics redact URL credentials and non-endpoint components',()=>{
+  const url='mqtt://username:password@broker.example:1883/private/path?token=hidden#fragment';
+  assert.equal(sanitizeBrokerUrl(url),'mqtt://broker.example:1883');
+  assert.equal(new MQTTService({brokerUrl:url}).getStatus().brokerUrl,'mqtt://broker.example:1883');
+  assert.equal(sanitizeBrokerUrl('not a URL'),'invalid-broker-url');
+});
 function storage() {
   const rows:any[]=[];
   mock.method(logger,'info',()=>{});mock.method(logger,'warn',()=>{});
@@ -110,6 +118,211 @@ test('topic MQTT duplicate updates cannot emit a second frame without fresh requ
   await new Promise<void>(resolve=>setImmediate(resolve));
   assert.equal(rows.length,1);
 });
+test('public MQTT persists only timestamped v1 frames on the exact configured device topic',async()=>{
+  const rows=storage();
+  mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const previous={
+    enabled:config.mqtt.publicTelemetryOnly,
+    namespace:config.mqtt.topicNamespace,
+    deviceId:config.mqtt.telemetryDeviceId,
+    scoped:config.mqtt.deviceScopedTopics,
+    commands:config.mqtt.actuatorCommandsEnabled,
+    deviceKey:config.device.keys['esp32-feeder-1'],
+  };
+  config.mqtt.publicTelemetryOnly=true;
+  config.mqtt.topicNamespace='aquasense-dev';
+  config.mqtt.telemetryDeviceId='esp32-feeder-1';
+  config.mqtt.deviceScopedTopics=true;
+  config.mqtt.actuatorCommandsEnabled=false;
+  config.device.keys['esp32-feeder-1']='test-public-frame-key';
+  try {
+    const service=new MQTTService();
+    const accept=(suffix:string,value:string)=> (service as any).handlePublicTelemetryMessage(
+      `aquasense-dev/devices/esp32-feeder-1/telemetry/${suffix}`,Buffer.from(value));
+    (service as any).handlePublicTelemetryMessage('aquasense-dev/devices/other-device/telemetry/temperature',Buffer.from('25'));
+    (service as any).handlePublicTelemetryMessage('aquasense-dev/devices/esp32-feeder-1/telemetry/temperature/status',Buffer.from('25'));
+    (service as any).handlePublicTelemetryMessage('aquasense-dev/devices/esp32-feeder-1/command',Buffer.from('25'));
+    // Legacy scalar publications carry no source time or sequence. They are
+    // intentionally ignored by this profile rather than stamped at receipt.
+    accept('temperature','25.1'); accept('ph','7.4'); accept('turbidity-ntu','18');
+    const acquiredAt=new Date(Date.now()-100).toISOString();
+    const frame={v:1,deviceId:'esp32-feeder-1',bootId:'boot-frame-test',sequence:1,acquiredAt,
+      sensorTimestamps:{temperature:acquiredAt,ph:acquiredAt,turbidity:acquiredAt,orp:acquiredAt},
+      temperature:25.1,ph:7.4,turbidity:18,turbidityUnit:'NTU',orp:null,
+      sensors:{temperature:{connected:true,valid:true,sampleAgeMs:100},ph:{connected:true,valid:true,sampleAgeMs:100},
+        turbidity:{connected:true,valid:true,sampleAgeMs:100,rawAdc:1800},orp:{connected:false,valid:false,sampleAgeMs:100}}};
+    const publishFrame=(value:unknown,device='esp32-feeder-1',signatureOverride?:string)=>{
+      const signedBody=JSON.stringify(value);
+      const envelope={frame:signedBody,signature:signatureOverride??signCanonical(signedBody,'test-public-frame-key')};
+      (service as any).handlePublicTelemetryMessage(
+        `aquasense-dev/devices/${device}/telemetry/frame`,Buffer.from(JSON.stringify(envelope)));
+    };
+    publishFrame({...frame,deviceId:'different-device'});
+    publishFrame({...frame,acquiredAt:'not-a-date'});
+    publishFrame(frame,'other-device');
+    publishFrame(frame,'esp32-feeder-1','0'.repeat(64));
+    publishFrame(frame);
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].deviceId,'esp32-feeder-1');
+    assert.equal(rows[0].temperature,25.1);
+    assert.equal(rows[0].ph,7.4);
+    assert.equal(rows[0].turbidity,18);
+    assert.equal(rows[0].turbidityUnit,'NTU');
+    assert.equal(rows[0].timestamp.toISOString(),acquiredAt);
+    assert.equal(rows[0].bootId,'boot-frame-test');
+    assert.equal(rows[0].sequenceId,1);
+    assert.equal(rows[0].sensorHealth.orp.value,null);
+    assert.equal(rows[0].sensorHealth.turbidity.rawAdc,1800);
+    assert.ok(Number.isFinite(Date.parse(service.getStatus().lastPublicFrameReceivedAt!)));
+    assert.ok(Number.isFinite(Date.parse(service.getStatus().lastPublicFrameVerifiedAt!)));
+    assert.ok(Number.isFinite(Date.parse(service.getStatus().lastPublicFramePersistedAt!)));
+  } finally {
+    config.mqtt.publicTelemetryOnly=previous.enabled;
+    config.mqtt.topicNamespace=previous.namespace;
+    config.mqtt.telemetryDeviceId=previous.deviceId;
+    config.mqtt.deviceScopedTopics=previous.scoped;
+    config.mqtt.actuatorCommandsEnabled=previous.commands;
+    if (previous.deviceKey === undefined) delete config.device.keys['esp32-feeder-1'];
+    else config.device.keys['esp32-feeder-1']=previous.deviceKey;
+  }
+});
+test('public telemetry-only mode refuses outbound actuator MQTT commands',async()=>{
+  const enabled=config.mqtt.publicTelemetryOnly, commands=config.mqtt.actuatorCommandsEnabled;
+  config.mqtt.publicTelemetryOnly=true;
+  config.mqtt.actuatorCommandsEnabled=false;
+  try {
+    const result=await new MQTTService().dispatchHardwareCommand({id:'command-test',deviceId:'esp32-feeder-1',source:'hardware',action:'ALL_OFF',expiresAt:new Date(Date.now()+1000)});
+    assert.equal(result,false);
+  } finally {
+    config.mqtt.publicTelemetryOnly=enabled;
+    config.mqtt.actuatorCommandsEnabled=commands;
+  }
+});
+test('public MQTT profile subscribes only to its exact device telemetry wildcard',()=>{
+  const previous={enabled:config.mqtt.publicTelemetryOnly,namespace:config.mqtt.topicNamespace,
+    deviceId:config.mqtt.telemetryDeviceId,scoped:config.mqtt.deviceScopedTopics,
+    commands:config.mqtt.actuatorCommandsEnabled,wildcard:config.mqtt.topics.sensorWildcard};
+  config.mqtt.publicTelemetryOnly=true;
+  config.mqtt.topicNamespace='aquasense-dev';
+  config.mqtt.telemetryDeviceId='esp32-feeder-1';
+  config.mqtt.deviceScopedTopics=true;
+  config.mqtt.actuatorCommandsEnabled=false;
+  const expected='aquasense-dev/devices/esp32-feeder-1/telemetry/+';
+  config.mqtt.topics.sensorWildcard=expected;
+  try {
+    const service=new MQTTService();
+    const subscribe=mock.fn((_topics: string[], callback: (error: Error|null)=>void)=>callback(null));
+    (service as any).client={subscribe};
+    (service as any).subscribe();
+    assert.deepEqual(subscribe.mock.calls[0].arguments[0],[expected]);
+  } finally {
+    config.mqtt.publicTelemetryOnly=previous.enabled;
+    config.mqtt.topicNamespace=previous.namespace;
+    config.mqtt.telemetryDeviceId=previous.deviceId;
+    config.mqtt.deviceScopedTopics=previous.scoped;
+    config.mqtt.actuatorCommandsEnabled=previous.commands;
+    config.mqtt.topics.sensorWildcard=previous.wildcard;
+  }
+});
+test('public MQTT persistence is rate-limited to one complete frame per 4500 ms',async()=>{
+  const rows=storage();
+  mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const now=Date.now(); let clock=now;
+  mock.method(Date,'now',()=>clock);
+  const previous={enabled:config.mqtt.publicTelemetryOnly,namespace:config.mqtt.topicNamespace,deviceId:config.mqtt.telemetryDeviceId,deviceKey:config.device.keys['esp32-feeder-1']};
+  config.mqtt.publicTelemetryOnly=true;
+  config.mqtt.topicNamespace='aquasense-dev';
+  config.mqtt.telemetryDeviceId='esp32-feeder-1';
+  config.device.keys['esp32-feeder-1']='test-public-frame-key';
+  try {
+    const service=new MQTTService();
+    let sequence=0;
+    const frame=(temperature:number)=>{
+      const acquiredAt=new Date(clock).toISOString();
+      const payload={v:1,deviceId:'esp32-feeder-1',bootId:'rate-limit-boot',sequence:++sequence,acquiredAt,
+        sensorTimestamps:{temperature:acquiredAt,ph:acquiredAt,turbidity:acquiredAt,orp:acquiredAt},
+        temperature,ph:7.4,turbidity:18,turbidityUnit:'NTU',orp:null,
+        sensors:{temperature:{connected:true,valid:true,sampleAgeMs:0},ph:{connected:true,valid:true,sampleAgeMs:0},
+          turbidity:{connected:true,valid:true,sampleAgeMs:0},orp:{connected:false,valid:false,sampleAgeMs:0}}};
+      const frameBody=JSON.stringify(payload);
+      (service as any).handlePublicTelemetryMessage('aquasense-dev/devices/esp32-feeder-1/telemetry/frame',
+        Buffer.from(JSON.stringify({frame:frameBody,signature:signCanonical(frameBody,'test-public-frame-key')})));
+    };
+    frame(25);
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(rows.length,1);
+    clock+=4499; frame(25.1);
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(rows.length,1);
+    clock+=1; frame(25.2);
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(rows.length,2);
+  } finally {
+    config.mqtt.publicTelemetryOnly=previous.enabled;
+    config.mqtt.topicNamespace=previous.namespace;
+    config.mqtt.telemetryDeviceId=previous.deviceId;
+    if (previous.deviceKey === undefined) delete config.device.keys['esp32-feeder-1'];
+    else config.device.keys['esp32-feeder-1']=previous.deviceKey;
+  }
+});
+test('public MQTT serializes ingestion and drains only the newest bounded pending frame',async()=>{
+  const now=Date.now(); let clock=now;
+  mock.method(Date,'now',()=>clock);
+  const service=new MQTTService();
+  let releaseFirst!: (inserted:boolean)=>void;
+  const firstIngestion=new Promise<boolean>(resolve=>{releaseFirst=resolve;});
+  const ingested:number[]=[];
+  (service as any).handleSensorReading=async(payload:string)=>{
+    const sequence=JSON.parse(payload).sequence;
+    ingested.push(sequence);
+    return sequence===1 ? firstIngestion : true;
+  };
+
+  void (service as any).persistPublicMqttFrame(JSON.stringify({sequence:1}),'deferred-boot',1);
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.deepEqual(ingested,[1]);
+  void (service as any).persistPublicMqttFrame(JSON.stringify({sequence:2}),'deferred-boot',2);
+  void (service as any).persistPublicMqttFrame(JSON.stringify({sequence:3}),'deferred-boot',3);
+  // A late replay must not replace the newer pending sequence.
+  void (service as any).persistPublicMqttFrame(JSON.stringify({sequence:2}),'deferred-boot',2);
+  assert.equal((service as any).pendingPublicFrame.sequence,3);
+  assert.deepEqual(ingested,[1]);
+
+  releaseFirst(true);
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.deepEqual(ingested,[1]);
+  clock+=4500;
+  await (service as any).drainPublicMqttFrame();
+  assert.deepEqual(ingested,[1,3]);
+  assert.equal((service as any).pendingPublicFrame,null);
+  assert.equal((service as any).publicFramePersistInProgress,false);
+});
+test('MQTT disconnect cancels the frame drain timer and discards pending telemetry',async()=>{
+  const now=Date.now(); let clock=now;
+  mock.method(Date,'now',()=>clock);
+  const enabled=config.mqtt.publicTelemetryOnly;
+  config.mqtt.publicTelemetryOnly=true;
+  try {
+    const service=new MQTTService();
+    const ingested:number[]=[];
+    (service as any).handleSensorReading=async(payload:string)=>{ingested.push(JSON.parse(payload).sequence);return true;};
+    (service as any).lastPublicFramePersistedAt=clock;
+    void (service as any).persistPublicMqttFrame(JSON.stringify({sequence:7}),'disconnect-boot',7);
+    assert.equal((service as any).pendingPublicFrame.sequence,7);
+    assert.ok((service as any).publicFrameDrainTimer);
+    (service as any).client={end:(_force:boolean,callback:()=>void)=>callback()};
+
+    await service.disconnect();
+    assert.equal((service as any).pendingPublicFrame,null);
+    assert.equal((service as any).publicFrameDrainTimer,null);
+    clock+=4500;
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.deepEqual(ingested,[]);
+  } finally {
+    config.mqtt.publicTelemetryOnly=enabled;
+  }
+});
 test('topic MQTT missing and disconnected values never persist cached measurements',async()=>{
   const rows=storage();
   mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
@@ -183,6 +396,16 @@ test('replayed acquisition cannot refresh age or train the stability window',asy
   const first=await sensorReadingService.ingest('replay-test',payload);
   const replay=await sensorReadingService.ingest('replay-test',payload);
   assert.equal(replay.id,first.id);assert.equal(rows.length,1);
+});
+test('duplicate MQTT frames do not repeat realtime or alert processing',async()=>{
+  const rows=storage();
+  const notify=mock.method(waterAlertNotificationService,'processReading',async()=>({alertsCreated:0,smsSentCount:0}));
+  const service=new MQTTService();let readings=0,stats=0;
+  service.setRealtimeHandlers({onReadingReceived:()=>readings++,onStatsUpdated:()=>stats++});
+  const payload=JSON.stringify({deviceId:'mqtt-replay-test',temperature:25,ph:8,bootId:'mqtt-boot',sequence:4,acquiredAt:new Date().toISOString()});
+  assert.equal(await (service as any).handleSensorReading(payload),true);
+  assert.equal(await (service as any).handleSensorReading(payload),false);
+  assert.equal(rows.length,1);assert.equal(readings,1);assert.equal(stats,1);assert.equal(notify.mock.callCount(),1);
 });
 test('new frame after restart is ordered against persisted device history',async()=>{
   const rows=storage(), now=Date.now();

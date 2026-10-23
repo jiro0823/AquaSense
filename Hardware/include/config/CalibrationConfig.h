@@ -5,8 +5,12 @@
 namespace CalibrationConfig {
 // User-supplied hardware calibration profile. Validate against reference
 // solutions and the installed analog front ends during commissioning.
-constexpr bool ANALOG_CONVERSION_VERIFIED = true;
-constexpr const char* PROFILE_ID = "aquasense-user-calibration-v1";
+// Conversion can be shown as a provisional estimate from the supplied sketch.
+// Keep this false until the installed sensor is checked against standards.
+constexpr bool ANALOG_CONVERSION_VERIFIED = false;
+constexpr bool TURBIDITY_CALIBRATION_VERIFIED = false;
+constexpr bool TURBIDITY_ESTIMATE_ENABLED = true;
+constexpr const char* PROFILE_ID = "aquasense-user-adc-linear-estimate-v1";
 constexpr int ADC_MAX = 4095;
 constexpr float ADC_REFERENCE_VOLTS = 3.3f;
 constexpr float SMOOTH_PREVIOUS_WEIGHT = 0.7f;
@@ -15,9 +19,12 @@ constexpr float PH_SLOPE = -5.70f;
 constexpr float PH_OFFSET = 21.34f;
 constexpr float ORP_SLOPE = 1333.33f;
 constexpr float ORP_OFFSET = -2000.0f;
+// Provisional mapping only; replace with measured points from the installed
+// sensor and validated reference standards before enabling NTU output.
 constexpr float TURBIDITY_CLEAR_ADC = 3000.0f;
 constexpr float TURBIDITY_DIRTY_ADC = 500.0f;
 constexpr float TURBIDITY_DIRTY_NTU = 1000.0f;
+// Per-sensor electrical windows and burst stability from the supplied sketch.
 constexpr int PH_CONNECT_MIN = 200;
 constexpr int PH_CONNECT_MAX = 3900;
 constexpr int TURBIDITY_CONNECT_MIN = 50;

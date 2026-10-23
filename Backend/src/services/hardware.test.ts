@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { Op } from 'sequelize';
 import type { AddressInfo } from 'node:net';
 import hardwareRoutes from '../api/v1/routes/hardware';
+import feedingRoutes from '../api/v1/routes/feeding';
 import { ackCanonical, commandCanonical, hardwareCommandSchema, hardwareStateSchema, hardwareSyncSchema, parseSignedAck, parseSignedCommand, signCanonical, verifyCanonical, type HardwareState } from './hardwareProtocol';
 import { hardwareService } from './hardwareService';
 import { HardwareCommand, HardwareDeviceState } from '../database/models/HardwareControl';
@@ -266,6 +267,42 @@ test('MQTT actuator publish signs command and explicitly disables retention', as
   assert.equal(verifyCanonical(commandCanonical(command), command.signature, 'test-device-secret'), true);
 });
 
+test('public-dev actuator publish uses the separate HiveMQ control namespace', async () => {
+  const old = {
+    publicTelemetryOnly: config.mqtt.publicTelemetryOnly,
+    publicCommandsEnabled: config.mqtt.publicCommandsEnabled,
+    actuatorCommandsEnabled: config.mqtt.actuatorCommandsEnabled,
+    telemetryDeviceId: config.mqtt.telemetryDeviceId,
+    controlTopicNamespace: config.mqtt.controlTopicNamespace,
+  };
+  config.mqtt.publicTelemetryOnly = true;
+  config.mqtt.publicCommandsEnabled = true;
+  config.mqtt.actuatorCommandsEnabled = true;
+  config.mqtt.telemetryDeviceId = 'board';
+  config.mqtt.controlTopicNamespace = 'control-test';
+  config.device.keys = { board: 'test-device-secret' };
+  const publishes: string[] = [];
+  const service = new MQTTService();
+  Object.assign(service as unknown as object, {
+    client: { connected: true, publish(topic: string, _payload: string, _options: unknown, callback: (error?: Error) => void) {
+      publishes.push(topic); callback();
+    } },
+    isConnected: true,
+  });
+  try {
+    assert.equal(await service.dispatchHardwareCommand({ id, deviceId: 'board', source: 'feeding', action: 'TRIGGER',
+      expiresAt: new Date(Date.now() + 30_000) }), true);
+    assert.deepEqual(publishes, ['control-test/board/command']);
+    assert.equal(service.isActuatorCommandChannelConnected(), true);
+  } finally {
+    config.mqtt.publicTelemetryOnly = old.publicTelemetryOnly;
+    config.mqtt.publicCommandsEnabled = old.publicCommandsEnabled;
+    config.mqtt.actuatorCommandsEnabled = old.actuatorCommandsEnabled;
+    config.mqtt.telemetryDeviceId = old.telemetryDeviceId;
+    config.mqtt.controlTopicNamespace = old.controlTopicNamespace;
+  }
+});
+
 test('MQTT publish callback failure and disconnected broker are not device confirmation', async () => {
   config.device.keys = { board: 'test-device-secret' };
   const service = new MQTTService();
@@ -286,7 +323,7 @@ test('ORP preserves negative/zero millivolts and never turns absent values into 
 
 test('integrated MQTT snapshot retains ORP and device identity through persistence and realtime delivery', async () => {
   mock.method(logger, 'info', () => {});
-  const save = mock.method(sensorReadingService, 'ingest', async (deviceId:string, payload:Record<string,any>) => ({...payload, deviceId, do:null, doMeasured:false}));
+  const save = mock.method(sensorReadingService, 'ingestWithStatus', async (deviceId:string, payload:Record<string,any>) => ({reading:{...payload, deviceId, do:null, doMeasured:false} as any, inserted:true}));
   mock.method(sensorReadingService, 'getStatistics', async () => ({ orp: orpStatistics([{ orp: -330.4 }]) }));
   mock.method(waterAlertNotificationService, 'processReading', async () => undefined);
   const service = new MQTTService();
@@ -334,4 +371,116 @@ test('HTTP sync requires a configured matching key and active device even in dev
     assert.deepEqual(body.data, { id, commandId: id, action: 'ALL_OFF', status: 'PENDING', result: null, expiresAt: expiry.toISOString(), published: false });
     assert.equal(queued.mock.callCount(), 1);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+});
+
+test('public telemetry-only HTTP mode rejects actuator and manual feed commands before queueing', async () => {
+  const oldPublicMode = config.mqtt.publicTelemetryOnly;
+  const oldActuatorCommandsEnabled = config.mqtt.actuatorCommandsEnabled;
+  config.mqtt.publicTelemetryOnly = true;
+  config.mqtt.actuatorCommandsEnabled = false;
+  mock.method(tokenService, 'verifyToken', () => ({ userId: 'owner', email: 'test@example.test', role: 'farmer' }));
+  const hardwareQueue = mock.method(hardwareService, 'queue', async () => { throw new Error('must not queue'); });
+  const feedingQueue = mock.method(feedingService, 'queueManualCommand', async () => { throw new Error('must not queue'); });
+  const app = express(); app.use(express.json(), csrfProtection, hardwareRoutes, feedingRoutes);
+  const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = (path: string, body: unknown) => fetch(base + path, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await post('/hardware/commands', { deviceId: 'board', action: 'ALL_OFF' })).status, 503);
+    assert.equal((await post('/feeding/manual', { action: 'TRIGGER', deviceId: 'board' })).status, 503);
+    assert.equal(hardwareQueue.mock.callCount(), 0);
+    assert.equal(feedingQueue.mock.callCount(), 0);
+  } finally {
+    config.mqtt.publicTelemetryOnly = oldPublicMode;
+    config.mqtt.actuatorCommandsEnabled = oldActuatorCommandsEnabled;
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('manual feeding fails fast without creating a pending command when private MQTT is offline', async () => {
+  const oldPublicMode = config.mqtt.publicTelemetryOnly;
+  const oldActuatorCommandsEnabled = config.mqtt.actuatorCommandsEnabled;
+  config.mqtt.publicTelemetryOnly = true;
+  config.mqtt.actuatorCommandsEnabled = true;
+  mock.method(tokenService, 'verifyToken', () => ({ userId: 'owner', email: 'test@example.test', role: 'farmer' }));
+  mock.method(deviceService, 'verifyOwnership', async () => true);
+  mock.method(MQTTService.prototype, 'isActuatorCommandChannelConnected', () => false);
+  const feedingQueue = mock.method(feedingService, 'queueManualCommand', async () => { throw new Error('must not queue'); });
+  const app = express(); app.use(express.json(), csrfProtection, feedingRoutes);
+  const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const response = await fetch(base + '/feeding/manual', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' },
+      body: JSON.stringify({ action: 'TRIGGER', deviceId: 'esp32-feeder-1' }) });
+    assert.equal(response.status, 503);
+    assert.equal(feedingQueue.mock.callCount(), 0);
+  } finally {
+    config.mqtt.publicTelemetryOnly = oldPublicMode;
+    config.mqtt.actuatorCommandsEnabled = oldActuatorCommandsEnabled;
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('manual feeding accepts fresh verified HiveMQ telemetry as the device liveness check', async () => {
+  const oldPublicMode = config.mqtt.publicTelemetryOnly;
+  const oldActuatorCommandsEnabled = config.mqtt.actuatorCommandsEnabled;
+  config.mqtt.publicTelemetryOnly = true;
+  config.mqtt.actuatorCommandsEnabled = true;
+  mock.method(tokenService, 'verifyToken', () => ({ userId: 'owner', email: 'test@example.test', role: 'farmer' }));
+  mock.method(deviceService, 'verifyOwnership', async () => true);
+  mock.method(MQTTService.prototype, 'isActuatorCommandChannelConnected', () => true);
+  mock.method(MQTTService.prototype, 'isTelemetryDeviceOnline', () => true);
+  mock.method(hardwareService, 'getState', async () => ({ deviceId: 'esp32-feeder-1', online: false, receivedAt: null, state: null, commands: [] }));
+  mock.method(feedingService, 'queueManualCommand', async () => ({ id, createdAt: new Date() } as any));
+  mock.method(MQTTService.prototype, 'dispatchHardwareCommand', async () => true);
+  mock.method(auditLogService, 'createLog', async () => ({} as any));
+  const app = express(); app.use(express.json(), csrfProtection, feedingRoutes);
+  const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const response = await fetch(base + '/feeding/manual', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' },
+      body: JSON.stringify({ action: 'TRIGGER', deviceId: 'esp32-feeder-1' }) });
+    assert.equal(response.status, 202);
+    assert.equal((await response.json() as { data: { published: boolean } }).data.published, true);
+  } finally {
+    config.mqtt.publicTelemetryOnly = oldPublicMode;
+    config.mqtt.actuatorCommandsEnabled = oldActuatorCommandsEnabled;
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('manual feeding removes the pending row when MQTT rejects a publish after the connection check', async () => {
+  const oldPublicMode = config.mqtt.publicTelemetryOnly;
+  const oldActuatorCommandsEnabled = config.mqtt.actuatorCommandsEnabled;
+  config.mqtt.publicTelemetryOnly = true;
+  config.mqtt.actuatorCommandsEnabled = true;
+  mock.method(tokenService, 'verifyToken', () => ({ userId: 'owner', email: 'test@example.test', role: 'farmer' }));
+  mock.method(deviceService, 'verifyOwnership', async () => true);
+  mock.method(MQTTService.prototype, 'isActuatorCommandChannelConnected', () => true);
+  mock.method(MQTTService.prototype, 'dispatchHardwareCommand', async () => false);
+  mock.method(hardwareService, 'getState', async () => ({ deviceId: 'esp32-feeder-1', online: true, receivedAt: new Date(), state }));
+  mock.method(feedingService, 'queueManualCommand', async () => ({ id, createdAt: new Date() } as any));
+  const discard = mock.method(feedingService, 'discardUnpublishedManualCommand', async () => {});
+  const app = express(); app.use(express.json(), csrfProtection, feedingRoutes);
+  const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const response = await fetch(base + '/feeding/manual', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' },
+      body: JSON.stringify({ action: 'TRIGGER', deviceId: 'esp32-feeder-1' }) });
+    assert.equal(response.status, 503);
+    assert.equal(discard.mock.callCount(), 1);
+    assert.deepEqual(discard.mock.calls[0].arguments, ['owner', 'esp32-feeder-1', id]);
+  } finally {
+    config.mqtt.publicTelemetryOnly = oldPublicMode;
+    config.mqtt.actuatorCommandsEnabled = oldActuatorCommandsEnabled;
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });

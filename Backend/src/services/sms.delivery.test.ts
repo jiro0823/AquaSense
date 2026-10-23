@@ -161,7 +161,7 @@ test('missing oxygen does not trigger DO emergency; measured zero still does', (
 });
 test('MQTT tags missing oxygen before persistence and notifications', async () => {
   setup();
-  const store = mock.method(sensorReadingService, 'ingest', async (_device:string, _payload:Record<string,any>) => ({ id: 'reading-test', do:null, doMeasured:false }));
+  const store = mock.method(sensorReadingService, 'ingestWithStatus', async (_device:string, _payload:Record<string,any>) => ({ reading:{ id: 'reading-test', do:null, doMeasured:false } as any, inserted:true }));
   mock.method(sensorReadingService, 'getStatistics', async () => ({}));
   const notify = mock.method(waterAlertNotificationService, 'processReading', async () => ({ alertsCreated: 0, smsSentCount: 0 }));
   const mqtt = new MQTTService() as unknown as { handleSensorReading(payload: string): Promise<void> };

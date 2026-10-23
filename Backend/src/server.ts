@@ -15,7 +15,7 @@ import { WaterQualityWebSocketServer } from './websocket/waterQualityWS';
 import { initializeDatabase, closeDatabase, syncDatabase } from './database/connection';
 import { runMigrations } from './database/migrations';
 import { initializeAllModels } from './database/models';
-import { mqttService } from './services/mqttService';
+import { mqttService, sanitizeBrokerUrl } from './services/mqttService';
 import { smsLogService } from './services/smsLogService';
 import { waterQualityService } from './iot/water/services/waterQualityService';
 
@@ -57,6 +57,7 @@ const createApp = (): Express => {
 
   // Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
+    const mqttStatus = mqttService.getStatus();
     const response: ApiResponse = {
       success: true,
       statusCode: 200,
@@ -64,6 +65,12 @@ const createApp = (): Express => {
       data: {
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
+        mqtt: {
+          connected: mqttStatus.connected,
+          lastPublicFrameReceivedAt: mqttStatus.lastPublicFrameReceivedAt,
+          lastPublicFrameVerifiedAt: mqttStatus.lastPublicFrameVerifiedAt,
+          lastPublicFramePersistedAt: mqttStatus.lastPublicFramePersistedAt,
+        },
       },
     };
     res.json(response);
@@ -202,9 +209,9 @@ const startServer = async (): Promise<void> => {
       logger.info('Initializing MQTT Service...');
       await mqttService.connect();
       const mqttStatus = mqttService.getStatus();
-      logger.info(`✓ MQTT Service initialized - Broker: ${mqttStatus.brokerUrl}`);
-    } catch (error) {
-      logger.warn('MQTT Service initialization skipped or failed - Proceeding without MQTT', error instanceof Error ? error.message : 'Unknown error');
+      logger.info(`✓ MQTT Service initialized - Broker: ${sanitizeBrokerUrl(mqttStatus.brokerUrl)}`);
+    } catch {
+      logger.warn('MQTT Service initialization skipped or failed - Proceeding without MQTT');
       // Continue without MQTT - REST API is still available
     }
 

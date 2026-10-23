@@ -18,20 +18,23 @@ constexpr float phFromVoltage(float volts) {
 constexpr float orpFromVoltage(float volts) {
     return volts * CalibrationConfig::ORP_SLOPE + CalibrationConfig::ORP_OFFSET;
 }
-constexpr float turbidityFromAdc(int raw) {
+constexpr float unclampedTurbidityFromAdc(int raw) {
     return ((CalibrationConfig::TURBIDITY_CLEAR_ADC - raw) /
         (CalibrationConfig::TURBIDITY_CLEAR_ADC - CalibrationConfig::TURBIDITY_DIRTY_ADC)) *
-        CalibrationConfig::TURBIDITY_DIRTY_NTU < 0.0f ? 0.0f :
-        ((CalibrationConfig::TURBIDITY_CLEAR_ADC - raw) /
-         (CalibrationConfig::TURBIDITY_CLEAR_ADC - CalibrationConfig::TURBIDITY_DIRTY_ADC)) *
-        CalibrationConfig::TURBIDITY_DIRTY_NTU > CalibrationConfig::TURBIDITY_DIRTY_NTU ?
-        CalibrationConfig::TURBIDITY_DIRTY_NTU :
-        ((CalibrationConfig::TURBIDITY_CLEAR_ADC - raw) /
-         (CalibrationConfig::TURBIDITY_CLEAR_ADC - CalibrationConfig::TURBIDITY_DIRTY_ADC)) *
         CalibrationConfig::TURBIDITY_DIRTY_NTU;
+}
+constexpr float clampTurbidity(float ntu) {
+    return ntu < 0.0f ? 0.0f :
+           ntu > CalibrationConfig::TURBIDITY_DIRTY_NTU ? CalibrationConfig::TURBIDITY_DIRTY_NTU : ntu;
+}
+constexpr float turbidityFromAdc(int raw) {
+    return clampTurbidity(unclampedTurbidityFromAdc(raw));
 }
 constexpr bool adcUsable(int raw) {
     return raw > 8 && raw < CalibrationConfig::ADC_MAX - 8;
+}
+constexpr bool adcLooksConnected(int raw, int deviation, int minimum, int maximum) {
+    return raw >= minimum && raw <= maximum && deviation <= CalibrationConfig::STABILITY_MAX_DEV;
 }
 constexpr bool phPlausible(float ph) {
     return ph >= Thresholds::PH_MIN && ph <= Thresholds::PH_MAX;

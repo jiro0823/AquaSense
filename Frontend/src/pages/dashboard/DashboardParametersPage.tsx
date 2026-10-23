@@ -1,10 +1,9 @@
-import { SensorHealthPanel, AmmoniaSpeciationCard } from '../../components/WaterQuality/SensorHealthPanel';
+import { SensorHealthPanel } from '../../components/WaterQuality/SensorHealthPanel';
 import React from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { DashboardIcon } from '../../components/WaterQuality/DashboardUi';
 import { useDashboardData } from '../../components/WaterQuality/useDashboardData';
 import type { WaterQualityStats } from '../../types/water';
-import { TanMeasurementEntryForm } from '../../components/WaterQuality/TanMeasurementEntryForm';
 import { currentWaterSensorValue } from '../../components/WaterQuality/sensorDisplay';
 
 type ParameterKey = 'temperature' | 'ph' | 'orp' | 'turbidity' | 'ammonia';
@@ -26,14 +25,16 @@ const parameterCards: CardConfig[] = [
   { key: 'ph', label: 'pH Level (culture guidance 7-8.5)', unit: '', color: '#3b82f6', normal: (value) => value >= 7 && value <= 8.5, normalLabel: 'Within guidance', warnLabel: 'Outside guidance' },
   { key: 'orp', label: 'ORP / Redox (reported; uncalibrated)', unit: 'mV', color: '#22c55e', normal: () => false, normalLabel: 'Not classified', warnLabel: 'Not classified' },
   { key: 'turbidity', label: 'Turbidity', unit: 'NTU', color: '#a855f7', normal: () => false, normalLabel: 'Unclassified', warnLabel: 'Unclassified' },
-  { key: 'ammonia', label: 'NH3 fraction of TAN', unit: '%', color: '#ef4444', normal: () => false, normalLabel: 'Preliminary', warnLabel: 'TAN required' },
+  { key: 'ammonia', label: 'NH3 fraction of TAN', unit: '%', color: '#ef4444', normal: () => false, normalLabel: 'Calculated', warnLabel: 'Inputs need qualification' },
   { key: 'riskScore', label: 'Risk Model Status', unit: '', color: '#6b7280', normal: () => false, normalLabel: 'Unavailable', warnLabel: 'Unavailable' },
 ];
 
 const formatValue = (value: number|null, unit: string) => value === null ? '--' : `${value.toFixed(unit === '' ? 2 : 1)}${unit ? ` ${unit}` : ''}`;
 
 const DashboardParametersPage: React.FC = () => {
-  const { statistics, chartData, predictiveWarning, latestReading, error, latestTanMeasurement, tanLoading, tanError, addTanMeasurement } = useDashboardData();
+  const { statistics, chartData, predictiveWarning, latestReading, error } = useDashboardData();
+  const lastTurbidityNtuPoint = [...chartData].reverse().find((point) => point.turbidityUnit === 'NTU' && point.turbidity != null);
+  const liveTurbidityNtu = latestReading?.turbidityUnit === 'NTU' ? latestReading.turbidity : null;
 
   const riskModelValidated = predictiveWarning?.modelStatus === 'READY'
     && predictiveWarning.validationStatus === 'VALIDATED'
@@ -55,15 +56,37 @@ const DashboardParametersPage: React.FC = () => {
       </header>
 
       {error && <div className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Connection state: {error}</div>}
-      {tanLoading && !latestTanMeasurement && <div role="status" className="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">Loading TAN history…</div>}
-      {tanError && <div role="alert" className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">TAN history unavailable: {tanError}</div>}
       <SensorHealthPanel reading={latestReading} />
-      <TanMeasurementEntryForm onSaved={addTanMeasurement} />
       {statistics ? (
         <section className="lg:flex-1 lg:min-h-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2 gap-2.5">
           {parameterCards.map((item) => {
             const isRisk = item.key === 'riskScore';
-            if(item.key==='ammonia') return <AmmoniaSpeciationCard key={item.key} measurement={latestTanMeasurement} />;
+            if(item.key==='ammonia') {
+              const fractionAvailable = latestReading?.speciation?.status === 'AVAILABLE';
+              const fraction = fractionAvailable ? latestReading.speciation?.percent ?? null : null;
+              const fractionChart = chartData.filter((point) => point.nh3FractionPercent !== null && point.nh3FractionPercent !== undefined);
+              return (
+                <div key={item.key} className="rounded-xl border border-gray-200 bg-white shadow-sm p-2 flex flex-col min-h-[180px] lg:min-h-0">
+                  <div className="flex items-center justify-between gap-2 shrink-0">
+                    <h3 className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 truncate">Unionized NH3 fraction</h3>
+                    <span className="text-xs font-bold text-gray-900 shrink-0">{fraction === null ? 'Unavailable' : `${fraction.toFixed(2)}%`}</span>
+                  </div>
+                  <p className="text-[9px] text-gray-400 mt-0.5 shrink-0">Freshwater fraction of TAN · concentration still requires measured TAN</p>
+                  <div className="flex-1 min-h-0 mt-1">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={fractionChart} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                        <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 9 }} tickMargin={4} minTickGap={20} />
+                        <YAxis stroke="#9ca3af" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} unit="%" />
+                        <Tooltip formatter={(value) => [`${Number(value).toFixed(3)}%`, 'NH3 fraction']} />
+                        <Area type="monotone" dataKey="nh3FractionPercent" name="NH3 fraction (%)" stroke={item.color} fill={item.color} fillOpacity={0.18} dot={false} connectNulls={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {!fractionAvailable && <p className="text-[9px] text-amber-700 shrink-0">{latestReading?.speciation?.reason || 'Fresh qualified pH and temperature readings are required.'}</p>}
+                </div>
+              );
+            }
             if (isRisk) {
               return (
                 <div key={item.key} className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col gap-2">
@@ -77,9 +100,11 @@ const DashboardParametersPage: React.FC = () => {
                 </div>
               );
             }
-            if(item.key==='turbidity' && latestReading?.turbidityUnit!=='NTU') return <div key={item.key} className="rounded-xl bg-white p-4 text-xs">Turbidity: {latestReading?.turbidityUnit==='raw_adc' ? `${latestReading.turbidity ?? '--'} raw ADC. NTU conversion requires formal calibration.` : 'Unit unavailable; turbidity value is not interpreted or charted.'}</div>;
             const sensorStats: WaterQualityStats[ParameterKey] = statistics[item.key as ParameterKey];
-            const stats: CardStats = { ...sensorStats, current: currentWaterSensorValue(latestReading, item.key as 'temperature'|'ph'|'orp'|'turbidity') };
+            const sensorValue = currentWaterSensorValue(latestReading, item.key as 'temperature'|'ph'|'orp'|'turbidity');
+            const stats: CardStats = { ...sensorStats, current: item.key === 'turbidity'
+              ? liveTurbidityNtu ?? lastTurbidityNtuPoint?.turbidity ?? null
+              : sensorValue };
             const sensorName = item.key === 'temperature' || item.key === 'ph' || item.key === 'orp' || item.key === 'turbidity' ? item.key : null;
             const health = sensorName ? latestReading?.sensorHealth?.[sensorName] : null;
             const isNormal = stats.current!==null && item.normal(stats.current);
@@ -87,9 +112,11 @@ const DashboardParametersPage: React.FC = () => {
               !health.valid || health.measurementValid===false ? (health.health==='STALE' ? 'STALE' : 'UNAVAILABLE') :
               health.health==='UNSTABLE' || health.stability==='UNSTABLE' ? 'UNSTABLE' :
               health.calibration!=='CALIBRATED' ? 'CALIBRATION REQUIRED' : isNormal ? item.normalLabel : item.warnLabel;
-            const statusLabel = item.key==='turbidity' && sensorStatus===item.normalLabel ? 'UNCLASSIFIED · NO SPECIES NTU LIMIT' : sensorStatus;
+            const statusLabel = item.key === 'turbidity' && liveTurbidityNtu == null && lastTurbidityNtuPoint
+              ? `LAST NTU ${lastTurbidityNtuPoint.time}; LIVE UNAVAILABLE`
+              : item.key==='turbidity' && sensorStatus===item.normalLabel ? 'UNCLASSIFIED · NO SPECIES NTU LIMIT' : sensorStatus;
             const statusQualified = !['STALE','UNAVAILABLE','UNKNOWN','UNSTABLE','CALIBRATION REQUIRED'].includes(statusLabel) && !statusLabel.startsWith('UNCLASSIFIED');
-            const chart = chartData.filter(point=>item.key!=='turbidity' || point.turbidityUnit===latestReading?.turbidityUnit).slice(-20);
+            const chart = chartData.filter(point=>item.key!=='turbidity' || (point.turbidityUnit==='NTU' && point.turbidity != null)).slice(-20);
             const currentLabel = item.key==='orp' && stats.current!==null && health?.valid!==true
               ? `Reported ${formatValue(stats.current, item.unit)} · unverified`
               : formatValue(stats.current, item.unit);

@@ -4,7 +4,6 @@
 #include "SensorConversions.h"
 #include "config/DeviceConfig.h"
 #include "config/Pins.h"
-#include "config/Thresholds.h"
 
 namespace {
 bool updateConnection(bool valid, bool& connected, uint8_t& connectCount,
@@ -46,16 +45,39 @@ void SensorManager::begin() {
 const SensorReadings& SensorManager::getReadings() const { return readings; }
 
 void SensorManager::printReadings() const {
-    Serial.println("===== SENSOR DATA =====");
-    Serial.printf("Temp: %.2f C [%s]\n", readings.temperatureC, readings.temperatureValid ? "valid" : "invalid");
-    Serial.printf("Turbidity: %.2f NTU [%s]\n", readings.turbidityRaw, readings.turbidityValid ? "valid" : "invalid");
-    Serial.printf("pH: %.2f [%s]\n", readings.ph, readings.phValid ? "valid" : "invalid");
-    Serial.printf("ORP: %.2f mV [%s]\n", readings.orpMv, readings.orpValid ? "valid" : "invalid");
-    Serial.printf("ADC pH raw=%.1f range=%u..%u V=%.3f; turbidity raw=%.1f range=%u..%u; ORP raw=%.1f range=%u..%u\n",
-        readings.phDiagnostics.rawAdc, readings.phDiagnostics.minimum, readings.phDiagnostics.maximum,
-        readings.phDiagnostics.voltage, readings.turbidityDiagnostics.rawAdc,
-        readings.turbidityDiagnostics.minimum, readings.turbidityDiagnostics.maximum,
-        readings.orpDiagnostics.rawAdc, readings.orpDiagnostics.minimum, readings.orpDiagnostics.maximum);
+    const int phDeviation = int(readings.phDiagnostics.maximum) - int(readings.phDiagnostics.minimum);
+    Serial.printf("[pH] RAW=%.0f DEV=%d", double(readings.phDiagnostics.rawAdc), phDeviation);
+    if (!readings.phConnected) Serial.println(" -> DISCONNECTED");
+    else if (!readings.phValid) Serial.println(" -> INVALID");
+    else Serial.printf(" V=%.3f pH=%.2f\n", double(readings.phDiagnostics.voltage), double(readings.ph));
+
+    const int turbidityDeviation = int(readings.turbidityDiagnostics.maximum) - int(readings.turbidityDiagnostics.minimum);
+    Serial.printf("[TURB] RAW=%.0f DEV=%d MIN=%u MAX=%u",
+        double(readings.turbidityDiagnostics.rawAdc), turbidityDeviation,
+        unsigned(readings.turbidityDiagnostics.minimum), unsigned(readings.turbidityDiagnostics.maximum));
+    if (!readings.turbidityConnected) Serial.println(" -> DISCONNECTED / OUT OF RANGE");
+    else if (!readings.turbidityValid && readings.turbidityDiagnostics.minimum <= 8)
+        Serial.println(" -> ADC AT MIN; CHECK SENSOR OUTPUT/GND");
+    else if (!readings.turbidityValid && readings.turbidityDiagnostics.maximum >= 4087)
+        Serial.println(" -> ADC AT MAX; CHECK INPUT VOLTAGE");
+    else if (!readings.turbidityValid) Serial.println(" -> INVALID");
+    else if (readings.turbidityDiagnostics.rawAdc < CalibrationConfig::TURBIDITY_DIRTY_ADC)
+        Serial.printf(" NTU-EST=%.1f (SATURATED; below provisional ADC span; calibration required)\n", double(readings.turbidityRaw));
+    else if (readings.turbidityDiagnostics.rawAdc > CalibrationConfig::TURBIDITY_CLEAR_ADC)
+        Serial.printf(" NTU-EST=%.1f (SATURATED; above provisional ADC span; calibration required)\n", double(readings.turbidityRaw));
+    else Serial.printf(" NTU-EST=%.1f%s Vpin=%.3f V\n", double(readings.turbidityRaw),
+        CalibrationConfig::TURBIDITY_CALIBRATION_VERIFIED ? "" : " (uncalibrated estimate)",
+        double(readings.turbidityDiagnostics.voltage));
+
+    const int orpDeviation = int(readings.orpDiagnostics.maximum) - int(readings.orpDiagnostics.minimum);
+    Serial.printf("[ORP] RAW=%.0f DEV=%d", double(readings.orpDiagnostics.rawAdc), orpDeviation);
+    if (!readings.orpConnected) Serial.println(" -> DISCONNECTED");
+    else if (!readings.orpValid) Serial.println(" -> INVALID");
+    else Serial.printf(" V=%.3f ORP=%.1f mV\n", double(readings.orpDiagnostics.voltage), double(readings.orpMv));
+
+    if (readings.temperatureConnected && readings.temperatureValid)
+        Serial.printf("[TEMP] %.2f C\n", double(readings.temperatureC));
+    else Serial.println("[TEMP] DISCONNECTED");
 }
 
 void SensorManager::startSampling(Phase next, uint32_t nowMs) {
@@ -91,17 +113,19 @@ void SensorManager::update(uint32_t nowMs) {
         const bool devicePresent = temperatureSensor.getDeviceCount() > 0;
         const float raw = devicePresent ? temperatureSensor.getTempCByIndex(0) : DEVICE_DISCONNECTED_C;
         const float corrected = raw + CalibrationConfig::TEMPERATURE_OFFSET_C;
-        const bool sampleValid = raw != DEVICE_DISCONNECTED_C && isfinite(corrected) &&
-            corrected > Thresholds::TEMPERATURE_MIN_C && corrected < Thresholds::TEMPERATURE_MAX_C;
-        pending.temperatureC = NAN;
-        pending.temperatureValid = false;
+        const bool sampleValid = devicePresent && raw != DEVICE_DISCONNECTED_C && isfinite(corrected) &&
+            corrected > -55.0f && corrected < 125.0f;
         pending.temperatureConnected = updateConnection(sampleValid, pending.temperatureConnected,
             temperatureConnectCount, temperatureDisconnectCount, "TEMP");
-        if (SensorSampleValidity::current(pending.temperatureConnected, sampleValid, isfinite(corrected))) {
+        if (pending.temperatureConnected && sampleValid && isfinite(corrected)) {
             pending.temperatureC = corrected;
             pending.temperatureValid = true;
+            pending.temperatureSampledAtMs = nowMs;
+        } else if (!pending.temperatureConnected) {
+            pending.temperatureC = NAN;
+            pending.temperatureValid = false;
+            pending.temperatureSampledAtMs = nowMs;
         }
-        pending.temperatureSampledAtMs = nowMs;
         finishSample(nowMs);
         return;
     }
@@ -118,9 +142,7 @@ void SensorManager::update(uint32_t nowMs) {
         burst.sampledAtMs = nowMs;
         if (phase == Phase::PhVoltage) {
             const float ph = SensorConversions::phFromVoltage(burst.voltage);
-            if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED &&
-                SensorSampleValidity::current(pending.phConnected, true,
-                    isfinite(ph) && SensorConversions::phPlausible(ph))) {
+            if (SensorSampleValidity::current(pending.phConnected, true, isfinite(ph))) {
                 pending.ph = constrain(ph, 0.0f, 14.0f);
                 pending.phValid = true;
             } else {
@@ -132,8 +154,7 @@ void SensorManager::update(uint32_t nowMs) {
             startSampling(Phase::Turbidity, nowMs);
         } else {
             const float orp = SensorConversions::orpFromVoltage(burst.voltage);
-            if (CalibrationConfig::ANALOG_CONVERSION_VERIFIED &&
-                SensorSampleValidity::current(pending.orpConnected, true, isfinite(orp))) {
+            if (SensorSampleValidity::current(pending.orpConnected, true, isfinite(orp))) {
                 pending.orpMv = orp;
                 pending.orpValid = true;
             } else {
@@ -163,19 +184,30 @@ void SensorManager::update(uint32_t nowMs) {
     const int raw = adcSum / DeviceConfig::ADC_SAMPLE_COUNT;
     burst.rawAdc = float(adcSum) / DeviceConfig::ADC_SAMPLE_COUNT;
     burst.sampledAtMs = nowMs;
-    const int deviation = int(burst.maximum) - int(burst.minimum);
     bool connected = false;
     if (phase == Phase::Turbidity) {
         pending.turbidityDiagnostics = burst;
-        connected = raw >= CalibrationConfig::TURBIDITY_CONNECT_MIN && raw <= CalibrationConfig::TURBIDITY_CONNECT_MAX &&
-                    deviation <= CalibrationConfig::STABILITY_MAX_DEV && burst.clipped == 0 &&
-                    SensorConversions::adcUsable(uint16_t(raw));
+        const int deviation = int(burst.maximum) - int(burst.minimum);
+        connected = SensorConversions::adcLooksConnected(raw, deviation, CalibrationConfig::TURBIDITY_CONNECT_MIN,
+            CalibrationConfig::TURBIDITY_CONNECT_MAX);
         pending.turbidityRaw = NAN;
         pending.turbidityValid = false;
         pending.turbidityConnected = updateConnection(connected, pending.turbidityConnected,
             turbidityConnectCount, turbidityDisconnectCount, "TURB");
-        const float turbidity = connected ? SensorConversions::turbidityFromAdc(raw) : NAN;
-        if (SensorSampleValidity::current(pending.turbidityConnected, connected, isfinite(turbidity))) {
+        // Preserve the supplied sketch's provisional linear ADC-to-NTU
+        // mapping. Voltage is diagnostic only; it is not interchangeable with NTU.
+        voltageSumMv = 0;
+        for (uint8_t i = 0; i < DeviceConfig::VOLTAGE_SAMPLE_COUNT; ++i) {
+            voltageSumMv += analogReadMilliVolts(Pins::TURBIDITY);
+            delayMicroseconds(DeviceConfig::ADC_SAMPLE_INTERVAL_US);
+        }
+        pending.turbidityDiagnostics.voltage =
+            float(voltageSumMv) / DeviceConfig::VOLTAGE_SAMPLE_COUNT / 1000.0f;
+        const float turbidity = pending.turbidityConnected && CalibrationConfig::TURBIDITY_ESTIMATE_ENABLED
+            ? SensorConversions::turbidityFromAdc(raw) : NAN;
+        if (SensorSampleValidity::current(pending.turbidityConnected,
+                                          CalibrationConfig::TURBIDITY_ESTIMATE_ENABLED,
+                                          isfinite(turbidity))) {
             pending.turbidityRaw = turbidity;
             pending.turbidityValid = true;
         }
@@ -183,28 +215,28 @@ void SensorManager::update(uint32_t nowMs) {
         startSampling(Phase::Orp, nowMs);
     } else if (phase == Phase::Ph) {
         pending.phDiagnostics = burst;
-        connected = raw >= CalibrationConfig::PH_CONNECT_MIN && raw <= CalibrationConfig::PH_CONNECT_MAX &&
-                    deviation <= CalibrationConfig::STABILITY_MAX_DEV && burst.clipped == 0 &&
-                    SensorConversions::adcUsable(uint16_t(raw));
+        const int deviation = int(burst.maximum) - int(burst.minimum);
+        connected = SensorConversions::adcLooksConnected(raw, deviation, CalibrationConfig::PH_CONNECT_MIN,
+            CalibrationConfig::PH_CONNECT_MAX);
         pending.ph = NAN;
         pending.phValid = false;
         pending.phConnected = updateConnection(connected, pending.phConnected,
             phConnectCount, phDisconnectCount, "pH");
-        if (connected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
+        if (pending.phConnected) {
             startVoltageSampling(Phase::PhVoltage);
         } else {
             startSampling(Phase::Turbidity, nowMs);
         }
     } else {
         pending.orpDiagnostics = burst;
-        connected = raw >= CalibrationConfig::ORP_CONNECT_MIN && raw <= CalibrationConfig::ORP_CONNECT_MAX &&
-                    deviation <= CalibrationConfig::STABILITY_MAX_DEV && burst.clipped == 0 &&
-                    SensorConversions::adcUsable(uint16_t(raw));
+        const int deviation = int(burst.maximum) - int(burst.minimum);
+        connected = SensorConversions::adcLooksConnected(raw, deviation, CalibrationConfig::ORP_CONNECT_MIN,
+            CalibrationConfig::ORP_CONNECT_MAX);
         pending.orpMv = NAN;
         pending.orpValid = false;
         pending.orpConnected = updateConnection(connected, pending.orpConnected,
             orpConnectCount, orpDisconnectCount, "ORP");
-        if (connected && CalibrationConfig::ANALOG_CONVERSION_VERIFIED) {
+        if (pending.orpConnected) {
             startVoltageSampling(Phase::OrpVoltage);
         } else {
             temperatureSensor.requestTemperatures();

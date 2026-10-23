@@ -5,6 +5,7 @@
  */
 
 import mqtt, { MqttClient } from 'mqtt';
+import fs from 'fs';
 import { numeric } from './sensorHealth';
 import { logger } from '../utils/logger';
 import { sensorReadingService } from './sensorReadingService';
@@ -30,8 +31,22 @@ interface MQTTConfig {
   };
 }
 
+const PUBLIC_MQTT_MAX_FRAME_BYTES = 4096;
+const PUBLIC_MQTT_MIN_FRAME_INTERVAL_MS = 4500;
+
+export const sanitizeBrokerUrl = (brokerUrl: string): string => {
+  try {
+    const parsed = new URL(brokerUrl);
+    if (!parsed.protocol || !parsed.hostname) return 'invalid-broker-url';
+    return `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`;
+  } catch {
+    return 'invalid-broker-url';
+  }
+};
+
 export class MQTTService {
   private client: MqttClient | null = null;
+  private controlClient: MqttClient | null = null;
   private config: MQTTConfig;
   private isConnected = false;
   private reconnectInterval: NodeJS.Timeout | null = null;
@@ -58,6 +73,12 @@ export class MQTTService {
   private latestDoReceivedAt = 0;
   private latestOrpReceivedAt = 0;
   private actuatorRedeliveryInterval: NodeJS.Timeout | null = null;
+  private lastPublicFramePersistedAt: number | null = null;
+  private publicFramePersistInProgress = false;
+  private pendingPublicFrame: { payload: string; bootId: string; sequence: number } | null = null;
+  private publicFrameDrainTimer: NodeJS.Timeout | null = null;
+  private lastPublicFrameReceivedAt: string | null = null;
+  private lastPublicFrameVerifiedAt: string | null = null;
 
   constructor(config?: Partial<MQTTConfig>) {
     this.config = {
@@ -80,15 +101,22 @@ export class MQTTService {
    */
   async connect(): Promise<void> {
     try {
+      if (appConfig.mqtt.publicTelemetryOnly && !appConfig.device.keys[appConfig.mqtt.telemetryDeviceId]) {
+        logger.error('Public MQTT telemetry frames will be rejected: configure DEVICE_KEYS for the configured telemetry device', {
+          deviceId: appConfig.mqtt.telemetryDeviceId,
+          requiredSetting: 'DEVICE_KEYS',
+        });
+      }
+
       const options: mqtt.IClientOptions = {
         clientId: this.config.clientId,
         clean: true,
         reconnectPeriod: 5000,
-        username: this.config.username,
-        password: this.config.password,
+        username: appConfig.mqtt.publicTelemetryOnly ? undefined : this.config.username,
+        password: appConfig.mqtt.publicTelemetryOnly ? undefined : this.config.password,
       };
 
-      logger.info(`Connecting to MQTT Broker: ${this.config.brokerUrl}`);
+      logger.info(`Connecting to MQTT Broker: ${sanitizeBrokerUrl(this.config.brokerUrl)}`);
       this.client = mqtt.connect(this.config.brokerUrl, options);
 
       // Connection established
@@ -96,11 +124,13 @@ export class MQTTService {
         this.isConnected = true;
         logger.info('âœ“ MQTT Connected successfully');
         this.subscribe();
-        void this.redeliverPendingActuatorCommands();
-        if (!this.actuatorRedeliveryInterval) this.actuatorRedeliveryInterval = setInterval(() => {
+        if (!appConfig.mqtt.publicTelemetryOnly) {
           void this.redeliverPendingActuatorCommands();
-        }, 5000);
-        this.publishStatus('online');
+          if (!this.actuatorRedeliveryInterval) this.actuatorRedeliveryInterval = setInterval(() => {
+            void this.redeliverPendingActuatorCommands();
+          }, 5000);
+          this.publishStatus('online');
+        }
 
         // Clear any existing reconnect interval
         if (this.reconnectInterval) {
@@ -111,7 +141,16 @@ export class MQTTService {
 
       // New messages
       this.client.on('message', (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) => {
-        if (!packet.retain) this.handleMessage(topic, payload);
+        if (packet.retain) return;
+        if (appConfig.mqtt.publicTelemetryOnly) {
+          if (appConfig.mqtt.publicCommandsEnabled && this.isActuatorStateTopic(topic)) {
+            void this.handleActuatorAck(topic, payload.toString());
+          } else if (payload.byteLength <= PUBLIC_MQTT_MAX_FRAME_BYTES) {
+            this.handlePublicTelemetryMessage(topic, payload);
+          }
+        } else {
+          this.handleMessage(topic, payload);
+        }
       });
 
       // Disconnection
@@ -122,13 +161,13 @@ export class MQTTService {
 
       // MQTT is optional for local development; REST sensor ingestion remains online
       // even when the public broker is unreachable.
-      this.client.on('error', (error: Error) => {
+      this.client.on('error', () => {
         const now = Date.now();
         if (now - this.lastConnectionWarningAt > 30000) {
           this.lastConnectionWarningAt = now;
           logger.warn('MQTT broker unavailable; backend is still running without MQTT data', {
-            brokerUrl: this.config.brokerUrl,
-            message: error.message || 'Connection failed',
+            brokerUrl: sanitizeBrokerUrl(this.config.brokerUrl),
+            message: 'Connection failed',
           });
         }
       });
@@ -137,8 +176,42 @@ export class MQTTService {
       this.client.on('reconnect', () => {
         logger.info('MQTT attempting to reconnect...');
       });
+
+      // Public-dev commands are signed and use a namespace separate from telemetry.
+      if (appConfig.mqtt.publicTelemetryOnly && !appConfig.mqtt.publicCommandsEnabled && appConfig.mqtt.actuatorCommandsEnabled &&
+          appConfig.mqtt.controlBrokerUrl && appConfig.mqtt.controlCaCertPath) {
+        const controlOptions: mqtt.IClientOptions = {
+          clientId: `aquasense-control-${Date.now()}`,
+          clean: true,
+          reconnectPeriod: 5000,
+          username: appConfig.mqtt.controlUsername,
+          password: appConfig.mqtt.controlPassword,
+          ca: fs.readFileSync(appConfig.mqtt.controlCaCertPath),
+          rejectUnauthorized: true,
+        };
+        this.controlClient = mqtt.connect(appConfig.mqtt.controlBrokerUrl, controlOptions);
+        this.controlClient.on('connect', () => {
+          this.controlClient?.subscribe('aquasense/+/state', { qos: 1 });
+          void this.redeliverPendingActuatorCommands();
+          if (!this.actuatorRedeliveryInterval) this.actuatorRedeliveryInterval = setInterval(() => {
+            void this.redeliverPendingActuatorCommands();
+          }, 5000);
+          logger.info('Private MQTT control channel connected', {
+            brokerUrl: sanitizeBrokerUrl(appConfig.mqtt.controlBrokerUrl!),
+          });
+        });
+        this.controlClient.on('message', (topic, payload, packet) => {
+          if (!packet.retain && this.isActuatorStateTopic(topic)) void this.handleActuatorAck(topic, payload.toString());
+        });
+        this.controlClient.on('error', () => {
+          logger.warn('Private MQTT control channel unavailable; dashboard actuator commands cannot be delivered', {
+            brokerUrl: sanitizeBrokerUrl(appConfig.mqtt.controlBrokerUrl!),
+          });
+        });
+      }
+      this.startActuatorMaintenanceLoop();
     } catch (error) {
-      logger.error('Failed to initialize MQTT connection:', error);
+      logger.error('Failed to initialize MQTT connection', { brokerUrl: sanitizeBrokerUrl(this.config.brokerUrl) });
       throw error;
     }
   }
@@ -150,18 +223,27 @@ export class MQTTService {
     if (!this.client) return;
 
     try {
-      this.client.subscribe([this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'], (err) => {
+      const topics = appConfig.mqtt.publicTelemetryOnly
+        ? [this.config.topics.sensorWildcard,
+          ...(appConfig.mqtt.publicCommandsEnabled ? [`${appConfig.mqtt.controlTopicNamespace}/+/state`] : [])]
+        : [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands, 'aquasense/+/state'];
+      this.client.subscribe(topics, (err) => {
         if (err) {
           logger.error('MQTT subscription error:', err.message);
         } else {
-          logger.info(
-            `âœ“ Subscribed to topics: ${this.config.topics.readings}, ${this.config.topics.sensorWildcard}, ${this.config.topics.commands}`
-          );
+          logger.info(`Subscribed to MQTT topics: ${topics.join(', ')}`);
         }
       });
     } catch (error) {
       logger.error('Failed to subscribe to MQTT topics:', error);
     }
+  }
+
+  private startActuatorMaintenanceLoop(): void {
+    if (this.actuatorRedeliveryInterval) return;
+    this.actuatorRedeliveryInterval = setInterval(() => {
+      void this.redeliverPendingActuatorCommands();
+    }, 5000);
   }
 
   /**
@@ -174,7 +256,7 @@ export class MQTTService {
 
       if (topic === this.config.topics.readings) {
         this.handleSensorReading(message);
-      } else if (/^aquasense\/[^/]+\/state$/.test(topic)) {
+      } else if (this.isActuatorStateTopic(topic)) {
         void this.handleActuatorAck(topic, message);
       } else if (this.isAquasenseSensorTopic(topic)) {
         this.handleAquasenseTopicValue(topic, message);
@@ -186,23 +268,87 @@ export class MQTTService {
     }
   }
 
+  private handlePublicTelemetryMessage(topic: string, payload: Buffer): void {
+    const parts = topic.split('/');
+    if (parts.length !== 5 || parts[0] !== appConfig.mqtt.topicNamespace || parts[1] !== 'devices' ||
+        parts[2] !== appConfig.mqtt.telemetryDeviceId || parts[3] !== 'telemetry') return;
+
+    // Public profile scalar topics have no source timestamp or sequence. Keep
+    // accepting them on the broker for legacy observers, but never persist
+    // them as current measurements. Only a complete source-timestamped frame
+    // can enter the database in this profile.
+    if (parts[4] === 'frame') {
+      this.lastPublicFrameReceivedAt = new Date().toISOString();
+      if (payload.byteLength > PUBLIC_MQTT_MAX_FRAME_BYTES) return;
+      let envelope: any;
+      try { envelope = JSON.parse(payload.toString('utf8')); } catch { return; }
+      const deviceKey = appConfig.device.keys[parts[2]];
+      if (!deviceKey || !envelope || typeof envelope !== 'object' || Array.isArray(envelope) ||
+          typeof envelope.frame !== 'string' || envelope.frame.length > 2048 ||
+          typeof envelope.signature !== 'string' || !/^[a-f0-9]{64}$/i.test(envelope.signature) ||
+          !verifyCanonical(envelope.frame, envelope.signature, deviceKey)) return;
+      let frame: any;
+      try { frame = JSON.parse(envelope.frame); } catch { return; }
+      if (!frame || typeof frame !== 'object' || Array.isArray(frame) || frame.v !== 1 ||
+          frame.deviceId !== parts[2] || typeof frame.bootId !== 'string' || frame.bootId.length > 64 ||
+          !Number.isSafeInteger(frame.sequence) || frame.sequence < 0 ||
+          typeof frame.acquiredAt !== 'string' || !Number.isFinite(Date.parse(frame.acquiredAt)) ||
+          !frame.sensorTimestamps || typeof frame.sensorTimestamps !== 'object' ||
+          !frame.sensors || typeof frame.sensors !== 'object' || frame.turbidityUnit !== 'NTU') return;
+      const timestampNames = ['temperature', 'ph', 'turbidity', 'orp'];
+      if (!timestampNames.every(name => typeof frame.sensorTimestamps[name] === 'string' &&
+          Number.isFinite(Date.parse(frame.sensorTimestamps[name])))) return;
+      this.latestDeviceId = parts[2];
+      this.lastPublicFrameVerifiedAt = new Date().toISOString();
+      void this.persistPublicMqttFrame(JSON.stringify(frame), frame.bootId, frame.sequence);
+      return;
+    }
+    // Legacy scalar publications lack cycle identity and source timestamps.
+    // They remain available to broker subscribers but are ignored for storage.
+  }
+
   /** Publish one non-retained, signed actuator command. Publishing means queued, never confirmed. */
   async dispatchHardwareCommand(input: { id: string; deviceId: string; source: 'hardware' | 'feeding'; action: string; durationMs?: number; expiresAt: Date }): Promise<boolean> {
-    if (!this.client || !this.isConnected) return false;
+    if (!appConfig.mqtt.actuatorCommandsEnabled) return false;
+    const publisher = appConfig.mqtt.publicTelemetryOnly && !appConfig.mqtt.publicCommandsEnabled
+      ? this.controlClient : this.client;
+    if (!publisher || (appConfig.mqtt.publicTelemetryOnly && !appConfig.mqtt.publicCommandsEnabled
+      ? !publisher.connected : !this.isConnected)) return false;
     const key = appConfig.device.keys[input.deviceId];
     if (!key) return false;
     const unsigned = { v: 1 as const, deviceId: input.deviceId, id: input.id, source: input.source,
       action: input.action, durationMs: input.durationMs ?? 0, expiresAt: input.expiresAt.getTime() };
     const payload = JSON.stringify({ ...unsigned, signature: signCanonical(commandCanonical(unsigned), key) });
-    return new Promise((resolve) => this.client!.publish(`aquasense/${input.deviceId}/command`, payload,
+    return new Promise((resolve) => publisher.publish(`${appConfig.mqtt.controlTopicNamespace}/${input.deviceId}/command`, payload,
       { qos: 1, retain: false }, error => {
         if (error) { logger.warn('Actuator MQTT publish failed', { deviceId: input.deviceId, commandId: input.id, error: error.message }); resolve(false); }
         else resolve(true);
       }));
   }
 
+  /** Return true only when the configured command publisher is connected. */
+  isActuatorCommandChannelConnected(): boolean {
+    if (!appConfig.mqtt.actuatorCommandsEnabled) return false;
+    const publicControl = appConfig.mqtt.publicTelemetryOnly && appConfig.mqtt.publicCommandsEnabled;
+    const privateControl = appConfig.mqtt.publicTelemetryOnly && !appConfig.mqtt.publicCommandsEnabled;
+    const publisher = privateControl ? this.controlClient : this.client;
+    return !!publisher?.connected && (privateControl || this.isConnected || publicControl);
+  }
+
+  /** Fresh verified telemetry is the device liveness signal in public-dev mode. */
+  isTelemetryDeviceOnline(deviceId: string, maxAgeMs = 20_000): boolean {
+    if (!appConfig.mqtt.publicTelemetryOnly || deviceId !== appConfig.mqtt.telemetryDeviceId ||
+        !this.lastPublicFrameVerifiedAt) return false;
+    const ageMs = Date.now() - Date.parse(this.lastPublicFrameVerifiedAt);
+    return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= maxAgeMs;
+  }
+
   private async redeliverPendingActuatorCommands(): Promise<void> {
-    if (!this.client || !this.isConnected) return;
+    if (!this.isActuatorCommandChannelConnected()) {
+      try { await hardwareService.expirePendingCommands(); }
+      catch (error) { logger.error('Failed to expire undelivered actuator commands', error); }
+      return;
+    }
     try {
       const [hardware, feeding] = await Promise.all([
         HardwareCommand.findAll({ where: { status: 'PENDING' }, order: [['createdAt', 'ASC']], limit: 100 }),
@@ -242,21 +388,70 @@ export class MQTTService {
     } catch (error) { logger.error('Failed to persist actuator state/ack', error); }
   }
 
+  private isActuatorStateTopic(topic: string): boolean {
+    const namespace = appConfig.mqtt.controlTopicNamespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${namespace}/[^/]+/state$`).test(topic);
+  }
+
   /**
    * Process sensor reading from ESP32
    * Expected format: {temperature, ph, do, turbidity, location?, timestamp?}
    */
-  private async handleSensorReading(payload: string): Promise<void> {
+  private async handleSensorReading(payload: string): Promise<boolean> {
+    let ingested = false;
     try {
       const data = JSON.parse(payload);
-      if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
       const deviceId = typeof data.deviceId === 'string' ? data.deviceId : 'mqtt-device';
-      const reading = await sensorReadingService.ingest(deviceId, data);
+      const result = await sensorReadingService.ingestWithStatus(deviceId, data);
+      if (!result.inserted) return false;
+      const reading = result.reading;
+      ingested = true;
       this.onReadingReceived?.(reading);
       await waterAlertNotificationService.processReading({...reading, dissolvedOxygen:reading.do, dissolvedOxygenMeasured:reading.doMeasured}).catch(error=>logger.error('Post-ingestion notification failed', {deviceId, readingId:reading.id, error:String(error)}));
       const stats = await sensorReadingService.getStatistics(60);
       this.onStatsUpdated?.({...stats,timestamp:new Date()});
     } catch { logger.warn('Malformed sensor payload or ingestion failed'); }
+    return ingested;
+  }
+
+  private async persistPublicMqttFrame(payload: string, bootId: string, sequence: number): Promise<void> {
+    const pending = this.pendingPublicFrame;
+    // Keep only the newest frame for a boot; duplicate or out-of-order delivery
+    // must not replace a newer frame waiting for the rate limit to expire.
+    if (pending?.bootId === bootId && sequence <= pending.sequence) return;
+    this.pendingPublicFrame = { payload, bootId, sequence };
+    await this.drainPublicMqttFrame();
+  }
+
+  private async drainPublicMqttFrame(): Promise<void> {
+    if (this.publicFramePersistInProgress || !this.pendingPublicFrame) return;
+    const waitMs = this.lastPublicFramePersistedAt === null
+      ? 0
+      : PUBLIC_MQTT_MIN_FRAME_INTERVAL_MS - (Date.now() - this.lastPublicFramePersistedAt);
+    if (waitMs > 0) {
+      if (!this.publicFrameDrainTimer) {
+        this.publicFrameDrainTimer = setTimeout(() => {
+          this.publicFrameDrainTimer = null;
+          void this.drainPublicMqttFrame();
+        }, waitMs);
+      }
+      return;
+    }
+    if (this.publicFrameDrainTimer) {
+      clearTimeout(this.publicFrameDrainTimer);
+      this.publicFrameDrainTimer = null;
+    }
+
+    const frame = this.pendingPublicFrame;
+    this.pendingPublicFrame = null;
+    this.publicFramePersistInProgress = true;
+    try {
+      if (await this.handleSensorReading(frame.payload)) this.lastPublicFramePersistedAt = Date.now();
+    } finally {
+      this.publicFramePersistInProgress = false;
+      if (this.pendingPublicFrame) void this.drainPublicMqttFrame();
+    }
   }
 
   setRealtimeHandlers(handlers: {
@@ -375,7 +570,8 @@ export class MQTTService {
       this.latestSensorPayload.ph = undefined;
       this.latestSensorPayload.turbidity = undefined;
 
-      this.handleSensorReading(JSON.stringify(normalizedPayload));
+      const serialized = JSON.stringify(normalizedPayload);
+      if (!appConfig.mqtt.publicTelemetryOnly) void this.handleSensorReading(serialized);
     }
   }
 
@@ -414,7 +610,7 @@ export class MQTTService {
    * Publish device status
    */
   private publishStatus(status: 'online' | 'offline'): void {
-    if (!this.client || !this.isConnected) return;
+    if (!this.client || !this.isConnected || appConfig.mqtt.publicTelemetryOnly) return;
 
     const message = JSON.stringify({
       status,
@@ -436,13 +632,19 @@ export class MQTTService {
    */
   async disconnect(): Promise<void> {
     if (this.actuatorRedeliveryInterval) { clearInterval(this.actuatorRedeliveryInterval); this.actuatorRedeliveryInterval = null; }
+    if (this.publicFrameDrainTimer) { clearTimeout(this.publicFrameDrainTimer); this.publicFrameDrainTimer = null; }
+    this.pendingPublicFrame = null;
+    if (this.controlClient) {
+      this.controlClient.end(false);
+      this.controlClient = null;
+    }
     return new Promise((resolve) => {
       if (!this.client) {
         resolve();
         return;
       }
 
-      this.publishStatus('offline');
+      if (!appConfig.mqtt.publicTelemetryOnly) this.publishStatus('offline');
       this.client.end(false, () => {
         this.isConnected = false;
         logger.info('âœ“ MQTT disconnected');
@@ -458,11 +660,22 @@ export class MQTTService {
     connected: boolean;
     brokerUrl: string;
     subscribedTopics: string[];
+    lastPublicFrameReceivedAt: string | null;
+    lastPublicFrameVerifiedAt: string | null;
+    lastPublicFramePersistedAt: string | null;
   } {
     return {
       connected: this.isConnected,
-      brokerUrl: this.config.brokerUrl,
-      subscribedTopics: [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands],
+      brokerUrl: sanitizeBrokerUrl(this.config.brokerUrl),
+      subscribedTopics: appConfig.mqtt.publicTelemetryOnly
+        ? [this.config.topics.sensorWildcard,
+          ...(appConfig.mqtt.publicCommandsEnabled ? [`${appConfig.mqtt.controlTopicNamespace}/+/state`] : [])]
+        : [this.config.topics.readings, this.config.topics.sensorWildcard, this.config.topics.commands],
+      lastPublicFrameReceivedAt: this.lastPublicFrameReceivedAt,
+      lastPublicFrameVerifiedAt: this.lastPublicFrameVerifiedAt,
+      lastPublicFramePersistedAt: this.lastPublicFramePersistedAt === null
+        ? null
+        : new Date(this.lastPublicFramePersistedAt).toISOString(),
     };
   }
 }

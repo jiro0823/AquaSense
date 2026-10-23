@@ -6,22 +6,26 @@ export function SensorHealthPanel({reading}:{reading:WaterQualityReading|null}) 
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {(['temperature','ph','turbidity','orp'] as const).map(name=> {
         const s=health?.[name];
+        const displayedValue = name === 'turbidity'
+          ? reading?.turbidityUnit === 'NTU' ? reading.turbidity : null
+          : s?.value ?? null;
         return <div key={name}>
           <strong>{name === 'ph' ? 'pH' : name.toUpperCase()}</strong>
-          <p>{s?.valid && s.value!==null ? `${s.value.toFixed(2)} ${s.unit} · ${s.calibration==='CALIBRATED' && s.stability==='STABLE' ? 'qualified' : 'reported; calibration required'}`:'--'} · {s?.health || 'MISSING'}</p>
+          <p>{s?.valid && displayedValue!==null ? `${displayedValue.toFixed(2)} ${name === 'turbidity' ? 'NTU' : s?.unit ?? ''} · ${s?.calibration==='CALIBRATED' && s?.stability==='STABLE' ? 'qualified' : 'reported; calibration required'}`:'--'} · {s?.health || 'MISSING'}</p>
           {name==='orp' && s?.health==='MISSING' && s.value!==null && s.reason.includes('not commissioned') &&
             <p className="text-amber-800">Device-reported diagnostic: {s.value.toFixed(2)} mV · uncalibrated, not a validated measurement</p>}
           {s?.rawAvailable && !s.measurementValid && <p className="text-amber-800">Signal available; engineering measurement unavailable</p>}
           <p>Water quality: {reading?.waterQuality?.[name] || 'UNAVAILABLE'}</p>
           <p>Stability: {s?.stability || 'COLLECTING'} · Calibration required</p>
           {s?.reason && <p className="text-amber-800">{s.reason}</p>}
-          <details><summary className="cursor-pointer text-blue-700">Calibration diagnostics</summary>
+          {name === 'turbidity' ? <><p className="text-amber-800">{reading?.turbidityUnit === 'NTU' ? 'Linear ADC estimate reported; sensor calibration is required.' : 'NTU unavailable for this sample.'}</p>
+            <p>ADC pin signal: {s?.voltage?.toFixed(3) ?? '--'} V · raw ADC: {s?.rawAdc ?? '--'} · burst {s?.adcMinimum ?? '--'}–{s?.adcMaximum ?? '--'}</p></> : <details><summary className="cursor-pointer text-blue-700">Calibration diagnostics</summary>
             <p>Raw ADC: {s?.rawAdc ?? '--'} · Input voltage: {s?.voltage?.toFixed(4) ?? '--'} V</p>
             <p>ADC burst: last {s?.adcLast ?? '--'} / min {s?.adcMinimum ?? '--'} / max {s?.adcMaximum ?? '--'} / clipped {s?.clippedSamples ?? '--'}</p>
             <p>Samples: {s?.window.count ?? 0} · Range: {s?.window.range?.toFixed(3) ?? '--'}</p>
             <p>Min: {s?.window.min?.toFixed(3) ?? '--'} · Max: {s?.window.max?.toFixed(3) ?? '--'} · Mean: {s?.window.average?.toFixed(3) ?? '--'}</p>
             <p>Ready for calibration: {s?.readyForCalibration?'YES':'OBSERVE / CHECK'}</p>
-          </details>
+          </details>}
         </div>;
       })}
     </div>

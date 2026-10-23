@@ -15,7 +15,7 @@ struct AnalogDiagnostics {
 struct SensorReadings {
     float temperatureC = 0.0f;
     float ph = 0.0f;
-    float turbidityRaw = 0.0f; // Preserved field name; calibrated NTU under this profile.
+    float turbidityRaw = 0.0f; // Preserved field name; provisional NTU estimate when enabled.
     float orpMv = 0.0f;
     bool temperatureValid = false;
     bool phValid = false;

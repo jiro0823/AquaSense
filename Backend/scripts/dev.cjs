@@ -4,6 +4,8 @@ const net = require('node:net');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const dotenv = require('dotenv');
+const PUBLIC_DEV_BROKER_URL = 'mqtt://broker.hivemq.com:1883';
+const PUBLIC_DEV_DEVICE_ID = 'esp32-feeder-1';
 
 const backendDir = path.resolve(__dirname, '..');
 
@@ -55,10 +57,36 @@ async function checkStartup(host, port) {
 }
 
 async function main() {
-  const envPath = path.join(backendDir, '.env');
+  const args = process.argv.slice(2);
+  const publicDev = args.includes('--profile') && args[args.indexOf('--profile') + 1] === 'public-dev';
+  if (args.some((arg, index) => arg === '--profile' && args[index + 1] !== 'public-dev') ||
+      args.filter((arg) => arg === '--profile').length > 1) {
+    throw new Error('Only the explicit --profile public-dev option is supported');
+  }
+  const envPath = path.join(backendDir, publicDev ? '.env.public-dev' : '.env');
   const fileEnv = fs.existsSync(envPath) ? dotenv.parse(fs.readFileSync(envPath)) : {};
+  if (publicDev) {
+    if (fileEnv.MQTT_BROKER_URL !== PUBLIC_DEV_BROKER_URL ||
+        (process.env.MQTT_BROKER_URL !== undefined && process.env.MQTT_BROKER_URL !== PUBLIC_DEV_BROKER_URL)) {
+      throw new Error('Public development profile requires the exact configured HiveMQ broker URL');
+    }
+    if ((fileEnv.FEEDER_DEVICE_ID !== undefined && fileEnv.FEEDER_DEVICE_ID !== PUBLIC_DEV_DEVICE_ID) ||
+        (process.env.FEEDER_DEVICE_ID !== undefined && process.env.FEEDER_DEVICE_ID !== PUBLIC_DEV_DEVICE_ID)) {
+      throw new Error('Public development profile device ID must match the firmware configuration');
+    }
+    if (!fileEnv.PORT || (process.env.PORT !== undefined && process.env.PORT !== fileEnv.PORT)) {
+      throw new Error('Public development profile server port must match its profile configuration');
+    }
+    if (fileEnv.MQTT_DEVICE_SCOPED_TOPICS !== 'true' || fileEnv.MQTT_ACTUATOR_COMMANDS_ENABLED !== 'true' ||
+        fileEnv.MQTT_PUBLIC_COMMANDS_ENABLED !== 'true' ||
+        !/^[A-Za-z0-9_-]{3,48}$/.test(fileEnv.MQTT_TOPIC_NAMESPACE || '') ||
+        !/^[A-Za-z0-9_-]{3,48}$/.test(fileEnv.MQTT_CONTROL_TOPIC_NAMESPACE || '') ||
+        fileEnv.MQTT_TOPIC_NAMESPACE === fileEnv.MQTT_CONTROL_TOPIC_NAMESPACE) {
+      throw new Error('Public development profile settings are incomplete or unsafe');
+    }
+  }
   const host = fileEnv.HOST ?? process.env.HOST ?? 'localhost';
-  const port = Number(fileEnv.PORT ?? process.env.PORT ?? '5001');
+  const port = Number((publicDev ? fileEnv.PORT : fileEnv.PORT ?? process.env.PORT) ?? '5001');
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer between 1 and 65535 in Backend/.env');
 
   if (await checkStartup(host || 'localhost', port) === 'running') {
@@ -67,9 +95,12 @@ async function main() {
     return;
   }
 
-  const child = spawn(process.execPath, [require.resolve('nodemon/bin/nodemon.js'), '--exec', 'ts-node', 'src/server.ts', ...process.argv.slice(2)], {
+  const childArgs = args.filter((arg, index) => !(arg === '--profile' || args[index - 1] === '--profile'));
+  const childEnv = { ...process.env, ...(publicDev ? { AQUASENSE_CONFIG_PROFILE: 'public-dev' } : {}) };
+  const child = spawn(process.execPath, [require.resolve('nodemon/bin/nodemon.js'), '--exec', 'ts-node', 'src/server.ts', ...childArgs], {
     cwd: backendDir,
     stdio: 'inherit',
+    env: childEnv,
   });
   process.on('SIGINT', () => child.kill('SIGINT'));
   process.on('SIGTERM', () => child.kill('SIGTERM'));

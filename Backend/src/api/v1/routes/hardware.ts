@@ -14,6 +14,9 @@ import { mqttService } from '../../../services/mqttService';
 const router = Router();
 router.post('/hardware/commands', authenticateToken, requireRole(['admin', 'farmer']), validateBody(hardwareCommandSchema),
   async (req: AuthenticatedRequest, res) => {
+    if (config.mqtt.publicTelemetryOnly || !config.mqtt.actuatorCommandsEnabled) {
+      sendError(res, 503, 'Generic hardware commands are disabled in public development mode'); return;
+    }
     const { deviceId, action, durationMs } = req.body;
     try {
       if (!req.userId || !(await deviceService.verifyOwnership(req.userId, deviceId))) { sendError(res, 403, 'Device is not owned/active'); return; }
@@ -34,7 +37,13 @@ router.get('/hardware/state', authenticateToken, requireRole(['admin', 'farmer']
   const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : '';
   try {
     if (!req.userId || !(await deviceService.verifyOwnership(req.userId, deviceId))) { sendError(res, 403, 'Device is not owned/active'); return; }
-    sendSuccess(res, 200, 'Last reported hardware state', await hardwareService.getState(req.userId, deviceId));
+    const state = await hardwareService.getState(req.userId, deviceId);
+    const telemetryOnline = mqttService.isTelemetryDeviceOnline(deviceId);
+    sendSuccess(res, 200, 'Last reported hardware state', {
+      ...state,
+      online: state.online || telemetryOnline,
+      receivedAt: state.receivedAt || (telemetryOnline ? mqttService.getStatus().lastPublicFrameVerifiedAt : null),
+    });
   } catch { sendError(res, 503, 'Unable to read hardware state'); }
 });
 router.post('/hardware/device/sync', validateBody(hardwareSyncSchema), (req, res, next) => {

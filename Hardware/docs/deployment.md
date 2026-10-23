@@ -3,10 +3,10 @@
 ## Integrated water-monitor
 
 Follow [backend/device setup](backend-control.md) first. The configuration still
-contains an example API address, empty device key, and diagram-backed relay load
-assignments. Firmware polarity is configured active-LOW from the reported module
-intent, but physical polarity and channel mapping remain unverified; the relay
-output commissioning gate is false. Pump target/max runtimes and cooldown
+contains an example API address and empty device key. User-reported relay mapping
+is K3 refill/GPIO26, K4 drain/GPIO27, and K2 aerator/GPIO25. Firmware polarity is
+configured active-LOW from reported intent, but electrical polarity and reset/OFF
+behavior remain unverified; the relay output gate is false. Pump runtimes and cooldown
 are zero, so pump operation remains disabled. Commission bounded timings only
 after supervised flow-rate and physical safety checks.
 
@@ -23,7 +23,8 @@ Replace COM5 with the verified port. Close an existing serial monitor before
 upload. Confirm the board matches classic esp32dev with 4 MB flash. Keep relay
 loads unpowered until polarity and reset/OFF state are measured and safe,
 supervised timing limits are commissioned for the tank and pump flow.
-The integrated servo initializes to its configured HOME position on GPIO13.
+The integrated servo initializes to its configured HOME position on GPIO18;
+the passive buzzer uses GPIO19. The legacy standalone feeder still uses GPIO13.
 
 Private credentials belong in include/secrets/Secrets.h, which replaces the whole
 example header. Keep firmware binaries private too: credentials are compiled in.

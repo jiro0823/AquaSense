@@ -5,7 +5,7 @@ import { getDashboardProfile } from '../../components/WaterQuality/dashboardProf
 import { ParameterIcon as CustomIcon, type ParameterIconName } from '../../components/WaterQuality/ParameterIcon';
 
 const DashboardOverviewPage: React.FC = () => {
-  const { isConnected, latestReading, chartData, predictiveWarning, error, tanMeasurements, latestTanMeasurement, tanLoading, tanError } = useDashboardData();
+  const { isConnected, latestReading, chartData, predictiveWarning, error } = useDashboardData();
   const [profile, setProfile] = useState(getDashboardProfile());
 
   useEffect(() => {
@@ -15,15 +15,6 @@ const DashboardOverviewPage: React.FC = () => {
   }, []);
 
   const processedChartData = useMemo(() => chartData, [chartData]);
-  const tanChartData = useMemo(() => tanMeasurements.map((measurement) => ({
-    timestamp: new Date(measurement.sampleCollectedAt).toISOString(),
-    time: new Date(measurement.sampleCollectedAt).toLocaleTimeString(),
-    tan: measurement.value,
-    nh3N: measurement.nh3N,
-  })).sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)), [tanMeasurements]);
-
-
-
   const riskModelValidated = predictiveWarning?.modelStatus === 'READY'
     && predictiveWarning.validationStatus === 'VALIDATED'
     && predictiveWarning.analysisStatus === 'AVAILABLE'
@@ -32,10 +23,17 @@ const DashboardOverviewPage: React.FC = () => {
   const riskLevel = riskModelValidated ? predictiveWarning?.warningCard?.riskLevel ?? 'UNAVAILABLE' : 'UNAVAILABLE';
   const riskColor = riskLevel === 'LOW' ? '#22c55e' : riskLevel === 'MODERATE' ? '#eab308' : riskLevel === 'HIGH' ? '#f97316' : riskLevel === 'CRITICAL' ? '#ef4444' : '#6b7280';
   const orpIsStale = latestReading?.sensorHealth?.orp.health === 'STALE';
+  const orpIsCalibrated = latestReading?.sensorHealth?.orp.valid === true
+    && latestReading.sensorHealth.orp.health === 'VALID'
+    && latestReading.sensorHealth.orp.calibration === 'CALIBRATED'
+    && latestReading.sensorHealth.orp.stability === 'STABLE';
   const monitoredSensors = ['temperature', 'ph', 'turbidity', 'orp'] as const;
   const validSensorCount = monitoredSensors.filter((name) => latestReading?.sensorHealth?.[name].valid && latestReading.sensorHealth[name].health === 'VALID').length;
   const calibratedSensorCount = monitoredSensors.filter((name) => latestReading?.sensorHealth?.[name].calibration === 'CALIBRATED' && latestReading.sensorHealth[name].stability === 'STABLE').length;
-
+  const turbidityNtuHistoryAvailable = chartData.some((point) => point.turbidityUnit === 'NTU' && point.turbidity !== null && point.turbidity !== undefined);
+  const latestTurbidityNtuPoint = [...chartData].reverse().find((point) => point.turbidityUnit === 'NTU' && point.turbidity !== null && point.turbidity !== undefined);
+  const currentTurbidityNtu = latestReading?.turbidityUnit === 'NTU' ? latestReading.turbidity : null;
+  const turbidityNtu = currentTurbidityNtu ?? latestTurbidityNtuPoint?.turbidity ?? null;
   const getStatus = (param: string, value: number|null|undefined, calibrated: boolean) => {
     if(value==null || !Number.isFinite(value)) return {label:'Unavailable',color:'text-gray-600',bg:'bg-gray-100'};
     if (!calibrated) return {label:'Calibration required · not classified',color:'text-amber-700',bg:'bg-amber-100'};
@@ -51,24 +49,30 @@ const DashboardOverviewPage: React.FC = () => {
     }
   };
 
+  const turbidityStatus = currentTurbidityNtu != null
+    ? getStatus('turbidity', currentTurbidityNtu, latestReading?.sensorHealth?.turbidity.valid===true && latestReading.sensorHealth.turbidity.health==='VALID' && latestReading.sensorHealth.turbidity.calibration==='CALIBRATED' && latestReading.sensorHealth.turbidity.stability==='STABLE')
+    : latestTurbidityNtuPoint
+      ? {label:`Last NTU sample ${latestTurbidityNtuPoint.time}; live sample unavailable`,color:'text-amber-700',bg:'bg-amber-100'}
+      : getStatus('turbidity', null, false);
+
   const metrics: Array<{ title: string; value: string; color: string; icon: ParameterIconName; status: { label: string; color: string; bg: string } }> = [
     { title: 'TEMPERATURE', value: latestReading?.temperature != null ? `${latestReading.temperature?.toFixed(1)} °C` : '--', color: '#f59e0b', icon: 'temperature', status: getStatus('temp', latestReading?.temperature, latestReading?.sensorHealth?.temperature.valid===true && latestReading.sensorHealth.temperature.health==='VALID' && latestReading.sensorHealth.temperature.calibration==='CALIBRATED' && latestReading.sensorHealth.temperature.stability==='STABLE') },
     { title: 'pH LEVEL', value: latestReading?.ph != null ? latestReading.ph?.toFixed(1) : '--', color: '#3b82f6', icon: 'ph', status: getStatus('ph', latestReading?.ph, latestReading?.sensorHealth?.ph.valid===true && latestReading.sensorHealth.ph.health==='VALID' && latestReading.sensorHealth.ph.calibration==='CALIBRATED' && latestReading.sensorHealth.ph.stability==='STABLE') },
-    { title: 'ORP / REDOX', value: latestReading?.orp != null ? `${latestReading.orp.toFixed(1)} mV` : '--', color: '#22c55e', icon: 'shield', status: orpIsStale ? {label:'Stale reported sample',color:'text-amber-700',bg:'bg-amber-100'} : latestReading?.sensorHealth?.orp.valid ? {label:'Calibrated reading',color:'text-emerald-700',bg:'bg-emerald-100'} : latestReading?.orp != null ? {label:'Reported; calibration required',color:'text-amber-700',bg:'bg-amber-100'} : {label:'Unavailable',color:'text-gray-600',bg:'bg-gray-100'} },
-    { title: 'TURBIDITY', value: latestReading?.turbidity != null ? `${latestReading.turbidity?.toFixed(0)} ${latestReading.turbidityUnit}` : '--', color: '#a855f7', icon: 'turbidity', status: latestReading?.turbidityUnit==='raw_adc' ? {label:'Raw ADC · diagnostic only',color:'text-gray-600',bg:'bg-gray-100'} : latestReading?.turbidityUnit==='NTU' ? getStatus('turbidity', latestReading?.turbidity, latestReading?.sensorHealth?.turbidity.valid===true && latestReading.sensorHealth.turbidity.health==='VALID' && latestReading.sensorHealth.turbidity.calibration==='CALIBRATED' && latestReading.sensorHealth.turbidity.stability==='STABLE') : getStatus('turbidity', null, false) },
-    { title: 'UNIONIZED NH3-N', value: latestTanMeasurement?.nh3N != null ? `${latestTanMeasurement.nh3N.toFixed(3)} mg/L as N` : '--', color: '#ef4444', icon: 'ammonia', status: {label:latestTanMeasurement?.nh3N != null ? 'Calculated from aligned measured TAN' : latestTanMeasurement ? 'TAN recorded; speciation unavailable' : tanLoading ? 'Loading TAN history' : tanError ? 'TAN history unavailable' : 'TAN not recorded',color:'text-gray-600',bg:'bg-gray-100'} },
+    { title: 'ORP / REDOX', value: latestReading?.orp != null ? `${latestReading.orp.toFixed(1)} mV` : '--', color: '#22c55e', icon: 'shield', status: orpIsStale ? {label:'Stale reported sample',color:'text-amber-700',bg:'bg-amber-100'} : orpIsCalibrated ? {label:'Calibrated reading',color:'text-emerald-700',bg:'bg-emerald-100'} : latestReading?.orp != null ? {label:'Reported; calibration required',color:'text-amber-700',bg:'bg-amber-100'} : {label:'Unavailable',color:'text-gray-600',bg:'bg-gray-100'} },
+    { title: 'TURBIDITY', value: turbidityNtu != null ? `${turbidityNtu.toFixed(1)} NTU` : '--', color: '#a855f7', icon: 'turbidity', status: turbidityStatus },
+    { title: 'NH3 FRACTION OF TAN', value: latestReading?.speciation?.status === 'AVAILABLE' && latestReading.speciation.percent != null ? `${latestReading.speciation.percent.toFixed(2)}%` : '--', color: '#ef4444', icon: 'ammonia', status: {label:latestReading?.speciation?.status === 'AVAILABLE' ? 'Calculated from pH + temperature' : latestReading?.speciation?.reason || 'Qualified pH and temperature required',color:'text-gray-600',bg:'bg-gray-100'} },
   ];
 
   const renderChart = (title: string, dataKey: string, color: string, yDomain: [number | string, number | string], idealLabel: string, detail?: React.ReactNode, secondSeries?: { dataKey: string; color: string }, dataOverride?: typeof chartData) => (
     <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-2.5 lg:p-2 h-[220px] lg:h-full lg:min-h-0 flex flex-col relative">
       <div className="flex items-center justify-between gap-2 mb-1 shrink-0">
-        <h3 className="text-xs font-semibold flex items-center gap-1.5 truncate" style={{ color }}><CustomIcon name={dataKey === 'temperature' ? 'temperature' : dataKey === 'ph' ? 'ph' : dataKey === 'turbidity' ? 'turbidity' : secondSeries || dataKey === 'tan' || dataKey === 'nh3N' ? 'ammonia' : 'shield'} color={color} size="h-4 w-4" /> <span className="truncate">{title}</span></h3>
+        <h3 className="text-xs font-semibold flex items-center gap-1.5 truncate" style={{ color }}><CustomIcon name={dataKey === 'temperature' ? 'temperature' : dataKey === 'ph' ? 'ph' : dataKey === 'turbidity' ? 'turbidity' : secondSeries || dataKey === 'tan' || dataKey === 'nh3N' || dataKey === 'nh3FractionPercent' ? 'ammonia' : 'shield'} color={color} size="h-4 w-4" /> <span className="truncate">{title}</span></h3>
         <span className="text-[9px] text-gray-400 whitespace-nowrap">{idealLabel}</span>
       </div>
       {detail && <div className="shrink-0 text-[9px] leading-tight text-gray-500">{detail}</div>}
       <div className="relative flex-1 w-full min-h-0">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={dataKey==='turbidity'?(dataOverride ?? processedChartData).filter(point=>point.turbidityUnit===latestReading?.turbidityUnit):(dataOverride ?? processedChartData)} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+          <AreaChart data={dataKey==='turbidity'?(dataOverride ?? processedChartData).filter(point=>point.turbidityUnit==='NTU' && point.turbidity != null):(dataOverride ?? processedChartData)} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id={`gradient-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
@@ -136,7 +140,6 @@ const DashboardOverviewPage: React.FC = () => {
       </header>
 
       {error && <div className="p-2 text-sm border shrink-0 rounded-xl border-amber-200 bg-amber-50 text-amber-900">Data connection status: {error}</div>}
-      {tanError && <div role="alert" className="p-2 text-sm border shrink-0 rounded-xl border-amber-200 bg-amber-50 text-amber-900">TAN history unavailable: {tanError}</div>}
 
       {/* Top Metrics Cards */}
       <section className="shrink-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 lg:gap-2">
@@ -177,11 +180,12 @@ const DashboardOverviewPage: React.FC = () => {
           {renderChart('Temperature (°C)', 'temperature', '#f59e0b', [20, 36], 'Growth guidance 26-29°C')}
           {renderChart('pH Level', 'ph', '#3b82f6', [4, 10], 'Culture guidance pH 7-8.5')}
           {renderChart('ORP / Redox (mV)', 'orp', '#22c55e', ['auto', 'auto'], 'Independent redox indicator', orpIsStale ? 'Latest sample is stale; historical device-reported values are uncalibrated' : latestReading?.orp != null ? 'Device-reported trend; calibration required for interpretation' : 'No reported ORP samples')}
-          {renderChart('Turbidity ('+(latestReading?.turbidityUnit || 'unit unknown')+')', 'turbidity', '#a855f7', ['auto', 'auto'], 'Calibration required')}
+          {renderChart('Turbidity (NTU)', 'turbidity', '#a855f7', ['auto', 'auto'], 'Calibration required', turbidityNtuHistoryAvailable ? undefined : 'NTU unavailable for the current sensor samples')}
           {renderChart(
-            'TAN / NH3-N (mg/L as N)', 'tan', '#3b82f6', ['auto', 'auto'], 'Measured TAN; NH3-N only when aligned and qualified',
-            <>{latestTanMeasurement ? `Latest TAN ${latestTanMeasurement.value} mg/L as N · ${latestTanMeasurement.source} · collected ${new Date(latestTanMeasurement.sampleCollectedAt).toLocaleString()}` : tanLoading ? 'Loading TAN measurement history…' : tanError ? 'TAN history could not be loaded' : 'No TAN measurement recorded'} · {latestTanMeasurement?.nh3N != null ? `NH3-N ${latestTanMeasurement.nh3N.toFixed(5)} mg/L as N` : 'NH3-N unavailable'}</>,
-            { dataKey: 'nh3N', color: '#ef4444' }, tanChartData
+            'Unionized NH3 fraction (%)', 'nh3FractionPercent', '#ef4444', ['auto', 'auto'], 'Calculated from qualified pH + temperature',
+            <>{latestReading?.speciation?.status === 'AVAILABLE' && latestReading.speciation.percent != null ? `Latest fraction ${latestReading.speciation.percent.toFixed(3)}%` : latestReading?.speciation?.reason || 'Qualified pH and temperature are required'} · TAN and NH3-N concentration require measured TAN</>,
+            undefined,
+            processedChartData,
           )}
           <div className="relative flex h-[220px] flex-col rounded-xl border border-gray-200 bg-white p-2.5 shadow-sm lg:h-full lg:min-h-0 lg:p-2"><div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-gray-700">Risk Index</h3><span className="text-[9px] text-gray-400">Unavailable</span></div><div className="flex flex-1 flex-col items-center justify-center text-center"><span className="text-2xl font-bold" style={{color:riskColor}}>{currentRiskScore === null ? '--' : `${currentRiskScore.toFixed(0)} / 100`}</span><span className="text-xs text-gray-500">{riskLevel}</span><span className="mt-2 text-[10px] text-gray-400">No validated, commissioned crayfish risk model</span></div></div>
         </div>
@@ -197,9 +201,9 @@ const DashboardOverviewPage: React.FC = () => {
                <span>Model validation</span><span className="text-right">{predictiveWarning?.validationStatus === 'VALIDATED' ? 'Validated' : 'Not commissioned'}</span>
                <span>Sensor coverage</span><span className="text-right">{validSensorCount}/{monitoredSensors.length} valid</span>
                <span>Calibrated and stable</span><span className="text-right">{calibratedSensorCount}/{monitoredSensors.length}</span>
-               <span>Measured TAN source</span><span className="text-right">{latestTanMeasurement ? 'User-reported result' : 'Unavailable'}</span>
+               <span>TAN concentration</span><span className="text-right">Requires actual measurement</span>
              </div>
-             <p className="mt-2 text-[10px] text-gray-500">{latestTanMeasurement?.speciationReason || 'Ammonia hazard is unassessed until an actual TAN result is entered.'}</p>
+             <p className="mt-2 text-[10px] text-gray-500">pH and temperature estimate the NH3 fraction only; they cannot determine TAN concentration.</p>
           </div>
 
           {/* Risk Level Guide Panel */}
@@ -218,8 +222,8 @@ const DashboardOverviewPage: React.FC = () => {
              <div className="flex flex-col gap-1.5 lg:gap-1.5">
                 {([
                   { name: 'ORP / Redox (uncalibrated)', status: latestReading?.orp != null ? `${latestReading.orp.toFixed(1)} mV reported${orpIsStale ? ' · stale' : ''}` : 'Unavailable', color: '#22c55e', icon: 'shield' },
-                  { name: 'TAN', status: latestTanMeasurement ? `${latestTanMeasurement.value} mg/L as N · ${latestTanMeasurement.validationStatus.toLowerCase().replace('_', ' ')}` : tanLoading ? 'Loading history' : tanError ? 'History unavailable' : 'No result recorded', color: '#3b82f6', icon: 'ammonia' },
-                  { name: 'Unionized NH3-N', status: latestTanMeasurement?.nh3N != null ? `${latestTanMeasurement.nh3N.toFixed(3)} mg/L as N` : 'Unavailable', color: '#ef4444', icon: 'ammonia' },
+                  { name: 'TAN concentration', status: 'Requires measured TAN', color: '#3b82f6', icon: 'ammonia' },
+                  { name: 'Unionized NH3 fraction', status: latestReading?.speciation?.status === 'AVAILABLE' && latestReading.speciation.percent != null ? `${latestReading.speciation.percent.toFixed(2)}%` : 'Unavailable', color: '#ef4444', icon: 'ammonia' },
                   { name: 'Temperature', status: latestReading?.temperature != null ? `${latestReading.temperature.toFixed(1)} °C` : 'Unavailable', color: metrics[0].color, icon: 'temperature' },
                   { name: 'pH Level', status: latestReading?.ph != null ? latestReading.ph.toFixed(2) : 'Unavailable', color: metrics[1].color, icon: 'ph' },
                 ] as Array<{ name: string; status: string; color: string; icon: ParameterIconName }>).map((factor, idx) => (

@@ -2,8 +2,8 @@
 
 ESP32 Arduino firmware built with PlatformIO in VS Code. The integrated
 `water-monitor` handles sensors, LCD, DS3231, servo feeder, buzzer and relay
-control. The supplied wiring diagram maps relay IN1/IN2/IN3 to GPIO25/26/27 for
-fill, drain and aerator; GPIO33 connects to unused IN4. Relay control remains
+control. User-confirmed wiring maps relay K3/K4/K2 to GPIO26/27/25 for fill,
+drain and aerator; GPIO33 is unused. Relay control remains
 disabled by a closed commissioning gate. Firmware polarity is configured
 active-LOW from the reported module intent, but physical trigger behavior,
 channel mapping and safe OFF behavior remain unverified.
@@ -60,7 +60,8 @@ pio device list
 ```
 
 Upload one target per board. Do not run standalone and integrated feeders with
-the same backend device ID. Integrated and standalone servo signal use GPIO13.
+the same backend device ID. The integrated servo uses GPIO18 and buzzer GPIO19;
+the separate legacy feeder retains GPIO13.
 Board baseline is classic `esp32dev` with 4 MB flash; confirm the actual module.
 
 Existing credentials remain in ignored `include/secrets/Secrets.h`. Fresh clone:
@@ -100,8 +101,8 @@ diagram labels a 16x2 module, so verify the installed display dimensions.
 Pump timing, mutual-exclusion and local deadline logic exists, but pump runs are
 currently inhibited: relay outputs are gated off and configured run limits are
 zero. The software active-LOW setting is not electrical verification. Physical
-reset/OFF bias and the reported K3 refill/K4 drain assignment must be checked
-against the board before changing GPIO roles. There is no
+reset/OFF bias must be measured before enabling relay outputs; the reported
+K2/K3/K4 mapping is reflected in Pins.h. There is no
 JSN-SR04T, float-switch, or inferred level measurement; water exchange is timed,
 not level-confirmed. Automatic water exchange and temperature-based aeration
 remain disabled until their policies and hardware are commissioned.

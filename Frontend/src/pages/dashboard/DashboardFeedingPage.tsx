@@ -37,6 +37,7 @@ const DashboardFeedingPage: React.FC = () => {
   const [hardwareState, setHardwareState] = useState<HardwareState | null>(null);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
+  const [manualMessage, setManualMessage] = useState<string | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
@@ -46,6 +47,7 @@ const DashboardFeedingPage: React.FC = () => {
   const [editTime, setEditTime] = useState('');
   const [editLabel, setEditLabel] = useState('');
   const enabledCount = feedingSchedules.filter((item) => item.enabled).length;
+  const deviceOnline = !!hardwareState?.online && loadedAt !== null && Date.now() - loadedAt < 20000;
 
   const refreshState = useCallback(async (selectedId = deviceId) => {
     if (!selectedId) return;
@@ -84,8 +86,14 @@ const DashboardFeedingPage: React.FC = () => {
   const runManual = async (action: 'ON' | 'OFF' | 'TRIGGER') => {
     try {
       setManualBusy(true);
-      await triggerManual(action, deviceId);
+      setManualMessage(null);
+      const published = await triggerManual(action, deviceId);
+      setManualMessage(published
+        ? `${action === 'TRIGGER' ? 'Feed trigger' : `Feeder ${action}`} published to HiveMQ; servo movement is unconfirmed until the ESP32 acknowledges.`
+        : 'Command was not sent. The broker did not accept it, and no retry was queued.');
       await refreshState();
+    } catch (cause) {
+      setManualMessage(getApiErrorMessage(cause, 'Unable to send the feeder command.'));
     } finally {
       setManualBusy(false);
     }
@@ -117,7 +125,7 @@ const DashboardFeedingPage: React.FC = () => {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Manual Control
             </h3>
-            <Pill label={manualBusy ? 'Sending' : hardwareState?.state?.feederBusy ? 'Feeding' : 'Ready'} tone={manualBusy || hardwareState?.state?.feederBusy ? 'amber' : 'emerald'} />
+            <Pill label={manualBusy ? 'Sending' : hardwareState?.state?.feederBusy ? 'Feeding' : deviceOnline ? 'Ready' : 'Unavailable'} tone={manualBusy || hardwareState?.state?.feederBusy ? 'amber' : deviceOnline ? 'emerald' : 'gray'} />
           </div>
           <label className="mb-2 block text-[10px] font-semibold text-gray-600" htmlFor="feeding-device">Device</label>
           <select id="feeding-device" value={deviceId} onChange={(event) => { setDeviceId(event.target.value); setFeedingState(null); setHardwareState(null); setLoadedAt(null); }} className="mb-2 w-full rounded border border-gray-200 bg-gray-50 p-2 text-xs">
@@ -125,15 +133,17 @@ const DashboardFeedingPage: React.FC = () => {
             {devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} ({device.deviceId})</option>)}
           </select>
           <div className="mb-2 grid grid-cols-2 gap-2 text-[10px] text-gray-600">
-            <span>Device: <strong>{hardwareState?.online && loadedAt !== null && Date.now() - loadedAt < 20000 ? 'ONLINE' : 'OFFLINE / STALE'}</strong></span>
+            <span>Device: <strong>{deviceOnline ? 'ONLINE' : 'OFFLINE / STALE'}</strong></span>
             <span>Feeder state: <strong>{hardwareState?.state ? (hardwareState.state.feederBusy ? 'FEEDING' : 'IDLE') : 'UNKNOWN'}</strong></span>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <button disabled={manualBusy} onClick={() => void runManual('ON')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">ON</button>
-            <button disabled={manualBusy} onClick={() => void runManual('OFF')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-40">OFF</button>
-            <button disabled={manualBusy} onClick={() => void runManual('TRIGGER')} className="px-3 py-2 text-xs font-semibold text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">Feed</button>
+            <button disabled={manualBusy || !deviceOnline} title={!deviceOnline ? 'Device must report online before a feeder command can be sent.' : undefined} onClick={() => void runManual('ON')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">ON</button>
+            <button disabled={manualBusy || !deviceOnline} title={!deviceOnline ? 'Device must report online before a feeder command can be sent.' : undefined} onClick={() => void runManual('OFF')} className="px-3 py-2 text-xs font-semibold text-white transition-colors rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-40">OFF</button>
+            <button disabled={manualBusy || !deviceOnline} title={!deviceOnline ? 'Device must report online before a feeder command can be sent.' : undefined} onClick={() => void runManual('TRIGGER')} className="px-3 py-2 text-xs font-semibold text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">Feed</button>
           </div>
+          {!deviceOnline && <p role="status" className="mt-2 text-[10px] text-amber-700">Feeder controls are disabled until fresh, verified ESP32 telemetry is received and the HiveMQ command connection is available.</p>}
           <p className="mt-2 text-[10px] text-gray-400">State is device-reported logical status; it does not confirm food was physically dispensed. Manual commands use the backend feeder command endpoint.</p>
+          {manualMessage && <p role="status" aria-live="polite" className="mt-1 text-[10px] text-blue-700">{manualMessage}</p>}
           <p className="mt-2 text-[10px] text-gray-600" aria-live="polite">{feedingState?.lastCommand ? `Latest command ${feedingState.lastCommand.action}: ${feedingState.lastCommand.status}${feedingState.lastCommand.metadata?.deviceResult ? ` · ${String(feedingState.lastCommand.metadata.deviceResult)}` : ''}` : 'No reported feeding command'}{manualBusy ? ' · PENDING' : ''}</p>
           {feedingState?.lastCommand?.id && <p className="mt-1 break-all text-[10px] text-gray-400">Command ID: {feedingState.lastCommand.id}</p>}
           {loadedAt && <p className="mt-1 text-[10px] text-gray-400">Last state poll: {new Date(loadedAt).toLocaleTimeString()}</p>}

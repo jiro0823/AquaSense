@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "vite --mode local",
+    "dev:public-dev": "vite --mode public-dev",
     "build": "tsc && vite build",
     "build:watch": "tsc --watch",
     "preview": "vite preview",

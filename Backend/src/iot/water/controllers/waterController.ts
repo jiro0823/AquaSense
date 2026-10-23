@@ -19,8 +19,17 @@ import { deviceService } from '../../../services/device.service';
 import { TanMeasurementInputError, tanMeasurementService } from '../../../services/tanMeasurement.service';
 import { auditLogService } from '../../../services/auditLog.service';
 
-const mapDbStatsToWaterStats = async (minutes: number): Promise<WaterQualityStats> => {
-  const dbStats = await sensorReadingService.getStatistics(minutes);
+const getReadingDeviceScope = async (req: AuthenticatedRequest): Promise<string[] | undefined> => {
+  // An absent identity must never fall through to the service's unfiltered query.
+  if (!req.userId) return [];
+  if (req.userRole === 'admin') return undefined;
+  return (await deviceService.listByUser(req.userId))
+    .filter((device) => device.isActive)
+    .map((device) => device.deviceId);
+};
+
+const mapDbStatsToWaterStats = async (minutes: number, deviceIds?: string[]): Promise<WaterQualityStats> => {
+  const dbStats = await sensorReadingService.getStatistics(minutes, deviceIds);
 
   return {
     timestamp: new Date(),
@@ -163,9 +172,10 @@ export const getIngestStatus = (_req: Request, res: Response): void => {
   });
 };
 
-export const getLatestReading = async (_req: Request, res: Response): Promise<void> => {
+export const getLatestReading = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const reading = await sensorReadingService.getLatestReading();
+    const deviceIds = await getReadingDeviceScope(req);
+    const reading = await sensorReadingService.getLatestReading(deviceIds);
     if (!reading) {
       sendError(res, 404, 'No readings available yet');
       return;
@@ -176,10 +186,11 @@ export const getLatestReading = async (_req: Request, res: Response): Promise<vo
   }
 };
 
-export const getReadingsByTimeRange = async (req: Request, res: Response): Promise<void> => {
+export const getReadingsByTimeRange = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const minutes = parseInt(req.query.minutes as string, 10) || 60;
-    const readings = await sensorReadingService.getReadingsByTimeRange(minutes);
+    const deviceIds = await getReadingDeviceScope(req);
+    const readings = await sensorReadingService.getReadingsByTimeRange(minutes, deviceIds);
     if (readings.length === 0) {
       sendError(res, 404, 'No readings found for the specified time range');
       return;
@@ -190,10 +201,11 @@ export const getReadingsByTimeRange = async (req: Request, res: Response): Promi
   }
 };
 
-export const getStatistics = async (req: Request, res: Response): Promise<void> => {
+export const getStatistics = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const minutes = parseInt(req.query.minutes as string, 10) || 60;
-    const stats = await mapDbStatsToWaterStats(minutes);
+    const deviceIds = await getReadingDeviceScope(req);
+    const stats = await mapDbStatsToWaterStats(minutes, deviceIds);
     sendSuccess(res, 200, 'Statistics calculated', stats);
   } catch (error) {
     sendError(res, 500, 'Failed to calculate statistics', error instanceof Error ? error.message : 'Unknown error');
@@ -243,14 +255,14 @@ export const updateThresholds = async (req: Request, res: Response): Promise<voi
 
 export const getDashboardData = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const latest = await sensorReadingService.getLatestReading();
-    const stats = await mapDbStatsToWaterStats(60);
-    const deviceIds = req.userRole === 'admin' ? undefined : (req.userId ? (await deviceService.listByUser(req.userId)).filter((device) => device.isActive).map((device) => device.deviceId) : []);
+    const deviceIds = await getReadingDeviceScope(req);
+    const latest = await sensorReadingService.getLatestReading(deviceIds);
+    const stats = await mapDbStatsToWaterStats(60, deviceIds);
     const alerts = await alertService.getAlerts(10, undefined, deviceIds);
     const thresholds = waterQualityService.getThresholds();
     const predictive = await predictiveAnalyticsService.getWarningCard(60);
-    const predictionHistory = await predictionLogService.getRecentLogs(30);
-    const smsLogs = await smsLogService.getRecentLogs(15);
+    const predictionHistory = await predictionLogService.getRecentLogs(30, deviceIds);
+    const smsLogs = await smsLogService.getRecentLogs(15, deviceIds);
 
     const dashboardData = {
       latest,
@@ -279,10 +291,11 @@ export const getPredictiveWarning = async (req: Request, res: Response): Promise
   }
 };
 
-export const getPredictionHistory = async (req: Request, res: Response): Promise<void> => {
+export const getPredictionHistory = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const limit = parseInt(req.query.limit as string, 10) || 60;
-    const logs = await predictionLogService.getRecentLogs(limit);
+    const deviceIds = await getReadingDeviceScope(req);
+    const logs = await predictionLogService.getRecentLogs(limit, deviceIds);
     sendSuccess(res, 200, 'Prediction history retrieved', logs);
   } catch (error) {
     sendError(res, 500, 'Failed to retrieve prediction history', error instanceof Error ? error.message : 'Unknown error');

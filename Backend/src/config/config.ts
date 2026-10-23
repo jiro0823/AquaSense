@@ -1,10 +1,62 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 
-const envPath = path.resolve(__dirname, '..', '..', '.env');
+const publicDevProfile = process.env.AQUASENSE_CONFIG_PROFILE === 'public-dev';
+const PUBLIC_DEV_BROKER_URL = 'mqtt://broker.hivemq.com:1883';
+const PUBLIC_DEV_DEVICE_ID = 'esp32-feeder-1';
+const backendDir = path.resolve(__dirname, '..', '..');
+const envPath = path.join(backendDir, publicDevProfile ? '.env.public-dev' : '.env');
 // Tests never load deployment secrets or override their isolated environment.
-const fileEnv = process.env.NODE_ENV === 'test' ? {} : dotenv.config({ path: envPath, override: false }).parsed || {};
+const fileEnv = process.env.NODE_ENV === 'test' ? {} : publicDevProfile
+  ? {
+    ...(fs.existsSync(path.join(backendDir, '.env'))
+      ? dotenv.parse(fs.readFileSync(path.join(backendDir, '.env')))
+      : {}),
+    ...(dotenv.config({ path: envPath, override: false }).parsed || {}),
+  }
+  : dotenv.config({ path: envPath, override: false }).parsed || {};
+// Public-dev supports signed, device-scoped commands in a separate HiveMQ
+// namespace. The separate private broker remains available as a fallback.
+const privateControlEnv: Record<string, string> = process.env.NODE_ENV === 'test' || !publicDevProfile ||
+  !fs.existsSync(path.join(backendDir, '.env'))
+  ? {}
+  : dotenv.parse(fs.readFileSync(path.join(backendDir, '.env')));
+
+const assertProfileSetting = (key: string, expected: string): void => {
+  const fromFile = fileEnv[key];
+  const fromProcess = process.env[key];
+  if (fromFile !== expected || (fromProcess !== undefined && fromProcess !== expected)) {
+    throw new Error(`Public development profile requires ${key} to match its profile configuration`);
+  }
+};
+
+if (publicDevProfile && process.env.NODE_ENV !== 'test') {
+  const profileBroker = fileEnv.MQTT_BROKER_URL;
+  if (profileBroker !== PUBLIC_DEV_BROKER_URL ||
+      (process.env.MQTT_BROKER_URL !== undefined && process.env.MQTT_BROKER_URL !== PUBLIC_DEV_BROKER_URL)) {
+    throw new Error('Public development profile requires the exact configured HiveMQ broker URL');
+  }
+  if ((fileEnv.FEEDER_DEVICE_ID !== undefined && fileEnv.FEEDER_DEVICE_ID !== PUBLIC_DEV_DEVICE_ID) ||
+      (process.env.FEEDER_DEVICE_ID !== undefined && process.env.FEEDER_DEVICE_ID !== PUBLIC_DEV_DEVICE_ID)) {
+    throw new Error('Public development profile device ID must match the firmware configuration');
+  }
+  assertProfileSetting('MQTT_DEVICE_SCOPED_TOPICS', 'true');
+  assertProfileSetting('MQTT_ACTUATOR_COMMANDS_ENABLED', 'true');
+  assertProfileSetting('MQTT_PUBLIC_COMMANDS_ENABLED', 'true');
+  if (!fileEnv.MQTT_CONTROL_TOPIC_NAMESPACE || !/^[A-Za-z0-9_-]{3,48}$/.test(fileEnv.MQTT_CONTROL_TOPIC_NAMESPACE)) {
+    throw new Error('Public development profile requires a valid MQTT_CONTROL_TOPIC_NAMESPACE');
+  }
+  if (!fileEnv.PORT) throw new Error('Public development profile requires a configured server port');
+  assertProfileSetting('PORT', fileEnv.PORT);
+  if (!fileEnv.MQTT_TOPIC_NAMESPACE || !/^[A-Za-z0-9_-]{3,48}$/.test(fileEnv.MQTT_TOPIC_NAMESPACE)) {
+    throw new Error('Public development profile requires a valid MQTT_TOPIC_NAMESPACE');
+  }
+  if (fileEnv.MQTT_TOPIC_NAMESPACE === fileEnv.MQTT_CONTROL_TOPIC_NAMESPACE) {
+    throw new Error('Public telemetry and actuator commands must use separate MQTT namespaces');
+  }
+}
 
 const getEnv = (key: string, fallback?: string): string | undefined => {
   if (process.env[key] !== undefined) {
@@ -42,7 +94,20 @@ const parseDeviceKeys = (raw?: string): Record<string, string> => {
     }, {});
 };
 
+const isPublicHiveMqUrl = (raw?: string): boolean => {
+  try {
+    const hostname = new URL(raw || '').hostname.toLowerCase();
+    return hostname === 'broker.hivemq.com' || hostname.endsWith('.hivemq.cloud');
+  } catch {
+    return true;
+  }
+};
+
 const nodeEnv = getEnv('NODE_ENV', 'development') || 'development';
+const mqttNamespace = publicDevProfile ? (fileEnv.MQTT_TOPIC_NAMESPACE || '') : (getEnv('MQTT_TOPIC_NAMESPACE') || 'aquasense');
+const telemetryDeviceId = publicDevProfile
+  ? PUBLIC_DEV_DEVICE_ID
+  : (getEnv('FEEDER_DEVICE_ID', 'esp32-feeder-1') || 'esp32-feeder-1');
 
 /**
  * Application configuration
@@ -99,18 +164,43 @@ export const config = {
     circuitCooldownMs: parseInt(getEnv('SMS_CIRCUIT_COOLDOWN_MS', '60000') || '60000', 10),
   },
   mqtt: {
-    brokerUrl: getEnv('MQTT_BROKER_URL', 'mqtt://localhost:1883') || 'mqtt://localhost:1883',
-    username: getOptionalCredential('MQTT_USERNAME'),
-    password: getOptionalCredential('MQTT_PASSWORD'),
+    brokerUrl: publicDevProfile
+      ? (fileEnv.MQTT_BROKER_URL || 'mqtt://localhost:1883')
+      : (getEnv('MQTT_BROKER_URL', 'mqtt://localhost:1883') || 'mqtt://localhost:1883'),
+    publicTelemetryOnly: publicDevProfile,
+    publicCommandsEnabled: publicDevProfile && fileEnv.MQTT_PUBLIC_COMMANDS_ENABLED === 'true',
+    controlTopicNamespace: publicDevProfile
+      ? (fileEnv.MQTT_CONTROL_TOPIC_NAMESPACE || '')
+      : (getEnv('MQTT_CONTROL_TOPIC_NAMESPACE') || 'aquasense'),
+    topicNamespace: mqttNamespace,
+    deviceScopedTopics: publicDevProfile && fileEnv.MQTT_DEVICE_SCOPED_TOPICS === 'true',
+    controlBrokerUrl: publicDevProfile ? privateControlEnv.MQTT_BROKER_URL : undefined,
+    controlUsername: publicDevProfile ? privateControlEnv.MQTT_USERNAME : undefined,
+    controlPassword: publicDevProfile ? privateControlEnv.MQTT_PASSWORD : undefined,
+    controlCaCertPath: publicDevProfile ? privateControlEnv.MQTT_CA_CERT_PATH : undefined,
+    actuatorCommandsEnabled: publicDevProfile
+      ? Boolean(fileEnv.MQTT_ACTUATOR_COMMANDS_ENABLED === 'true' &&
+          ((fileEnv.MQTT_PUBLIC_COMMANDS_ENABLED === 'true' && isPublicHiveMqUrl(fileEnv.MQTT_BROKER_URL) &&
+            parseDeviceKeys(fileEnv.DEVICE_KEYS)[telemetryDeviceId]?.length >= 32) ||
+          (privateControlEnv.MQTT_BROKER_URL?.startsWith('mqtts://') &&
+            !isPublicHiveMqUrl(privateControlEnv.MQTT_BROKER_URL) && privateControlEnv.MQTT_USERNAME &&
+            privateControlEnv.MQTT_PASSWORD && privateControlEnv.MQTT_CA_CERT_PATH &&
+            fs.existsSync(privateControlEnv.MQTT_CA_CERT_PATH) && parseDeviceKeys(fileEnv.DEVICE_KEYS)[telemetryDeviceId])))
+      : getEnv('MQTT_ACTUATOR_COMMANDS_ENABLED', 'true') !== 'false',
+    telemetryDeviceId,
+    username: publicDevProfile ? undefined : getOptionalCredential('MQTT_USERNAME'),
+    password: publicDevProfile ? undefined : getOptionalCredential('MQTT_PASSWORD'),
     topics: {
       readings: getEnv('MQTT_TOPIC_READINGS', 'water/esp32/readings') || 'water/esp32/readings',
-      sensorWildcard: getEnv('MQTT_TOPIC_SENSOR_WILDCARD', 'aquasense/+') || 'aquasense/+',
+      sensorWildcard: publicDevProfile
+        ? `${mqttNamespace}/devices/${telemetryDeviceId}/telemetry/+`
+        : (getEnv('MQTT_TOPIC_SENSOR_WILDCARD', 'aquasense/+') || 'aquasense/+'),
       commands: getEnv('MQTT_TOPIC_COMMANDS', 'water/commands/#') || 'water/commands/#',
       status: getEnv('MQTT_TOPIC_STATUS', 'water/esp32/status') || 'water/esp32/status',
     },
   },
   feeding: {
-    deviceId: getEnv('FEEDER_DEVICE_ID', 'esp32-feeder-1') || 'esp32-feeder-1',
+    deviceId: telemetryDeviceId,
     timezone: getEnv('FEEDING_TIMEZONE', 'Asia/Manila') || 'Asia/Manila',
   },
   farm: {
@@ -156,6 +246,17 @@ const configSchema = z.object({
       commands: z.string().min(1),
       status: z.string().min(1),
     }),
+    publicTelemetryOnly: z.boolean(),
+    publicCommandsEnabled: z.boolean(),
+    controlTopicNamespace: z.string().min(1),
+    topicNamespace: z.string().min(1),
+    deviceScopedTopics: z.boolean(),
+    actuatorCommandsEnabled: z.boolean(),
+    controlBrokerUrl: z.string().url().optional(),
+    controlUsername: z.string().min(1).optional(),
+    controlPassword: z.string().min(1).optional(),
+    controlCaCertPath: z.string().min(1).optional(),
+    telemetryDeviceId: z.string().min(1),
   }),
   feeding: z.object({
     deviceId: z.string().min(1),

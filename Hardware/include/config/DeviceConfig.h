@@ -11,9 +11,11 @@ constexpr uint8_t VOLTAGE_SAMPLE_COUNT = 20;
 constexpr uint8_t TEMPERATURE_RESOLUTION_BITS = 12;
 constexpr uint32_t TEMPERATURE_CONVERSION_MS = 750;
 constexpr uint32_t WIFI_RECONNECT_INTERVAL_MS = 3000;
+constexpr uint32_t WIFI_RECONNECT_MAX_MS = 30000;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
 constexpr uint32_t WIFI_CHECK_INTERVAL_MS = 5000;
 constexpr uint32_t MQTT_RECONNECT_INTERVAL_MS = 3000;
+constexpr uint32_t MQTT_RECONNECT_MAX_MS = 30000;
 constexpr uint32_t MQTT_CONNECT_TIMEOUT_MS = 20000;
 constexpr uint32_t MQTT_PUBLISH_INTERVAL_MS = 5000;
 constexpr uint32_t MQTT_TASK_POLL_MS = 20;
@@ -61,9 +63,21 @@ constexpr int32_t LOCAL_OFFSET_SECONDS = 8 * 3600;
 constexpr const char* NTP_PRIMARY = "pool.ntp.org";
 constexpr const char* NTP_SECONDARY = "time.nist.gov";
 
+// Public-dev routes signed, device-scoped feeder commands through HiveMQ.
+// The broker has no ACL/TLS; command HMAC validation and replay protection are mandatory.
 constexpr const char* MQTT_HOST = "broker.hivemq.com";
 constexpr uint16_t MQTT_PORT = 1883;
+constexpr const char* MQTT_TOPIC_NAMESPACE = "aquasense-dev";
+constexpr const char* MQTT_CONTROL_TOPIC_NAMESPACE = "aquasense-control-dev";
+constexpr const char* MQTT_CONTROL_HOST = "192.168.1.6";
+constexpr uint16_t MQTT_CONTROL_PORT = 8883;
+constexpr const char* MQTT_CONTROL_CLIENT_ID = "aquasense-ctrl-esp32-feeder-1";
+constexpr bool MQTT_ACTUATOR_COMMANDS_ENABLED = true;
+constexpr bool MQTT_CONTROL_PUBLIC_ENABLED = true; // Public HiveMQ transport; HMAC signatures and device replay checks are mandatory.
+constexpr bool MQTT_AUTHENTICATION_ENABLED = false;
+constexpr bool MQTT_CONTROL_TLS_ENABLED = true;
+constexpr bool MQTT_CONTROL_AUTHENTICATION_ENABLED = true;
 // DEVICE_ID is registered uniquely per board and is also the broker client ID.
 constexpr const char* MQTT_CLIENT_ID = DEVICE_ID;
-// Telemetry and device-scoped actuator topics use MQTT; schedules/config use the authenticated backend client.
+// Public development telemetry is device-scoped; control is routed separately.
 }

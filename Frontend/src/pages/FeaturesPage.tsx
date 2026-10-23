@@ -134,8 +134,8 @@ const FeaturesPage: React.FC = () => {
               <div className="flex-1">
                 <h3 className="mb-4 text-2xl font-bold leading-tight text-slate-800">Water Clarity</h3>
                 <ul className="space-y-2 text-sm text-slate-700">
-                  <li className="flex items-start gap-2"><span className="font-bold text-amber-500">✓</span><span>Raw ADC input; NTU unavailable until calibration</span></li>
-                  <li className="flex items-start gap-2"><span className="font-bold text-amber-500">✓</span><span>NTU conversion requires a validated calibration curve</span></li>
+                  <li className="flex items-start gap-2"><span className="font-bold text-amber-500">✓</span><span>NTU is shown when the sensor signal can be converted</span></li>
+                  <li className="flex items-start gap-2"><span className="font-bold text-amber-500">✓</span><span>A validated calibration curve is required for accurate NTU measurements</span></li>
                   <li className="flex items-start gap-2"><span className="font-bold text-amber-500">✓</span><span>No calibrated clarity index is currently available</span></li>
                   <li className="flex items-start gap-2"><span className="font-bold text-amber-500">✓</span><span>Quality assessment</span></li>
                 </ul>
@@ -269,7 +269,7 @@ const FeaturesPage: React.FC = () => {
                   <p className="text-blue-200"><span className="font-bold text-blue-300">Temperature:</span> Physical sensor input; reference calibration unverified</p>
                   <p className="text-blue-200"><span className="font-bold text-blue-300">pH Level:</span> Input present; engineering conversion uncommissioned</p>
                   <p className="text-blue-200"><span className="font-bold text-blue-300">ORP:</span> Redox mV only after engineering calibration; not a DO measurement</p>
-                  <p className="text-blue-200"><span className="font-bold text-blue-300">Turbidity:</span> Raw ADC until an NTU calibration is validated</p>
+                  <p className="text-blue-200"><span className="font-bold text-blue-300">Turbidity:</span> Displayed in NTU when the sensor signal is valid; calibration is required for accurate measurements</p>
                 </div>
               </div>
               <div>

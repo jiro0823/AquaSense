@@ -1,6 +1,5 @@
 /**
- * WebSocket Server for Real-time Water Quality Monitoring
- * Using Socket.io for real-time communication
+ * Authenticated, device-scoped Socket.IO server for water quality data.
  */
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -8,8 +7,47 @@ import { Server as HTTPServer } from 'http';
 import { logger } from '../utils/logger';
 import { sensorReadingService } from '../services/sensorReadingService';
 import { alertService } from '../services/alert.service';
-import type { WaterQualityStats } from '../iot/water/types';
+import { deviceService } from '../services/device.service';
+import { tokenService } from '../utils/tokenService';
+import type { TokenPayload } from '../utils/tokenService';
+import type { WaterQualityReading, WaterQualityStats } from '../iot/water/types';
 import { config } from '../config/config';
+
+interface SocketSession {
+  token: string;
+  userId: string;
+  role: 'admin' | 'farmer' | 'guest';
+}
+
+export const getSessionTokenFromCookieHeader = (header: string | undefined, cookieName: string): string | null => {
+  if (!header) return null;
+  const prefix = `${cookieName}=`;
+  const entry = header.split(';').map(part => part.trim()).find(part => part.startsWith(prefix));
+  if (!entry) return null;
+  try {
+    const token = decodeURIComponent(entry.slice(prefix.length));
+    return token || null;
+  } catch {
+    return null;
+  }
+};
+
+export const resolveSocketSession = (header: string | undefined, cookieName: string): SocketSession | null => {
+  const token = getSessionTokenFromCookieHeader(header, cookieName);
+  const payload = token ? tokenService.verifyToken(token) : null;
+  if (!token || !payload?.userId) return null;
+  return { token, userId: payload.userId, role: payload.role || 'farmer' };
+};
+
+export const resolveSocketDeviceScope = async (
+  session: Pick<SocketSession, 'userId' | 'role'>,
+  listDevices: (userId: string) => Promise<Array<{ deviceId: string; isActive: boolean }>>,
+): Promise<string[] | undefined> => {
+  if (session.role === 'admin') return undefined;
+  return (await listDevices(session.userId)).filter(device => device.isActive).map(device => device.deviceId);
+};
+
+const roleOf = (payload: TokenPayload): SocketSession['role'] => payload.role || 'farmer';
 
 class WaterQualityWebSocketServer {
   private io: SocketIOServer;
@@ -19,9 +57,20 @@ class WaterQualityWebSocketServer {
     this.io = new SocketIOServer(httpServer, {
       cors: {
         origin: config.cors.origin,
+        credentials: true,
         methods: ['GET', 'POST'],
       },
       transports: ['websocket', 'polling'],
+    });
+
+    this.io.use((socket, next) => {
+      const session = resolveSocketSession(socket.request.headers.cookie, config.authCookie.name);
+      if (!session) {
+        next(new Error('Authentication required'));
+        return;
+      }
+      socket.data.session = session;
+      next();
     });
 
     this.setupEventHandlers();
@@ -29,147 +78,130 @@ class WaterQualityWebSocketServer {
     logger.info('Socket.io WebSocket server initialized');
   }
 
-  /**
-   * Setup all WebSocket event handlers
-   */
+  private session(socket: Socket): SocketSession | null {
+    const session = socket.data.session as SocketSession | undefined;
+    if (!session) return null;
+    const payload = tokenService.verifyToken(session.token);
+    if (!payload || payload.userId !== session.userId) return null;
+    return { ...session, role: roleOf(payload) };
+  }
+
+  private async deviceIds(session: SocketSession): Promise<string[] | undefined> {
+    return resolveSocketDeviceScope(session, userId => deviceService.listByUser(userId));
+  }
+
+  private async runForSession(socket: Socket, action: (session: SocketSession, deviceIds: string[] | undefined) => Promise<void>): Promise<void> {
+    const session = this.session(socket);
+    if (!session) {
+      socket.disconnect(true);
+      return;
+    }
+    try {
+      await action(session, await this.deviceIds(session));
+    } catch (error) {
+      logger.warn('WebSocket request failed', error);
+      socket.emit('error', { message: 'Failed to retrieve water quality data' });
+    }
+  }
+
   private setupEventHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
       this.connectedClients.add(socket.id);
-      logger.info(`Water quality client connected: ${socket.id}`, {
-        totalClients: this.connectedClients.size,
-      });
+      logger.info(`Water quality client connected: ${socket.id}`, { totalClients: this.connectedClients.size });
 
-      void this.emitSnapshot(socket, 60);
+      const expiryCheck = setInterval(() => {
+        if (!this.session(socket)) socket.disconnect(true);
+      }, 30_000);
+      expiryCheck.unref();
+      void this.runForSession(socket, (_session, deviceIds) => this.emitSnapshot(socket, 60, deviceIds));
 
-      // Handle client events
-      socket.on('water:request-latest', async () => {
-        const latest = await sensorReadingService.getLatestReading();
-        socket.emit('water:latest', latest);
-      });
-
-      socket.on('water:request-stats', async (minutes: number) => {
-        try {
-          const stats = await this.getDbBackedStats(minutes || 60);
-          socket.emit('water:stats', stats);
-        } catch (error) {
-          socket.emit('error', { message: 'Failed to get statistics' });
-        }
-      });
-
-      socket.on('water:request-alerts', (limit: number) => {
-        void alertService.getAlerts(limit || 50).then((alerts) => socket.emit('water:alerts', alerts));
-      });
-
-      socket.on('water:request-history', async (minutes: number) => {
-        const history = await sensorReadingService.getReadingsByTimeRange(minutes || 60);
-        socket.emit('water:history', history);
-      });
-
-      socket.on('disconnect', () => {
-        this.connectedClients.delete(socket.id);
-        logger.info(`Water quality client disconnected: ${socket.id}`, {
-          totalClients: this.connectedClients.size,
+      socket.on('water:request-latest', () => {
+        void this.runForSession(socket, async (_session, deviceIds) => {
+          socket.emit('water:latest', await sensorReadingService.getLatestReading(deviceIds));
         });
+      });
+      socket.on('water:request-stats', (minutes: number) => {
+        void this.runForSession(socket, async (_session, deviceIds) => {
+          socket.emit('water:stats', await this.getDbBackedStats(minutes || 60, deviceIds));
+        });
+      });
+      socket.on('water:request-alerts', (limit: number) => {
+        void this.runForSession(socket, async (_session, deviceIds) => {
+          socket.emit('water:alerts', await alertService.getAlerts(limit || 50, undefined, deviceIds));
+        });
+      });
+      socket.on('water:request-history', (minutes: number) => {
+        void this.runForSession(socket, async (_session, deviceIds) => {
+          socket.emit('water:history', await sensorReadingService.getReadingsByTimeRange(minutes || 60, deviceIds));
+        });
+      });
+      socket.on('disconnect', () => {
+        clearInterval(expiryCheck);
+        this.connectedClients.delete(socket.id);
+        logger.info(`Water quality client disconnected: ${socket.id}`, { totalClients: this.connectedClients.size });
       });
     });
   }
 
-  private async emitSnapshot(socket: Socket, minutes: number): Promise<void> {
-    try {
-      const latest = await sensorReadingService.getLatestReading();
-      socket.emit('water:latest', latest);
-
-      const stats = await this.getDbBackedStats(minutes);
-      socket.emit('water:stats', stats);
-
-      const history = await sensorReadingService.getReadingsByTimeRange(minutes);
-      socket.emit('water:history', history);
-    } catch (error) {
-      logger.warn('Failed to emit websocket snapshot', error);
-    }
+  private async emitSnapshot(socket: Socket, minutes: number, deviceIds: string[] | undefined): Promise<void> {
+    const latest = await sensorReadingService.getLatestReading(deviceIds);
+    socket.emit('water:latest', latest);
+    socket.emit('water:stats', await this.getDbBackedStats(minutes, deviceIds));
+    socket.emit('water:history', await sensorReadingService.getReadingsByTimeRange(minutes, deviceIds));
   }
 
-  private async getDbBackedStats(minutes: number): Promise<WaterQualityStats> {
-    const dbStats = await sensorReadingService.getStatistics(minutes);
+  private async getDbBackedStats(minutes: number, deviceIds?: string[]): Promise<WaterQualityStats> {
+    const dbStats = await sensorReadingService.getStatistics(minutes, deviceIds);
     return {
       timestamp: new Date(),
-    orp: dbStats.orp,
-      temperature: {
-        current: dbStats.temperature.current,
-        average: dbStats.temperature.average,
-        min: dbStats.temperature.min,
-        max: dbStats.temperature.max,
-      },
-      ph: {
-        current: dbStats.ph.current,
-        average: dbStats.ph.average,
-        min: dbStats.ph.min,
-        max: dbStats.ph.max,
-      },
-      do: {
-        current: dbStats.do.current,
-        average: dbStats.do.average,
-        min: dbStats.do.min,
-        max: dbStats.do.max,
-      },
-      turbidity: {
-        current: dbStats.turbidity.current,
-        average: dbStats.turbidity.average,
-        min: dbStats.turbidity.min,
-        max: dbStats.turbidity.max,
-      },
-      ammonia: {
-        current: dbStats.ammonia.current,
-        average: dbStats.ammonia.average,
-        min: dbStats.ammonia.min,
-        max: dbStats.ammonia.max,
-      },
+      orp: dbStats.orp,
+      temperature: { current: dbStats.temperature.current, average: dbStats.temperature.average, min: dbStats.temperature.min, max: dbStats.temperature.max },
+      ph: { current: dbStats.ph.current, average: dbStats.ph.average, min: dbStats.ph.min, max: dbStats.ph.max },
+      do: { current: dbStats.do.current, average: dbStats.do.average, min: dbStats.do.min, max: dbStats.do.max },
+      turbidity: { current: dbStats.turbidity.current, average: dbStats.turbidity.average, min: dbStats.turbidity.min, max: dbStats.turbidity.max },
+      ammonia: { current: dbStats.ammonia.current, average: dbStats.ammonia.average, min: dbStats.ammonia.min, max: dbStats.ammonia.max },
       healthScore: dbStats.healthScore,
     };
   }
 
-  /**
-   * Broadcast new reading to all connected clients
-   */
-  broadcastReading(reading: any): void {
-    this.io.emit('water:new-reading', reading);
+  /** Send live records only to administrators and the active owner of the record's device. */
+  broadcastReading(reading: WaterQualityReading): void {
+    const deviceId = (reading as unknown as { deviceId?: string }).deviceId;
+    if (!deviceId) return;
+    void (async () => {
+      const device = await deviceService.getActiveDevice(deviceId);
+      if (!device) return;
+      for (const socket of this.io.sockets.sockets.values()) {
+        const session = this.session(socket);
+        if (!session) { socket.disconnect(true); continue; }
+        if (session.role === 'admin' || session.userId === device.userId) socket.emit('water:new-reading', reading);
+      }
+    })().catch(error => logger.warn('Failed to scope live reading broadcast', error));
   }
 
-  /**
-   * Broadcast alert to all connected clients
-   */
-  broadcastAlert(alert: any): void {
-    this.io.emit('water:alert', alert);
+  broadcastAlert(alert: { deviceId?: string; [key: string]: unknown }): void {
+    void (async () => {
+      const device = alert?.deviceId ? await deviceService.getActiveDevice(alert.deviceId) : null;
+      for (const socket of this.io.sockets.sockets.values()) {
+        const session = this.session(socket);
+        if (!session) { socket.disconnect(true); continue; }
+        if (session.role === 'admin' || (device && session.userId === device.userId)) socket.emit('water:alert', alert);
+      }
+    })().catch(error => logger.warn('Failed to scope alert broadcast', error));
   }
 
-  /**
-   * Broadcast statistics update
-   */
-  broadcastStats(stats: any): void {
-    this.io.emit('water:stats-update', stats);
+  /** Recompute per owner; never broadcast global statistics. */
+  broadcastStats(_stats: unknown): void {
+    for (const socket of this.io.sockets.sockets.values()) {
+      void this.runForSession(socket, async (_session, deviceIds) => {
+        socket.emit('water:stats-update', await this.getDbBackedStats(60, deviceIds));
+      });
+    }
   }
 
-  /**
-   * Get connected clients count
-   */
-  public getConnectedClientsCount(): number {
-    return this.connectedClients.size;
-  }
+  public getConnectedClientsCount(): number { return this.connectedClients.size; }
 
-  /**
-   * Placeholder for data simulation
-   * In production, this will receive data from ESP32 IoT device via HTTP POST to /api/v1/water/readings
-   * For now, this method is a no-op to keep the system in preparation mode
-   * 
-   * FUTURE: When ESP32 is connected, remove this method and handle data via POST endpoints
-   */
   private startDataSimulation(): void {
-    // Preparation mode: no data simulation
-    // Real data will come from:
-    // 1. HTTP POST /api/v1/water/readings (from ESP32)
-    // 2. MQTT broker (optional)
-    // 3. Direct database polling
-    
     const baseUrl = `http://${config.server.host}:${config.server.port}`;
     logger.info('✓ Backend in preparation mode - ready to receive ESP32 sensor data via API');
     logger.info(`✓ ESP32 should POST to: ${baseUrl}/api/v1/water/readings`);

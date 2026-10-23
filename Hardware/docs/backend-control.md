@@ -5,14 +5,20 @@ commands are sent only after authenticated API authorization, then delivered by
 signed, device-scoped MQTT. The device publishes a signed acknowledgement and
 logical output state. Authenticated HTTPS device sync is used for schedule
 delivery and state heartbeat; it does not deliver or acknowledge actuator
-commands.
+commands. In the public development profile, control topics use
+`aquasense-control-dev/<deviceId>/command` and
+`aquasense-control-dev/<deviceId>/state`, separate from the telemetry namespace.
+HiveMQ public MQTT has no ACL or TLS. HMAC authenticates signed payloads but does
+not hide them or prevent an observer from replaying a captured, not-yet-processed
+command. Use this only on a controlled development network; use a private,
+authenticated TLS broker for deployment.
 
 ## Connect
 
 1. Register the device to the intended farmer/admin through existing
    POST /api/v1/devices (deviceId, name). Confirm it is active. Match
    DeviceConfig::DEVICE_ID. Only one board may consume that ID.
-2. Configure Backend's private environment variable:
+2. Configure Backend's device key:
    DEVICE_KEYS=esp32-feeder-1:YOUR_RANDOM_DEVICE_KEY.
    Multiple entries are comma-separated deviceId:key pairs; keys cannot contain
    commas or colons. Match ignored Secrets::DEVICE_KEY.
@@ -31,10 +37,10 @@ commands.
    enable this development opt-in for deployment: HTTP exposes the device key.
    If the URL, CA, or transport policy is invalid, backend control remains
    disconnected.
-5. Match broker credentials/topic with Backend MQTT_TOPIC_READINGS. Integrated
-   default is water/esp32/readings. The retained public plaintext broker is for
-   development; deployment needs private authenticated transport and a separate
-   telemetry-security review.
+5. The public development profile uses `mqtt://broker.hivemq.com:1883` for
+   telemetry and signed feeder control. Keep the namespace settings aligned
+   between `Backend/.env.public-dev` and `DeviceConfig.h`. Deployment requires
+   private authenticated TLS transport and a separate telemetry-security review.
 6. Rebuild/restart Backend using its existing workflow. Startup adds nullable
    sensor_readings.orp and creates hardware_commands/hardware_device_states via
    existing model initialization and non-destructive sync. No live database
@@ -54,8 +60,8 @@ existing CSRF cookie/header pair.
 | `POST /api/v1/feeding/commands` | Frontend → Backend | Validate and queue manual feeder actions |
 | `GET /api/v1/hardware/state?deviceId=...` | Frontend → Backend | Read latest device state and command history |
 | `POST /api/v1/hardware/device/sync` | Device → Backend HTTPS | Schedule delivery and state heartbeat only |
-| `aquasense/{deviceId}/command` | Backend → ESP32 MQTT | Signed command, QoS 1, always non-retained |
-| `aquasense/{deviceId}/state` | ESP32 → Backend MQTT | Signed acknowledgement plus resulting logical state, QoS 1, non-retained |
+| `aquasense-control-dev/{deviceId}/command` | Backend → ESP32 MQTT | Signed command, QoS 1, always non-retained |
+| `aquasense-control-dev/{deviceId}/state` | ESP32 → Backend MQTT | Signed acknowledgement plus resulting logical state, QoS 1, non-retained |
 | Existing `aquasense/...` sensor topics | ESP32 → Backend MQTT | Retained readings and sensor connection state |
 
 Command JSON fields are `v`, `deviceId`, `id` (UUID), `source` (`hardware` or

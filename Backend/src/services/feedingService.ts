@@ -110,6 +110,12 @@ export const feedingService = {
     });
   },
 
+  async discardUnpublishedManualCommand(userId: string, deviceId: string, commandId: string): Promise<void> {
+    await FeedingCommand.destroy({
+      where: { id: commandId, userId, deviceId, source: 'MANUAL', status: 'PENDING' },
+    });
+  },
+
   async getLatestDeviceCommand(userId: string, deviceId: string): Promise<FeedingCommand | null> {
     return FeedingCommand.findOne({
       where: {

@@ -7,15 +7,13 @@ GPIO4 and shared I2C SDA/SCL GPIO21/22. The current monitor source is configured
 for a 20x4 LCD at address 0x27, as in the attached code. The earlier wiring
 diagram labels a 16x2 LCD; verify the physical panel before deployment. Both use
 the same I2C wiring, but only four-row hardware can show the full sensor page.
-The supplied wiring reference sets
-the integrated servo to GPIO13 (older integrated code used GPIO19) and passive
-buzzer to GPIO18.
+The user-confirmed installed wiring sets the integrated servo to GPIO18 and
+passive buzzer to GPIO19. The legacy standalone feeder uses GPIO13.
 
-The diagram routes GPIO25, GPIO26, GPIO27 and GPIO33 to relay IN1..IN4 in order.
-It labels IN1 as fill, IN2 as drain, IN3 as aerator, and IN4 as unused; source
-uses the same assignments. The reported module assignment (K3 refill, K4 drain)
-conflicts with that diagram if K3/K4 refer to board output channels. No physical
-wiring evidence currently resolves the conflict, so do not change GPIO roles.
+The user reports relay K3 refill on GPIO26, K4 drain on GPIO27, and K2 aerator
+on GPIO25; GPIO33 is unused. This is a reported wiring mapping, not an independent
+electrical measurement. Relay outputs remain disabled until channel mapping,
+trigger polarity, and safe OFF behavior are physically commissioned.
 Firmware polarity is configured active-LOW from the reported intent, while the
 output commissioning gate remains false. Measure the actual board trigger level,
 channel continuity, and safe OFF behavior before enabling outputs. The relay
@@ -23,11 +21,16 @@ module has a separate 5 V supply and shares ground with ESP32. Verify its input
 bias holds the relay OFF while ESP32 GPIOs are high-impedance during reset;
 firmware cannot drive outputs during reset. There are no float switches.
 
-Sensors publish retained values/status under `aquasense/`; actuator commands
-use signed, non-retained, device-scoped MQTT messages after authenticated API
-authorization. Device state/ack messages are signed and correlated by command
-ID. Authenticated HTTP sync remains for schedules and state heartbeat. See
-[backend/control setup](backend-control.md) for the contract and commissioning.
+The current `water-monitor` source targets public HiveMQ at
+`broker.hivemq.com:1883`. It publishes non-retained scalar readings under
+`aquasense-dev/devices/<device-id>/telemetry/<sensor>` and status siblings under
+`.../<sensor>/status`. The backend `public-dev` profile subscribes only to the
+single-level telemetry wildcard, so it receives reading values and ignores the
+status siblings. MQTT credentials are not sent over the unencrypted connection.
+Public topic names are routing labels, not authentication. These are source
+settings and must be flashed before the board uses them. See
+[backend/control setup](backend-control.md) for the authenticated device protocol
+and commissioning.
 
 ## Preserved earlier targets
 
@@ -76,9 +79,17 @@ calibration conversion to pH or turbidity.
 
 The backend's default JSON subscription is `water/esp32/readings`; configure
 `MQTT_TOPIC_READINGS` to match this target's actual topic and use the same broker.
-The modular water-monitor instead publishes per-sensor values under
-`aquasense/`, uses a device-ID-derived MQTT client ID, and receives authenticated
-actuator commands through MQTT. Its registered `DEVICE_ID` must be unique per board.
+The modular `water-monitor` target publishes per-sensor values under the
+device-scoped `aquasense-dev/devices/<device-id>/telemetry/` path and uses the
+configured device ID as its MQTT client ID. In the public development profile,
+the feeder subscribes to `aquasense-control-dev/<device-id>/command` and
+publishes signed acknowledgements to `aquasense-control-dev/<device-id>/state`.
+Commands and acknowledgements use the per-device HMAC key, short expiry, unique
+command ID, and firmware replay checks. HiveMQ's public broker has no ACL or TLS,
+so this mode is for controlled development only; use a private authenticated TLS
+broker for production. Its `DEVICE_ID` must match the backend profile. The
+three-sensor target described below retains its older,
+separate `aquasense/` topic contract.
 
 ## Three-sensor MQTT
 

@@ -22,6 +22,10 @@ class SensorReadingService {
     if (this.transitions.size>2048) this.transitions.clear();
   }
   async ingest(deviceId: string, payload: Record<string,any>): Promise<SensorReading> {
+    const result = await this.ingestWithStatus(deviceId, payload);
+    return result.reading;
+  }
+  async ingestWithStatus(deviceId: string, payload: Record<string,any>): Promise<{reading:SensorReading; inserted:boolean}> {
     const now=Date.now();
     const age=payload.sampleAgeMs===undefined?0:numeric(payload.sampleAgeMs);
     if (age===null || age<0 || age>86_400_000) throw new Error('Invalid sampleAgeMs');
@@ -51,7 +55,7 @@ class SensorReadingService {
       return {model,sensorHealth,inserted:true};
     });
     if (result.inserted && result.sensorHealth) this.logTransitions(deviceId,result.sensorHealth);
-    return this.mapSensorModel(result.model);
+    return {reading:this.mapSensorModel(result.model),inserted:result.inserted};
   }
   private sensorTimestamp(diagnostic:any,now:number,fallback:Date|string):Date|string {
     if(diagnostic?.sampleAgeMs===undefined) return fallback;
@@ -63,16 +67,18 @@ class SensorReadingService {
     void do_value; void doMeasured;
     return this.ingest(deviceId,{temperature,ph,turbidity,location,timestamp:timestamp.toISOString(),orp});
   }
-  async getLatestReading(): Promise<SensorReading|null> {
-    const reading=await SensorReadingModel.findOne({order:[['createdAt','DESC']]});
+  async getLatestReading(deviceIds?: string[]): Promise<SensorReading|null> {
+    if (deviceIds && deviceIds.length === 0) return null;
+    const reading=await SensorReadingModel.findOne({where:deviceIds?{deviceId:{[Op.in]:deviceIds}}:undefined,order:[['createdAt','DESC']]});
     return reading?this.mapSensorModel(reading,true):null;
   }
-  async getReadingsByTimeRange(minutes=60): Promise<SensorReading[]> {
-    const readings=await SensorReadingModel.findAll({where:{timestamp:{[Op.gte]:new Date(Date.now()-minutes*60000)}},order:[['timestamp','DESC']]});
+  async getReadingsByTimeRange(minutes=60, deviceIds?: string[]): Promise<SensorReading[]> {
+    if (deviceIds && deviceIds.length === 0) return [];
+    const readings=await SensorReadingModel.findAll({where:{...(deviceIds?{deviceId:{[Op.in]:deviceIds}}:{}),timestamp:{[Op.gte]:new Date(Date.now()-minutes*60000)}},order:[['timestamp','DESC']]});
     return readings.map(r=>this.mapSensorModel(r));
   }
-  async getStatistics(minutes=60) {
-    const readings=await this.getReadingsByTimeRange(minutes), latest=await this.getLatestReading();
+  async getStatistics(minutes=60, deviceIds?: string[]) {
+    const readings=await this.getReadingsByTimeRange(minutes,deviceIds), latest=await this.getLatestReading(deviceIds);
     const stats=(name:'temperature'|'ph'|'do'|'turbidity'|'orp'|'ammonia'):SensorStatistics=>{
       const values=readings.filter(r=>(!latest || r.deviceId===latest.deviceId) && (name!=='turbidity' || r.turbidityUnit===latest?.turbidityUnit)).map(r=>r[name]).filter((v):v is number=>v!==null&&Number.isFinite(v));
       return {parameter:name,current:latest?.[name]??null,average:values.length?values.reduce((a,b)=>a+b,0)/values.length:null,

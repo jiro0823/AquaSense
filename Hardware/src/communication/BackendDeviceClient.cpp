@@ -30,9 +30,21 @@ bool BackendDeviceClient::takeSchedules(FeedingSchedules& next) { return schedul
 void BackendDeviceClient::taskEntry(void* context) { static_cast<BackendDeviceClient*>(context)->run(); }
 void BackendDeviceClient::run() {
     SystemState state{};
+    uint32_t lastDiagnosticsMs = millis(), syncSuccesses = 0, syncFailures = 0;
     for (;;) {
         xQueueReceive(states, &state, 0);
-        if (WiFi.status() == WL_CONNECTED) sync(state);
+        if (WiFi.status() == WL_CONNECTED) {
+            if (sync(state)) ++syncSuccesses;
+            else ++syncFailures;
+        }
+        const uint32_t nowMs = millis();
+        if (uint32_t(nowMs - lastDiagnosticsMs) >= 60000) {
+            Serial.printf("[BACKEND][HEALTH] uptimeMs=%lu syncSuccesses=%lu syncFailures=%lu workerStackHighWaterWords=%u\n",
+                static_cast<unsigned long>(nowMs), static_cast<unsigned long>(syncSuccesses),
+                static_cast<unsigned long>(syncFailures), unsigned(uxTaskGetStackHighWaterMark(nullptr)));
+            syncSuccesses = syncFailures = 0;
+            lastDiagnosticsMs = nowMs;
+        }
         vTaskDelay(pdMS_TO_TICKS(DeviceConfig::BACKEND_SYNC_INTERVAL_MS));
     }
 }

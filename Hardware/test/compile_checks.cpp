@@ -13,12 +13,12 @@ static_assert(!ControlSafety::relayConfiguration(25, 25, 27, 0), "Loads must not
 static_assert(ControlSafety::relayConfiguration(25, 26, 27, 0) && ControlSafety::relayConfiguration(27, 25, 26, 1), "Support both tested polarities");
 static_assert(ControlSafety::relayPin(25) && ControlSafety::relayPin(26) && ControlSafety::relayPin(27) && ControlSafety::relayPin(33),
               "Accept the four GPIO relay signal candidates without assigning physical loads");
-static_assert(Pins::Diagram::SERVO == 13 && Pins::Diagram::BUZZER == 18 &&
+static_assert(Pins::Diagram::SERVO == 18 && Pins::Diagram::BUZZER == 19 &&
               Pins::Diagram::RELAY_SIGNALS[0] == 25 && Pins::Diagram::RELAY_SIGNALS[1] == 26 &&
               Pins::Diagram::RELAY_SIGNALS[2] == 27 && Pins::Diagram::RELAY_SIGNALS[3] == 33,
               "Preserve explicitly supplied actuator GPIO group");
-static_assert(Pins::FILL_RELAY_GPIO == 25 && Pins::DRAIN_RELAY_GPIO == 26 &&
-              Pins::AERATOR_RELAY_GPIO == 27 &&
+static_assert(Pins::FILL_RELAY_GPIO == 26 && Pins::DRAIN_RELAY_GPIO == 27 &&
+              Pins::AERATOR_RELAY_GPIO == 25 &&
               ControlSafety::relayConfiguration(Pins::FILL_RELAY_GPIO, Pins::DRAIN_RELAY_GPIO,
                                                  Pins::AERATOR_RELAY_GPIO, ActuatorConfig::RELAY_ACTIVE_LEVEL),
               "Preserve diagram load channels with configured active-LOW polarity");
@@ -53,6 +53,15 @@ static_assert(near(SensorConversions::phFromVoltage(2.34f), 8.002f), "pH supplie
 static_assert(near(SensorConversions::orpFromVoltage(2.0f), 666.66f), "ORP supplied calibration regression");
 static_assert(near(SensorConversions::turbidityFromAdc(3000), 0.0f), "Clear water reference is zero NTU");
 static_assert(near(SensorConversions::turbidityFromAdc(500), 1000.0f), "Dirty water reference is 1000 NTU");
+static_assert(SensorConversions::adcLooksConnected(147, 157, CalibrationConfig::TURBIDITY_CONNECT_MIN,
+                                                    CalibrationConfig::TURBIDITY_CONNECT_MAX),
+              "Supplied turbidity electrical window accepts the reported ADC burst");
+static_assert(!SensorConversions::adcLooksConnected(138, 197, CalibrationConfig::PH_CONNECT_MIN,
+                                                     CalibrationConfig::PH_CONNECT_MAX),
+              "Supplied pH electrical window rejects values below its configured minimum");
+static_assert(!SensorConversions::adcLooksConnected(147, 401, CalibrationConfig::TURBIDITY_CONNECT_MIN,
+                                                     CalibrationConfig::TURBIDITY_CONNECT_MAX),
+              "Supplied stability rule rejects excessive burst variation");
 static_assert(!SensorConversions::adcUsable(0) && !SensorConversions::adcUsable(4095), "ADC rails must be invalid");
 static_assert(!SensorSampleValidity::current(true, false, true) &&
               SensorSampleValidity::current(true, true, true),
@@ -74,6 +83,12 @@ static_assert(Pins::PH == 35 && Pins::TURBIDITY == 34 && Pins::ORP == 32 && Pins
 static_assert(DeviceConfig::ADC_SAMPLE_COUNT == 12, "Match reference ADC averaging sample count");
 static_assert(DeviceConfig::SENSOR_READ_INTERVAL_MS == 1000 && DeviceConfig::MQTT_PUBLISH_INTERVAL_MS == 5000,
               "Match reference sensor and MQTT intervals");
+static_assert(DeviceConfig::MQTT_ACTUATOR_COMMANDS_ENABLED && DeviceConfig::MQTT_CONTROL_PUBLIC_ENABLED,
+              "Public-dev feeder control is explicitly enabled and HMAC protected");
+static_assert(DeviceConfig::MQTT_PORT == 1883 && DeviceConfig::hasPrefix(DeviceConfig::MQTT_HOST, "broker.hivemq.com") &&
+              DeviceConfig::hasPrefix(DeviceConfig::MQTT_CONTROL_TOPIC_NAMESPACE, "aquasense-control-dev") &&
+              !DeviceConfig::hasPrefix(DeviceConfig::MQTT_CONTROL_TOPIC_NAMESPACE, DeviceConfig::MQTT_TOPIC_NAMESPACE),
+              "Control uses the distinct public-dev namespace");
 static_assert(DeviceConfig::WIFI_RECONNECT_INTERVAL_MS == 3000 && DeviceConfig::WIFI_CHECK_INTERVAL_MS == 5000 &&
               DeviceConfig::MQTT_RECONNECT_INTERVAL_MS == 3000,
               "Match reference nonblocking connection retry/check intervals");

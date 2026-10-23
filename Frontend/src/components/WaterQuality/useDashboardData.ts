@@ -13,9 +13,16 @@ interface ChartDataPoint {
   orp?: number|null;
   turbidity?: number|null;
   turbidityUnit?: string;
+  turbidityRawAdc?: number|null;
   tan?: number|null;
   nh3N?: number|null;
+  nh3FractionPercent?: number|null;
 }
+
+const getReadingDeviceId = (reading: WaterQualityReading | null): string | null => {
+  if (!reading || !('deviceId' in reading) || typeof reading.deviceId !== 'string' || !reading.deviceId.trim()) return null;
+  return reading.deviceId;
+};
 
 interface FeedingSchedule {
   id: string;
@@ -36,6 +43,7 @@ export const useDashboardData = () => {
   useEffect(() => { const timer=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(timer); },[]);
   const newest = polledReading && (!latestReading || new Date(polledReading.createdAt || polledReading.timestamp)>=new Date(latestReading.createdAt || latestReading.timestamp)) ? polledReading : latestReading;
   const displayReading = refreshDisplayReading(newest,now);
+  const currentDeviceId = getReadingDeviceId(displayReading);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [tanMeasurements, setTanMeasurements] = useState<TanMeasurementRecord[]>([]);
   const [tanLoading, setTanLoading] = useState(true);
@@ -56,8 +64,12 @@ export const useDashboardData = () => {
   }, [isConnected, requestStatistics, requestLatestReading, requestHistory]);
 
   useEffect(() => {
-    if (!historyReadings.length) return;
+    if (!historyReadings.length || !currentDeviceId) {
+      setChartData([]);
+      return;
+    }
     const sorted = [...historyReadings]
+      .filter((reading) => getReadingDeviceId(reading) === currentDeviceId)
       .filter((reading) => Number.isFinite(new Date(reading.timestamp).getTime()))
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .slice(-30)
@@ -69,17 +81,17 @@ export const useDashboardData = () => {
         orp: reading.orp,
         turbidity: reading.turbidity,
         turbidityUnit: reading.turbidityUnit,
+        turbidityRawAdc: reading.sensorHealth?.turbidity.rawAdc ?? null,
         tan: reading.speciation?.tan?.value ?? null,
         nh3N: reading.speciation?.nh3N ?? null,
+        nh3FractionPercent: reading.speciation?.status === 'AVAILABLE' ? reading.speciation.percent : null,
       }));
     setChartData(sorted);
-  }, [historyReadings]);
+  }, [historyReadings, currentDeviceId]);
 
   useEffect(() => {
-    const candidates = [polledReading, latestReading].filter((reading): reading is WaterQualityReading => reading !== null);
-    const validCandidates = candidates.filter((item) => Number.isFinite(new Date(item.timestamp).getTime()));
-    const reading = validCandidates.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[validCandidates.length - 1];
-    if (!reading) return;
+    const reading = displayReading;
+    if (!reading || !currentDeviceId || getReadingDeviceId(reading) !== currentDeviceId || !Number.isFinite(new Date(reading.timestamp).getTime()) || Date.now() - new Date(reading.timestamp).getTime() > 15_000) return;
     const timestamp = new Date(reading.timestamp).toISOString();
     const time = new Date(timestamp).toLocaleTimeString();
     setChartData((prev) => {
@@ -92,11 +104,13 @@ export const useDashboardData = () => {
         orp: reading.orp,
         turbidity: reading.turbidity,
         turbidityUnit: reading.turbidityUnit,
+        turbidityRawAdc: reading.sensorHealth?.turbidity.rawAdc ?? null,
         tan: reading.speciation?.tan?.value ?? null,
         nh3N: reading.speciation?.nh3N ?? null,
+        nh3FractionPercent: reading.speciation?.status === 'AVAILABLE' ? reading.speciation.percent : null,
       }].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)).slice(-30);
     });
-  }, [latestReading, polledReading]);
+  }, [displayReading, currentDeviceId]);
 
   useEffect(() => {
     let active = true;
@@ -187,8 +201,9 @@ export const useDashboardData = () => {
   }, [ws.alerts]);
 
   const triggerManual = async (action: 'ON' | 'OFF' | 'TRIGGER', deviceId?: string) => {
-    await apiClient.post('/feeding/manual', { action, ...(deviceId ? { deviceId } : {}) });
+    const response = await apiClient.post<{ published?: boolean }>('/feeding/manual', { action, ...(deviceId ? { deviceId } : {}) });
     await loadFeedingSchedules();
+    return response.data?.published === true;
   };
 
   const addSchedule = async (date: string, time: string, label: string) => {

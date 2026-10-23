@@ -43,21 +43,18 @@ and a combined backend client instead of separate hardware/feeding HTTP workers.
 | I2C SDA / SCL | 21 / 22 |
 | LCD | 0x27, 20x4 (current monitor code; earlier diagram labels 16x2) |
 | RTC | DS3231 |
-| Servo | 13; older integrated configuration said 19 |
-| Buzzer | 18 |
-| Relay IN1 / pump 1 fill | GPIO25 |
-| Relay IN2 / pump 2 drain | GPIO26 |
-| Relay IN3 / aerator | GPIO27 |
+| Integrated servo | GPIO18 |
+| Passive buzzer | GPIO19 |
+| Relay K3 / refill | GPIO26 |
+| Relay K4 / drain | GPIO27 |
+| Relay K2 / aerator | GPIO25 |
 | Relay IN4 | GPIO33 (unused) |
 
 Loads connect to relay output terminals; ESP32 signals control module inputs only.
-The module has a separate 5 V supply and common ground. The diagram provides the
-documented relay signal order and load assignment, but the reported K3 refill / K4
-drain assignment conflicts with it if K3/K4 denote output channels. Firmware is
-configured active-LOW from reported intent, and its separate output gate remains
-false pending physical trigger, channel, and OFF-state measurements. Do not infer
-physical mapping from source or diagram alone. The user removed float switches;
-no float logic exists.
+The module has a separate 5 V supply and common ground. The K2/K3/K4 mapping above
+is user-confirmed, not independently measured. Firmware is configured active-LOW,
+and its separate output gate remains false pending physical trigger and OFF-state
+measurements. The user removed float switches; no float logic exists.
 
 ## Behavior changes
 

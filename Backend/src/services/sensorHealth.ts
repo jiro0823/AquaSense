@@ -83,8 +83,8 @@ export class SensorValidator {
       result.window={count:values.length,min,max,average,range:max-min,standardDeviation:Math.sqrt(values.reduce((s,v)=>s+(v-average)**2,0)/values.length)};
       if (values.length >= this.config.minSamples) result.stability=max-min > (rawOnly ? noise.turbidity : noise[name]) ? 'UNSTABLE' : 'STABLE';
     }
-    const clipped = rawAdc !== null && (rawAdc <= 8 || rawAdc >= 4087) || (result.clippedSamples ?? 0) > 0;
-    if (result.valid && clipped) { fail('SATURATED','ADC clipping detected in this acquisition'); result.adcRange='WARNING'; }
+    // One clipped conversion in an averaged burst is diagnostic only.
+    // Repeated rail readings remain invalidated by the independent-sample rule below.
     if (result.health !== 'STALE' && track.rails >= this.config.railSamples) { fail('SATURATED',`ADC repeatedly near ${track.railSide < 0 ? 'minimum':'maximum'} range`); result.adcRange='WARNING'; }
     // Firmware may detect errors at its faster acquisition rate; it cannot grant validity or calibration.
     if (result.health !== 'STALE' && ['SENSOR_ERROR','SATURATED','INVALID','UNSTABLE','POSSIBLY_STUCK'].includes(diagnostics?.health)) fail(diagnostics.health,`Device reported ${diagnostics.health}`);

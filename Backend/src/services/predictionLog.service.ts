@@ -1,3 +1,5 @@
+import { Op } from 'sequelize';
+import { Alert } from '../database/models/Alert';
 import { PredictionLog as PredictionLogModel } from '../database/models/PredictionLog';
 
 export interface PredictionLogRecord {
@@ -23,8 +25,20 @@ class PredictionLogService {
     return this.mapRecord(record);
   }
 
-  async getRecentLogs(limit: number = 60): Promise<PredictionLogRecord[]> {
+  async getRecentLogs(limit: number = 60, deviceIds?: string[]): Promise<PredictionLogRecord[]> {
+    let scopedAlertIds: string[] | undefined;
+    if (deviceIds) {
+      if (deviceIds.length === 0) return [];
+      const alerts = await Alert.findAll({
+        attributes: ['id'],
+        where: { deviceId: { [Op.in]: deviceIds } },
+      });
+      const alertIds = alerts.map((alert) => alert.id);
+      if (alertIds.length === 0) return [];
+      scopedAlertIds = alertIds;
+    }
     const records = await PredictionLogModel.findAll({
+      ...(scopedAlertIds ? { where: { triggeredAlertId: { [Op.in]: scopedAlertIds } } } : {}),
       order: [['createdAt', 'DESC']],
       limit,
     });

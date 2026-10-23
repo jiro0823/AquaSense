@@ -9,6 +9,7 @@ import { deviceService } from '../../../services/device.service';
 import type { DeviceAuthenticatedRequest } from '../../../middleware/deviceAuthMiddleware';
 import { auditLogService } from '../../../services/auditLog.service';
 import { mqttService } from '../../../services/mqttService';
+import { hardwareService } from '../../../services/hardwareService';
 import { config } from '../../../config/config';
 
 const DEFAULT_DEVICE_ID = config.feeding.deviceId;
@@ -91,6 +92,9 @@ export const deleteSchedule = async (req: AuthenticatedRequest, res: Response): 
 };
 
 export const triggerManualCommand = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  if (!config.mqtt.actuatorCommandsEnabled) {
+    sendError(res, 503, 'Manual feeding commands are disabled; configure a signed MQTT control channel'); return;
+  }
   try {
     if (!req.userId) {
       sendError(res, 401, 'Unauthorized');
@@ -107,12 +111,27 @@ export const triggerManualCommand = async (req: AuthenticatedRequest, res: Respo
       sendError(res, 403, 'Device does not belong to authenticated user');
       return;
     }
+    if (!mqttService.isActuatorCommandChannelConnected()) {
+      sendError(res, 503, 'Feeder command was not sent because the MQTT control channel is unavailable');
+      return;
+    }
+    const hardwareState = await hardwareService.getState(req.userId, deviceId);
+    const telemetryOnline = mqttService.isTelemetryDeviceOnline(deviceId);
+    if (!hardwareState.online && !telemetryOnline) {
+      sendError(res, 503, 'Feeder command was not sent because the device has not reported online recently');
+      return;
+    }
     const command = await feedingService.queueManualCommand(req.userId, deviceId, action, {
       requestedBy: 'dashboard',
       requestedAt: new Date().toISOString(),
     });
     const published = await mqttService.dispatchHardwareCommand({ id: command.id, deviceId, source: 'feeding', action,
       expiresAt: new Date(command.createdAt.getTime() + 120_000) });
+    if (!published) {
+      await feedingService.discardUnpublishedManualCommand(req.userId, deviceId, command.id);
+      sendError(res, 503, 'Feeder command was not sent; the MQTT publish was not accepted. No retry was queued');
+      return;
+    }
     await auditLogService.createLog({
       userId: req.userId,
       deviceId,
@@ -122,7 +141,7 @@ export const triggerManualCommand = async (req: AuthenticatedRequest, res: Respo
       metadata: { action, commandId: command.id },
     });
     sendSuccess(res, 202, 'Manual feed command queued; awaiting device acknowledgment',
-      { commandId: command.id, status: 'PENDING_DEVICE_ACK', published });
+      { commandId: command.id, status: 'PENDING_DEVICE_ACK', published: true });
   } catch (error) {
     if (error instanceof DeviceStopPendingError) {
       sendError(res, 409, error.message);
